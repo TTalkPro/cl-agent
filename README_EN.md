@@ -1,19 +1,19 @@
 # CL-Agent
 
-[English](README_EN.md)
+[中文](README.md)
 
-基于 Common Lisp 的统一 AI Agent 框架，采用语义内核架构和 7 层模块化设计。
+A unified AI Agent framework for Common Lisp, featuring a Semantic Kernel architecture with a 7-layer modular design.
 
-## 特性
+## Features
 
-- **多提供商 LLM 支持**：Anthropic Claude、OpenAI GPT、智谱 GLM、Ollama
-- **灵活的工具系统**：基于 Symbol plist 的元数据与声明式宏
-- **全面的记忆管理**：短期检查点 + 长期持久化存储
-- **RAG 管道**：文本分割、嵌入、向量存储、检索
-- **协议支持**：MCP（模型上下文协议）+ A2A（Agent 间通信）
-- **安全与弹性**：速率限制、输入验证、重试、超时、熔断
+- **Multi-Provider LLM Support**: Anthropic Claude, OpenAI GPT, ZhipuAI GLM, Ollama
+- **Flexible Tool System**: Symbol plist-based metadata with declarative macros
+- **Comprehensive Memory**: Short-term checkpoints + Long-term persistent storage
+- **RAG Pipeline**: Text splitting, embeddings, vector storage, retrieval
+- **Protocol Support**: MCP (Model Context Protocol) + A2A (Agent-to-Agent)
+- **Security & Resilience**: Rate limiting, input validation, retry, timeout, circuit breaker
 
-## 架构
+## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -25,7 +25,7 @@
     ▼                    ▼                    ▼
 ┌────────┐        ┌────────────┐        ┌──────────┐
 │  Core  │        │    LLM     │        │SimpleAgent│
-│(内核)  │        │(LLM提供商) │        │ (Agent)  │
+│(Kernel)│        │(Providers) │        │ (Agents)  │
 └────────┘        └────────────┘        └──────────┘
     │                    │                    │
     ├────────────────────┼────────────────────┤
@@ -33,80 +33,80 @@
     ▼                    ▼                    ▼
 ┌────────┐        ┌────────────┐        ┌──────────┐
 │ Memory │        │   Plugin   │        │   RAG    │
-│(记忆)  │        │  (工具)    │        │(检索增强)│
+│(Store) │        │  (Tools)   │        │(Retrieve)│
 └────────┘        └────────────┘        └──────────┘
                          │
                          ▼
                   ┌────────────┐
                   │    MCP     │
-                  │  (协议)    │
+                  │(Protocols) │
                   └────────────┘
 ```
 
-## 模块说明
+## Modules
 
-| 模块 | 描述 |
-|------|------|
-| **core** | 核心基础设施：Kernel、Context、Filter、Service 抽象 |
-| **llm** | LLM 提供商实现（Anthropic、OpenAI、智谱、Ollama） |
-| **simpleagent** | 简单 Agent 实现（KernelAgent、ProcessAgent） |
-| **memory** | 统一记忆管理（检查点、存储、长期记忆） |
-| **plugin** | 增强工具系统和内置工具（文件、HTTP、Shell） |
-| **rag** | 检索增强生成管道 |
-| **mcp** | 模型上下文协议实现 |
-| **protocols** | 协议支持（MCP、A2A） |
+| Module | Description |
+|--------|-------------|
+| **core** | Core infrastructure: Kernel, Context, Filter, Service abstractions |
+| **llm** | LLM provider implementations (Anthropic, OpenAI, ZhipuAI, Ollama) |
+| **simpleagent** | Simple agent implementations (KernelAgent, ProcessAgent) |
+| **memory** | Unified memory management (checkpoints, stores, long-term memory) |
+| **plugin** | Enhanced tool system with built-in tools (file, http, shell) |
+| **rag** | Retrieval-Augmented Generation pipeline |
+| **mcp** | Model Context Protocol implementation |
+| **protocols** | Protocol support (MCP, A2A) |
 
-## 安装
+## Installation
 
-### 前置条件
+### Prerequisites
 
-- SBCL 或其他 Common Lisp 实现
+- SBCL or other Common Lisp implementation
 - Quicklisp
 
-### 设置
+### Setup
 
 ```bash
-# 克隆仓库
+# Clone the repository
 git clone https://github.com/example/cl-agent.git
 cd cl-agent
 
-# 使用 ASDF 加载
+# Load with ASDF
 (asdf:load-system :cl-agent)
 ```
 
-## 快速开始
+## Quick Start
 
-### 基本聊天
+### Basic Chat
 
 ```lisp
 (ql:quickload :cl-agent)
 
-;; 创建 LLM 客户端
+;; Create LLM client
 (defvar *client*
   (cl-agent.llm:make-client
     :provider :anthropic
     :model "claude-3-5-sonnet-20241022"
     :api-key (uiop:getenv "ANTHROPIC_API_KEY")))
 
-;; 简单聊天
-(cl-agent.llm:chat *client* "你好，最近怎么样？")
+;; Simple chat
+(cl-agent.llm:chat *client* "Hello, how are you?")
 ```
 
-### 带工具的 Agent
+### Agent with Tools
 
 ```lisp
-;; 定义工具
+;; Define a tool
 (cl-agent.kernel:deftool get-weather
-    "获取指定城市的天气"
-  ((city :string "城市名称" :required-p t))
-  (format nil "~A 的天气：22°C，晴" city))
+    "Get current weather for a city"
+  ((city :string "City name" :required-p t))
+  (format nil "Weather in ~A: 22°C, sunny" city))
 
-;; 创建插件
+;; Create plugin
 (cl-agent.kernel:defplugin weather-plugin
-    "天气工具"
+    "Weather tools"
   get-weather)
 
-;; 创建 Kernel 和 Agent
+;; Create kernel and agent
 (defvar *kernel*
   (cl-agent.kernel:make-kernel
     :service *service*
@@ -114,21 +114,21 @@ cd cl-agent
 
 (defvar *agent*
   (cl-agent.simpleagent:make-kernel-agent *kernel*
-    :system-prompt "你是一个有帮助的助手。"))
+    :system-prompt "You are a helpful assistant."))
 
-;; 与 Agent 对话
-(cl-agent.simpleagent:agent-chat *agent* "东京的天气怎么样？")
+;; Chat with agent
+(cl-agent.simpleagent:agent-chat *agent* "What's the weather in Tokyo?")
 ```
 
-## 文档
+## Documentation
 
-- [快速开始指南](docs/QUICKSTART_CN.md)
-- [API 参考](docs/API_CN.md)
+- [Quick Start Guide](docs/QUICKSTART.md)
+- [API Reference](docs/API.md)
 
-## 许可证
+## License
 
 MIT License
 
-## 贡献
+## Contributing
 
-欢迎贡献！请随时提交 Pull Request。
+Contributions are welcome! Please feel free to submit a Pull Request.
