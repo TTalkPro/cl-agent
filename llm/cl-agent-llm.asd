@@ -65,7 +65,8 @@
     ((:file "define-provider")  ; Common macros and functions
      (:file "anthropic")
      (:file "openai")
-     (:file "zhipu")))
+     (:file "zhipu")
+     (:file "bailian")))       ; 阿里云百炼 DashScope
 
    ;; 6. Factory (registry, config, builder)
    (:module "factory"

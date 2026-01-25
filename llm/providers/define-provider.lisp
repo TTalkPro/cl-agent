@@ -224,7 +224,11 @@
     (setf (gethash "messages" body)
           (convert-messages-for-openai messages))
     (setf (gethash "temperature" body) temperature)
-    (setf (gethash "stream" body) (if stream :true :false))
+
+    ;; 仅在启用流式时设置 stream: true
+    ;; 不发送 stream: false 避免某些 API 的兼容性问题
+    (when stream
+      (setf (gethash "stream" body) t))
 
     ;; 可选字段
     (when max-tokens

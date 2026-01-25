@@ -52,6 +52,9 @@
    #:make-openai-provider
    #:make-ollama-provider
    #:make-zhipu-provider
+   #:make-dashscope-provider
+   #:make-bailian-provider
+   #:make-qwen-provider
 
    ;; 提供商访问器（统一接口）
    #:provider-name
@@ -212,4 +215,11 @@
    #:make-zhipu-provider
    #:extract-reasoning-content
    #:response-complete-p
-   #:get-suggested-max-tokens))
+   #:get-suggested-max-tokens
+
+   ;; ==================== 阿里云百炼 DashScope 提供商 ====================
+   #:dashscope-provider
+   #:make-dashscope-provider
+   #:make-bailian-provider
+   #:make-qwen-provider
+   #:dashscope-list-models))
