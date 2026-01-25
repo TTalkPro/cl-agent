@@ -3,13 +3,19 @@
 ;;;;
 ;;;; Overview:
 ;;;;   Agent that runs in a background thread with pause/resume support.
-;;;;   Uses message queues for communication.
+;;;;   Uses message queues for communication and integrates with core/process
+;;;;   framework for event-driven workflows and human-in-the-loop.
 ;;;;
 ;;;; Usage:
 ;;;;   (let ((agent (make-process-agent kernel)))
 ;;;;     (agent-start agent)
 ;;;;     (agent-send agent "Hello!")
 ;;;;     (sleep 1)
+;;;;     ;; Inject external event
+;;;;     (agent-inject-event agent (cl-agent.process:make-event
+;;;;                                 :type :external
+;;;;                                 :name "data-ready"
+;;;;                                 :data '(:file "data.csv")))
 ;;;;     (agent-pause agent)
 ;;;;     (agent-resume agent)
 ;;;;     (agent-stop agent))
@@ -60,33 +66,111 @@
    (stop-flag
     :initform nil
     :accessor agent-stop-flag
-    :documentation "Flag to signal thread to stop"))
+    :documentation "Flag to signal thread to stop")
 
-  (:documentation "Agent that runs in background thread with pause/resume."))
+   ;; ============================================================
+   ;; Process Framework Integration
+   ;; ============================================================
+
+   (event-bus
+    :initform nil
+    :accessor agent-event-bus
+    :documentation "Event bus for process events")
+
+   (event-queue
+    :initform nil
+    :accessor agent-event-queue
+    :documentation "Queue for incoming events")
+
+   (human-loop
+    :initform nil
+    :accessor agent-human-loop
+    :documentation "Human-in-the-loop manager")
+
+   (process-runtime
+    :initform nil
+    :accessor agent-process-runtime
+    :documentation "Optional process runtime for step-based workflows")
+
+   (event-handlers
+    :initform nil
+    :accessor agent-event-handlers
+    :documentation "Event type -> handler alist"))
+
+  (:documentation "Agent that runs in background thread with pause/resume.
+Integrates with core/process framework for event-driven workflows."))
 
 ;;; ============================================================
 ;;; Constructor
 ;;; ============================================================
 
-(defun make-process-agent (kernel &key name system-prompt settings callbacks)
+(defun make-process-agent (kernel &key name system-prompt settings callbacks
+                                       process event-handlers human-handler)
   "Create a Process Agent.
 
 Parameters:
-  KERNEL        - Kernel instance
-  NAME          - Agent name (optional)
-  SYSTEM-PROMPT - System prompt (optional)
-  SETTINGS      - Settings plist (optional)
-  CALLBACKS     - Callback functions (optional)
+  KERNEL         - Kernel instance
+  NAME           - Agent name (optional)
+  SYSTEM-PROMPT  - System prompt (optional)
+  SETTINGS       - Settings plist (optional)
+  CALLBACKS      - Callback functions (optional)
+  PROCESS        - Process definition for step-based workflow (optional)
+  EVENT-HANDLERS - Event type -> handler alist (optional)
+  HUMAN-HANDLER  - Handler for human input requests (optional)
 
 Returns:
   New process-agent instance"
-  (make-instance 'process-agent
-                 :kernel kernel
-                 :name (or name "process-agent")
-                 :system-prompt system-prompt
-                 :settings (merge-settings (default-agent-settings) settings)
-                 :callbacks callbacks
-                 :context (make-context)))
+  (let ((agent (make-instance 'process-agent
+                              :kernel kernel
+                              :name (or name "process-agent")
+                              :system-prompt system-prompt
+                              :settings (merge-settings (default-agent-settings) settings)
+                              :callbacks callbacks
+                              :context (make-context))))
+
+    ;; Initialize event system
+    (setf (agent-event-bus agent) (cl-agent.process:make-event-bus))
+    (setf (agent-event-queue agent) (cl-agent.process:make-event-queue))
+
+    ;; Initialize human-in-the-loop manager
+    (setf (agent-human-loop agent) (cl-agent.process:make-human-loop-manager
+                                     :handler human-handler
+                                     :on-request (lambda (req)
+                                                   (queue-enqueue (agent-output-queue agent)
+                                                                  (list :type :human-input-request
+                                                                        :request req)))))
+
+    ;; Set up event handlers
+    (when event-handlers
+      (setf (agent-event-handlers agent) event-handlers))
+
+    ;; Subscribe event bus to queue
+    (cl-agent.process:event-bus-subscribe
+     (agent-event-bus agent) :all
+     (lambda (event)
+       (cl-agent.process:event-queue-push (agent-event-queue agent) event)))
+
+    ;; Create process runtime if process is provided
+    (when process
+      (setf (agent-process-runtime agent)
+            (cl-agent.process:make-process-runtime
+             process
+             :human-handler human-handler
+             :on-step-start (lambda (ctx step)
+                              (queue-enqueue (agent-output-queue agent)
+                                             (list :type :step-start
+                                                   :step (cl-agent.process:step-name step))))
+             :on-step-complete (lambda (ctx step result)
+                                 (queue-enqueue (agent-output-queue agent)
+                                                (list :type :step-complete
+                                                      :step (cl-agent.process:step-name step)
+                                                      :result result)))
+             :on-event (lambda (event)
+                         (queue-enqueue (agent-output-queue agent)
+                                        (list :type :event
+                                              :event event))))))
+
+    agent))
 
 ;;; ============================================================
 ;;; State Predicates
@@ -224,6 +308,61 @@ Returns:
   agent)
 
 ;;; ============================================================
+;;; Helper Functions (defined before main loop)
+;;; ============================================================
+
+(defun process-pending-events (agent)
+  "Process pending events from the event queue.
+
+Parameters:
+  AGENT - Process agent"
+  (loop
+    (let ((event (cl-agent.process:event-queue-pop (agent-event-queue agent) :timeout 0)))
+      (unless event (return))
+
+      ;; Find matching handler
+      (let ((handlers (agent-event-handlers agent)))
+        (dolist (handler-pair handlers)
+          (let ((pattern (car handler-pair))
+                (handler (cdr handler-pair)))
+            (when (or (eq pattern :all)
+                      (cl-agent.process:event-matches-p event pattern))
+              (handler-case
+                  (funcall handler event)
+                (error (err)
+                  (cl-agent.core:log-error "Event handler error: ~A" err)
+                  (queue-enqueue (agent-output-queue agent)
+                                 (list :type :event-error
+                                       :event event
+                                       :error (format nil "~A" err)))))))))
+
+      ;; Notify output
+      (queue-enqueue (agent-output-queue agent)
+                     (list :type :event-processed
+                           :event-type (cl-agent.process:event-type event)
+                           :event-name (cl-agent.process:event-name event))))))
+
+(defun process-agent-command (agent command)
+  "Process an agent command.
+
+Parameters:
+  AGENT   - Process agent
+  COMMAND - Command plist"
+  (case (first command)
+    (:reset
+     (agent-reset agent)
+     (queue-enqueue (agent-output-queue agent)
+                    (list :type :ack :command :reset)))
+
+    (:set-system-prompt
+     (agent-set-system-prompt agent (second command))
+     (queue-enqueue (agent-output-queue agent)
+                    (list :type :ack :command :set-system-prompt)))
+
+    (otherwise
+     (cl-agent.core:log-warn "Unknown command: ~A" (first command)))))
+
+;;; ============================================================
 ;;; Main Loop
 ;;; ============================================================
 
@@ -246,6 +385,9 @@ Parameters:
       ;; Re-check stop after resume
       (when (agent-stop-flag agent)
         (return)))
+
+    ;; Process events from event queue (non-blocking)
+    (process-pending-events agent)
 
     ;; Wait for message
     (multiple-value-bind (message found)
@@ -272,26 +414,6 @@ Parameters:
           ;; Command plist
           ((and (listp message) (keywordp (first message)))
            (process-agent-command agent message)))))))
-
-(defun process-agent-command (agent command)
-  "Process an agent command.
-
-Parameters:
-  AGENT   - Process agent
-  COMMAND - Command plist"
-  (case (first command)
-    (:reset
-     (agent-reset agent)
-     (queue-enqueue (agent-output-queue agent)
-                    (list :type :ack :command :reset)))
-
-    (:set-system-prompt
-     (agent-set-system-prompt agent (second command))
-     (queue-enqueue (agent-output-queue agent)
-                    (list :type :ack :command :set-system-prompt)))
-
-    (otherwise
-     (cl-agent.core:log-warn "Unknown command: ~A" (first command)))))
 
 ;;; ============================================================
 ;;; Communication
@@ -355,3 +477,191 @@ Returns:
 (defmethod agent-p ((agent process-agent))
   "Process agents are agents."
   t)
+
+;;; ============================================================
+;;; Event Injection (C# Process Framework style)
+;;; ============================================================
+
+(defun agent-inject-event (agent event)
+  "Inject an external event into the agent's event system.
+
+This is similar to C# Process Framework's InputEvent pattern,
+allowing external systems to inject events that the agent can
+respond to.
+
+Parameters:
+  AGENT - Process agent
+  EVENT - Process event or event specification plist
+
+Returns:
+  The injected event
+
+Example:
+  ;; Inject a data-ready event
+  (agent-inject-event agent
+    (cl-agent.process:make-event
+      :type :external
+      :name \"data-ready\"
+      :data '(:file \"data.csv\")))
+
+  ;; Or with plist specification
+  (agent-inject-event agent
+    '(:type :approval :data t :source \"manager\"))"
+  (let ((evt (if (typep event 'cl-agent.process:process-event)
+                 event
+                 (apply #'cl-agent.process:make-event event))))
+    ;; Push to event queue
+    (cl-agent.process:event-queue-push (agent-event-queue agent) evt)
+
+    ;; Publish to event bus for subscribed handlers
+    (cl-agent.process:event-bus-publish (agent-event-bus agent) evt)
+
+    ;; Also inject into process runtime if present
+    (when (agent-process-runtime agent)
+      (cl-agent.process:runtime-inject-event (agent-process-runtime agent) evt))
+
+    evt))
+
+(defun agent-subscribe-event (agent event-type handler)
+  "Subscribe to events of a specific type.
+
+Parameters:
+  AGENT      - Process agent
+  EVENT-TYPE - Event type keyword or pattern
+  HANDLER    - Function (event) -> result
+
+Example:
+  (agent-subscribe-event agent :approval
+    (lambda (event)
+      (format t \"Got approval: ~A~%\" (cl-agent.process:event-data event))))"
+  (cl-agent.process:event-bus-subscribe (agent-event-bus agent) event-type handler)
+  (push (cons event-type handler) (agent-event-handlers agent)))
+
+(defun agent-unsubscribe-event (agent subscription-id)
+  "Unsubscribe from events.
+
+Parameters:
+  AGENT           - Process agent
+  SUBSCRIPTION-ID - Subscription ID returned by subscribe"
+  (cl-agent.process:event-bus-unsubscribe (agent-event-bus agent) subscription-id))
+
+;;; ============================================================
+;;; Human-in-the-Loop Support
+;;; ============================================================
+
+(defun agent-request-input (agent request)
+  "Request human input (non-blocking).
+
+Parameters:
+  AGENT   - Process agent
+  REQUEST - Input request
+
+Returns:
+  Request ID
+
+Example:
+  (agent-request-input agent
+    (cl-agent.process:make-input-request
+      :type :approval
+      :prompt \"Do you approve this action?\"))"
+  (cl-agent.process:human-loop-request-input-async
+   (agent-human-loop agent) request nil)
+  (cl-agent.process:input-request-id request))
+
+(defun agent-submit-input (agent response)
+  "Submit a response to a human input request.
+
+Parameters:
+  AGENT    - Process agent
+  RESPONSE - Input response
+
+Returns:
+  T if accepted
+
+Example:
+  (agent-submit-input agent
+    (cl-agent.process:make-input-response request-id
+      :value \"approved\"
+      :approved-p t))"
+  (let ((result (cl-agent.process:human-loop-submit-response
+                 (agent-human-loop agent) response)))
+    (when result
+      ;; Also inject as event
+      (agent-inject-event agent
+                          (cl-agent.process:make-event
+                           :type cl-agent.process:+event-type-input+
+                           :name "human-input"
+                           :data response
+                           :source :human)))
+    result))
+
+(defun agent-wait-for-approval (agent prompt &key description timeout)
+  "Convenience function to wait for approval.
+
+Parameters:
+  AGENT       - Process agent
+  PROMPT      - Approval prompt
+  DESCRIPTION - Detailed description
+  TIMEOUT     - Timeout in seconds
+
+Returns:
+  T if approved, NIL if rejected or timeout"
+  (cl-agent.process:wait-for-approval (agent-human-loop agent) prompt
+                                       :description description
+                                       :timeout timeout))
+
+(defun agent-wait-for-confirmation (agent prompt &key timeout default)
+  "Convenience function to wait for yes/no confirmation.
+
+Parameters:
+  AGENT   - Process agent
+  PROMPT  - Confirmation prompt
+  TIMEOUT - Timeout in seconds
+  DEFAULT - Default value
+
+Returns:
+  T for yes, NIL for no"
+  (cl-agent.process:wait-for-confirmation (agent-human-loop agent) prompt
+                                           :timeout timeout
+                                           :default default))
+
+(defun agent-get-pending-inputs (agent)
+  "Get pending human input requests.
+
+Parameters:
+  AGENT - Process agent
+
+Returns:
+  List of input requests"
+  (cl-agent.process:human-loop-pending-requests (agent-human-loop agent)))
+
+;;; ============================================================
+;;; Process Runtime Control
+;;; ============================================================
+
+(defun agent-start-process (agent &key input)
+  "Start the process runtime (for step-based workflows).
+
+Parameters:
+  AGENT - Process agent
+  INPUT - Initial input data
+
+Returns:
+  The agent"
+  (when (agent-process-runtime agent)
+    (cl-agent.process:runtime-start (agent-process-runtime agent)
+                                     :input input
+                                     :async t))
+  agent)
+
+(defun agent-get-process-state (agent)
+  "Get process runtime state.
+
+Parameters:
+  AGENT - Process agent
+
+Returns:
+  State plist or NIL if no process runtime"
+  (when (agent-process-runtime agent)
+    (cl-agent.process:runtime-get-state (agent-process-runtime agent))))
+

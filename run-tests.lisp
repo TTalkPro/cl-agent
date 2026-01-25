@@ -4,7 +4,7 @@
 (require :asdf)
 
 ;; Add paths
-(dolist (dir '("." "core/" "llm/" "memory/" "tools/" "mock/"))
+(dolist (dir '("." "core/" "llm/" "memory/" "tools/" "mock/" "simpleagent/"))
   (pushnew (truename dir) asdf:*central-registry* :test #'equal))
 
 ;; Load quicklisp if available
@@ -29,11 +29,23 @@
 (format t "Loading cl-agent-tools...~%")
 (asdf:load-system :cl-agent-tools)
 
+(format t "Loading cl-agent-simpleagent...~%")
+(asdf:load-system :cl-agent-simpleagent)
+
 (format t "~%All modules loaded successfully!~%~%")
 
 ;; Load and run tests
-(format t "Loading test file...~%")
+(format t "Loading test files...~%")
 (load "tests/test-cross-impl.lisp")
+(load "tests/process-agent-test.lisp")
 
 (format t "~%Running cross-implementation tests...~%~%")
 (cl-agent.tests.cross-impl:run-cross-impl-tests)
+
+;; Process agent tests (requires API key)
+(format t "~%~%=== Process Agent Tests ===~%")
+(format t "To run process-agent tests with GLM-4.7:~%")
+(format t "  1. Set GLM_API_KEY environment variable~%")
+(format t "  2. Run: (cl-agent.test.process-agent:run-all-tests)~%")
+(format t "  Or for local tests without API:~%")
+(format t "  Run: (cl-agent.test.process-agent:test-event-system-local)~%")

@@ -94,7 +94,20 @@
      (:file "service")        ; Service abstraction
      (:file "filter")         ; 4-type filter pipeline
      (:file "kernel")         ; Kernel class + Builder
-     (:file "chat")))))       ; 3-tier Invoke API
+     (:file "chat")))         ; 3-tier Invoke API
+
+   ;; ============================================================
+   ;; Process Framework
+   ;; ============================================================
+   (:module "process"
+    :components
+    ((:file "package")
+     (:file "event")          ; Event system + Event Bus
+     (:file "step")           ; Step abstraction
+     (:file "state-machine")  ; Finite state machine
+     (:file "human-loop")     ; Human-in-the-loop support
+     (:file "process")        ; Process definition
+     (:file "runtime")))))    ; Process runtime execution
 
 ;; ============================================================
 ;; Changelog

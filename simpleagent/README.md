@@ -101,7 +101,7 @@ simpleagent/
 
 ## ProcessAgent
 
-可暂停、恢复、停止的 Agent，适合长时间运行的任务。
+可暂停、恢复、停止的 Agent，适合长时间运行的任务。集成 core/process 框架支持事件驱动和人工介入。
 
 ### 基本用法
 
@@ -112,7 +112,8 @@ simpleagent/
     :name "background-worker"))
 
 ;; 启动（非阻塞）
-(agent-start *process-agent* "分析这份大型数据集...")
+(agent-start *process-agent*)
+(agent-send *process-agent* "分析这份大型数据集...")
 
 ;; 检查状态
 (agent-state *process-agent*)  ; => :running / :paused / :stopped
@@ -125,6 +126,88 @@ simpleagent/
 
 ;; 停止
 (agent-stop *process-agent*)
+```
+
+### 事件注入 (类似 C# Process Framework)
+
+```lisp
+;; 创建带事件处理的 Agent
+(defvar *process-agent*
+  (make-process-agent *kernel*
+    :name "event-driven-agent"
+    :event-handlers
+    (list
+      (cons :external
+            (lambda (event)
+              (format t "收到外部事件: ~A~%"
+                      (cl-agent.process:event-data event)))))))
+
+(agent-start *process-agent*)
+
+;; 订阅事件
+(agent-subscribe-event *process-agent* :approval
+  (lambda (event)
+    (format t "收到审批: ~A~%" (cl-agent.process:event-data event))))
+
+;; 注入外部事件（类似 C# 的 InputEvent）
+(agent-inject-event *process-agent*
+  (cl-agent.process:make-event
+    :type :external
+    :name "data-ready"
+    :data '(:file "data.csv" :rows 1000)))
+
+;; 注入审批事件
+(agent-inject-event *process-agent*
+  (cl-agent.process:make-event
+    :type :approval
+    :data t
+    :source "manager"))
+```
+
+### 人工介入 (Human-in-the-Loop)
+
+```lisp
+;; 创建带人工输入处理的 Agent
+(defvar *process-agent*
+  (make-process-agent *kernel*
+    :name "hitl-agent"
+    :human-handler
+    (lambda (request)
+      ;; 转发到 UI 或其他处理
+      (format t "需要人工输入: ~A~%"
+              (cl-agent.process:input-request-prompt request)))))
+
+(agent-start *process-agent*)
+
+;; 请求人工审批
+(let ((request (cl-agent.process:make-input-request
+                 :type :approval
+                 :prompt "是否批准删除这些文件？"
+                 :description "将删除 100 个临时文件"
+                 :timeout 300)))
+  (agent-request-input *process-agent* request))
+
+;; 查看待处理的人工输入
+(agent-get-pending-inputs *process-agent*)
+
+;; 提交人工响应
+(agent-submit-input *process-agent*
+  (cl-agent.process:make-input-response request-id
+    :value "approved"
+    :approved-p t
+    :responder "admin"))
+
+;; 便捷函数：等待审批
+(when (agent-wait-for-approval *process-agent*
+                                "继续执行？"
+                                :timeout 60)
+  (execute-dangerous-operation))
+
+;; 便捷函数：等待确认
+(when (agent-wait-for-confirmation *process-agent*
+                                    "是否保存更改？"
+                                    :default t)
+  (save-changes))
 ```
 
 ### 等待完成
@@ -161,11 +244,58 @@ simpleagent/
 
 ```lisp
 ;; 向运行中的 Agent 发送消息
-(agent-send-message *process-agent* "新的指令...")
+(agent-send *process-agent* "新的指令...")
 
 ;; 获取 Agent 输出
-(agent-receive-message *process-agent*)  ; 阻塞
-(agent-receive-message *process-agent* :timeout 5)  ; 5 秒超时
+(agent-receive *process-agent*)  ; 阻塞
+(agent-receive *process-agent* :timeout 5)  ; 5 秒超时
+```
+
+### 步骤流程 (Step-based Workflow)
+
+```lisp
+;; 定义流程
+(cl-agent.process:defprocess document-approval
+  :description "文档审批流程"
+
+  :steps
+  ((submit
+    :description "提交文档"
+    :handler (lambda (ctx input)
+               (cl-agent.process:step-completed :output input)))
+
+   (review
+    :description "审核文档"
+    :wait-for (:approval)
+    :timeout 3600
+    :handler (lambda (ctx input)
+               (if (cl-agent.process:context-get-variable ctx :approved)
+                   (cl-agent.process:step-completed :output input)
+                   (cl-agent.process:step-failed "被拒绝")))))
+
+  :on-event
+  ((:approval . (lambda (ctx event)
+                  (cl-agent.process:context-set-variable ctx :approved
+                    (cl-agent.process:event-data event))))))
+
+;; 创建带流程的 Agent
+(defvar *workflow-agent*
+  (make-process-agent *kernel*
+    :name "workflow-agent"
+    :process document-approval))
+
+(agent-start *workflow-agent*)
+
+;; 启动流程
+(agent-start-process *workflow-agent* :input document-data)
+
+;; 注入审批事件
+(agent-inject-event *workflow-agent*
+  (cl-agent.process:make-event :type :approval :data t))
+
+;; 获取流程状态
+(agent-get-process-state *workflow-agent*)
+;; => (:state :running :current-step "review" ...)
 ```
 
 ## 自定义 Agent
