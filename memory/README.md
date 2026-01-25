@@ -1,498 +1,362 @@
-# CL-Agent Memory
+# Memory 模块
 
-Agent 记忆管理系统，提供短期记忆（Checkpointer）和长期记忆（Store）的统一接口。
+统一记忆管理模块，提供短期检查点和长期持久化存储。
+
+## 目录结构
+
+```
+memory/
+├── package.lisp              # 包定义
+├── protocol.lisp             # 统一协议
+├── utils.lisp                # 工具函数
+├── store/                    # 长期存储
+│   ├── protocol.lisp         # Store 协议
+│   ├── memory-backend.lisp   # 内存后端
+│   ├── sqlite-backend.lisp   # SQLite 后端
+│   └── vector-memory.lisp    # 向量存储
+├── checkpoint/               # 检查点
+│   ├── protocol.lisp         # Checkpoint 协议
+│   └── manager.lisp          # Checkpoint 管理器
+├── long-term/                # 长期记忆类型
+│   ├── semantic.lisp         # 语义记忆
+│   ├── episodic.lisp         # 情节记忆
+│   └── procedural.lisp       # 程序性记忆
+├── retrieval/                # 检索策略
+│   └── strategies.lisp
+└── api/                      # 统一 API
+    ├── message.lisp          # 消息结构
+    ├── agent-memory.lisp     # Agent Memory 类
+    └── summary-buffer.lisp   # 摘要缓冲
+```
 
 ## 架构概览
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                     agent-memory                        │
-│  ┌─────────────────┐      ┌─────────────────────────┐  │
-│  │  context-store  │      │   persistent-store      │  │
-│  │  (内存，快速)   │      │   (持久化，归档)        │  │
-│  │                 │      │                         │  │
-│  │ ← checkpointer  │      │ ← 长期记忆              │  │
-│  │ ← 当前对话      │ ───→ │ ← 归档历史              │  │
-│  └─────────────────┘      └─────────────────────────┘  │
-└─────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────┐
+│           Agent Memory API              │
+└─────────────────────────────────────────┘
+              │           │
+    ┌─────────┴───┐   ┌───┴─────────┐
+    │             │   │             │
+    ▼             ▼   ▼             ▼
+┌─────────┐  ┌─────────┐  ┌─────────────┐
+│Checkpoint│  │ Message │  │   Store     │
+│ (短期)   │  │  结构   │  │  (长期)     │
+└─────────┘  └─────────┘  └─────────────┘
+                              │
+              ┌───────────────┼───────────────┐
+              │               │               │
+              ▼               ▼               ▼
+         ┌────────┐     ┌────────┐     ┌────────┐
+         │ Memory │     │ SQLite │     │ Vector │
+         │Backend │     │Backend │     │Backend │
+         └────────┘     └────────┘     └────────┘
 ```
 
-## 设计原则
+## 消息结构
 
-1. **无全局变量** - 显式传递 memory 实例，避免隐式状态
-2. **CLOS 类** - 使用 `defclass`/`defgeneric`/`defmethod` 模式
-3. **可插拔后端** - Store 协议支持多种实现（内存、SQLite、PostgreSQL 等）
-4. **双 Store 架构** - 支持热/冷数据分离，也可降级为单 Store
+```lisp
+;; 创建消息
+(make-memory-message :role :user :content "Hello")
 
-## 双 Store 架构
+;; 快捷方式
+(make-user-message "Hello")
+(make-assistant-message "Hi there!")
+(make-system-message "You are helpful.")
+(make-tool-message "Result" :tool-call-id "call_123")
 
-### 设计动机
-
-| 存储类型 | 用途 | 特点 |
-|---------|------|------|
-| context-store | 当前会话、Checkpointer | 快速读写、内存存储 |
-| persistent-store | 历史归档、知识库 | 持久化、大容量 |
-
-### 数据流向
-
+;; 访问属性
+(memory-message-role msg)       ; => :USER
+(memory-message-content msg)    ; => "Hello"
+(memory-message-timestamp msg)  ; => "2024-01-15T10:30:00Z"
+(memory-message-metadata msg)   ; => (:key "value")
 ```
-用户对话 → context-store → [归档] → persistent-store
-              ↑                           ↓
-         checkpointer                [加载历史]
-         (时间旅行)
-```
-
-### 降级模式
-
-当 `persistent-store` 为 `NIL` 时，自动降级为单 Store 模式，所有操作使用 `context-store`。
 
 ## Store 后端
 
-### 1. Memory Backend (内存)
+### 内存后端
 
-快速、非持久化，适用于开发测试和会话缓存。
-
-```lisp
-(make-memory-store-backend
-  :max-size 1000           ; 最大条目数（nil=无限制）
-  :eviction-policy :lru)   ; 淘汰策略 (:lru, :fifo, :lifo)
-```
-
-### 2. SQLite Backend (持久化)
-
-基于 SQLite 的持久化存储，适用于单机部署。
+快速、会话级存储：
 
 ```lisp
-(make-sqlite-store-backend
-  :db-path "/path/to/store.db"  ; 数据库路径（必需）
-  :busy-timeout 5000            ; 忙等待超时（毫秒）
-  :auto-vacuum t)               ; 自动清理
+(defvar *store* (make-memory-store-backend))
+
+;; 基本操作
+(store-put *store* '("namespace") "key" "value")
+(store-get *store* '("namespace") "key")  ; => "value"
+(store-delete *store* '("namespace") "key")
+
+;; 列表和计数
+(store-list-keys *store* '("namespace"))  ; => ("key1" "key2")
+(store-count *store* '("namespace"))      ; => 2
+
+;; 清空
+(store-clear *store* '("namespace"))
 ```
 
-#### SQLite 表结构
+### SQLite 后端
 
-```sql
-CREATE TABLE store_items (
-    full_key   TEXT PRIMARY KEY,   -- namespace + key 组合键
-    namespace  TEXT NOT NULL,       -- 命名空间（如 "user/123/prefs"）
-    key        TEXT NOT NULL,       -- 条目键
-    value      TEXT NOT NULL,       -- JSON 序列化的值
-    embedding  TEXT,                -- JSON 序列化的向量（可选）
-    metadata   TEXT,                -- JSON 序列化的元数据（可选）
-    created_at INTEGER NOT NULL,    -- 创建时间戳
-    updated_at INTEGER NOT NULL     -- 更新时间戳
-);
+持久化文件存储：
 
--- 索引
-CREATE INDEX idx_store_namespace ON store_items(namespace);
-CREATE INDEX idx_store_updated_at ON store_items(updated_at);
+```lisp
+(defvar *store*
+  (make-sqlite-store-backend
+    :db-path "~/.cl-agent/memory.db"))
+
+;; API 与内存后端相同
+(store-put *store* '("facts") "lisp-creator" "John McCarthy")
+(store-get *store* '("facts") "lisp-creator")
+
+;; 数据在应用重启后保留
 ```
 
-#### SQLite 配置
+### 向量存储后端
 
-- **WAL 模式**: 提高并发读写性能
-- **NORMAL 同步**: 平衡性能和安全性
-- **线程安全**: 使用锁 + busy_timeout
+支持语义搜索：
+
+```lisp
+(defvar *vector-store*
+  (make-vector-memory-backend
+    :embedding-fn #'my-embedding-function))
+
+;; 存储带嵌入的数据
+(store-put *vector-store* '("docs") "doc1"
+  '(:content "Common Lisp is..."
+    :embedding #(0.1 0.2 0.3 ...)))
+
+;; 语义搜索
+(vector-search *vector-store* '("docs")
+  :query-embedding #(0.15 0.25 0.35 ...)
+  :top-k 5)
+```
+
+## Checkpoint 系统
+
+保存和恢复 Agent 状态：
+
+```lisp
+(defvar *checkpointer* (make-checkpoint-manager *store*))
+
+;; 保存检查点
+(let ((cp (save-checkpoint *checkpointer* "thread-1"
+            '(:summary "用户讨论了旅行计划"
+              :facts ((:destination "日本")
+                      (:date "四月"))
+              :preferences (:style "文化")))))
+  (format t "检查点 ID: ~A~%" (checkpoint-id cp)))
+
+;; 加载最新检查点
+(let ((cp (load-checkpoint *checkpointer* "thread-1")))
+  (when cp
+    (format t "状态: ~A~%" (checkpoint-state cp))))
+
+;; 列出所有检查点
+(list-checkpoints *checkpointer* :thread-id "thread-1")
+
+;; 删除检查点
+(delete-checkpoint *checkpointer* checkpoint-id)
+
+;; 创建分支
+(create-branch *checkpointer* "thread-1" "experiment-branch")
+```
+
+## Agent Memory
+
+统一的记忆接口：
+
+```lisp
+;; 创建 Agent Memory
+(defvar *memory*
+  (make-agent-memory
+    :context-store (make-memory-store-backend)      ; 快速上下文
+    :persistent-store (make-sqlite-store-backend    ; 持久化
+                        :db-path "memory.db")
+    :default-thread-id "default"
+    :auto-archive t))                               ; 自动归档
+
+;; 消息操作
+(am-add-message *memory* "thread-1" :user "Hello")
+(am-add-message *memory* "thread-1" :assistant "Hi!")
+(am-get-messages *memory* "thread-1")
+(am-get-last-n-messages *memory* "thread-1" 5)
+(am-clear-messages *memory* "thread-1")
+
+;; 检查点
+(am-save-checkpoint *memory* "thread-1" '(:state ...))
+(am-load-checkpoint *memory* checkpoint-id)
+
+;; 事实存储
+(am-store-fact *memory* "user-name" "小明")
+(am-recall-facts *memory* "user-*")
+
+;; 归档（移动到持久化存储）
+(am-archive-messages *memory* "thread-1")
+```
+
+## 长期记忆类型
+
+### 语义记忆（Semantic）
+
+存储事实和知识：
+
+```lisp
+(defvar *semantic* (make-semantic-memory *store*))
+
+;; 存储事实
+(semantic-store *semantic* "lisp"
+  '(:type :programming-language
+    :created 1958
+    :creator "John McCarthy"))
+
+;; 检索
+(semantic-recall *semantic* "lisp")
+
+;; 关联搜索
+(semantic-search *semantic* :type :programming-language)
+```
+
+### 情节记忆（Episodic）
+
+存储事件和经历：
+
+```lisp
+(defvar *episodic* (make-episodic-memory *store*))
+
+;; 记录事件
+(episodic-record *episodic*
+  '(:event "用户询问天气"
+    :context (:location "北京" :mood "curious")
+    :outcome "提供了天气信息"))
+
+;; 按时间检索
+(episodic-recall *episodic*
+  :from "2024-01-01"
+  :to "2024-01-31")
+
+;; 按上下文检索
+(episodic-search *episodic* :location "北京")
+```
+
+### 程序性记忆（Procedural）
+
+存储技能和过程：
+
+```lisp
+(defvar *procedural* (make-procedural-memory *store*))
+
+;; 存储过程
+(procedural-store *procedural* "book-flight"
+  '(:steps ("1. 确认目的地"
+            "2. 选择日期"
+            "3. 搜索航班"
+            "4. 完成预订")
+    :preconditions (:has-destination t :has-dates t)
+    :tools ("flight-search" "booking-api")))
+
+;; 检索过程
+(procedural-recall *procedural* "book-flight")
+
+;; 按工具检索
+(procedural-search *procedural* :uses-tool "flight-search")
+```
+
+## 检索策略
+
+```lisp
+;; 语义检索（向量相似度）
+(make-retrieval-strategy :semantic
+  :embedding-fn #'embed
+  :top-k 5)
+
+;; 时间检索（最近优先）
+(make-retrieval-strategy :recency
+  :decay-factor 0.9)
+
+;; 频率检索（访问频率）
+(make-retrieval-strategy :frequency)
+
+;; 重要性检索（优先级排序）
+(make-retrieval-strategy :importance
+  :importance-fn #'calculate-importance)
+
+;; 混合检索
+(make-retrieval-strategy :hybrid
+  :strategies '((:semantic :weight 0.5)
+                (:recency :weight 0.3)
+                (:importance :weight 0.2)))
+```
+
+## 摘要缓冲
+
+自动摘要长对话：
+
+```lisp
+(defvar *buffer*
+  (make-summary-buffer
+    :max-messages 20
+    :summarize-fn #'summarize-with-llm))
+
+;; 添加消息（自动摘要）
+(buffer-add *buffer* message)
+
+;; 获取上下文（包含摘要）
+(buffer-get-context *buffer*)
+;; => ((:role :system :content "之前的对话摘要: ...")
+;;     (:role :user :content "最近的消息1")
+;;     (:role :assistant :content "最近的消息2")
+;;     ...)
+```
 
 ## 使用示例
 
-### 基本用法
+### 带持久化的聊天机器人
 
 ```lisp
-;; 加载系统
-(asdf:load-system :cl-agent-memory)
-(use-package :cl-agent.memory)
-
-;; 单 Store 模式（简单）
-(let ((memory (make-simple-memory)))
-  (memory-add-message memory :user "Hello")
-  (memory-add-message memory :assistant "Hi there!")
-  (memory-get-messages memory))
-
-;; 双 Store 模式（推荐）
-(let ((memory (make-dual-store-memory)))
-  ;; 使用...
-  )
-```
-
-### 自定义后端
-
-```lisp
-;; 内存 + SQLite 双 Store
-(let ((memory (make-agent-memory
-                :context-store (make-memory-store-backend
-                                 :max-size 500)
-                :persistent-store (make-sqlite-store-backend
-                                    :db-path "/data/agent-memory.db"))))
-
-  ;; 添加消息（保存到 context-store）
-  (memory-add-message memory :user "你好")
-
-  ;; 长期记忆（保存到 persistent-store）
-  (memory-remember memory "用户偏好深色主题" :type :preference)
-
-  ;; 归档当前会话
-  (memory-archive-session memory)
-
-  ;; 查看已归档会话
-  (memory-list-archived memory))
-```
-
-### Store 协议
-                                 :max-size 500)
-                :persistent-store (make-sqlite-store-backend
-                                    :db-path "/data/agent-memory.db"))))
-
-  ;; 添加消息（保存到 context-store）
-  (memory-add-message memory :user "你好")
-
-  ;; 长期记忆（保存到 persistent-store）
-  (memory-remember memory "用户偏好深色主题" :type :preference)
-
-  ;; 归档当前会话
-  (memory-archive-session memory)
-
-  ;; 查看已归档会话
-  (memory-list-archived memory))
-```
-
-### Store 协议
-
-所有 Store 后端实现统一的协议：
-
-```lisp
-;; 基本操作
-(store-put store namespace key value &key metadata embedding)
-(store-get store namespace key)
-(store-delete store namespace key)
-(store-search store namespace-prefix &key query limit filter)
-
-;; 管理操作
-(store-clear store &optional namespace)
-(store-count store &optional namespace)
-(store-stats store)
-(store-list-namespaces store prefix &key limit)
-
-;; 批量操作
-(store-put-batch store items)
-(store-get-batch store keys)
-(store-delete-batch store keys)
-```
-
-### 命名空间
-
-命名空间使用列表表示层级结构：
-
-```lisp
-;; 命名空间示例
-'("user" "123" "preferences")  ; -> "user/123/preferences"
-'("archives" "sessions")       ; -> "archives/sessions"
-'("knowledge" "facts")         ; -> "knowledge/facts"
-
-;; 前缀搜索
-(store-search store '("user" "123"))  ; 搜索 user/123 下所有条目
-```
-
-## agent-memory 详细使用指南
-
-### checkpoint-manager vs agent-memory
-
-| 特性 | `checkpoint-manager` | `agent-memory` |
-|------|---------------------|------------------|
-| **用途** | 纯检查点管理 | Agent 内存接口（短期+长期） |
-| **存储** | 单 Store | 双 Store（context + persistent） |
-| **时间旅行** | ✅ | ✅ |
-| **分支功能** | ✅ | ✅ |
-| **知识库** | ❌ | ✅ |
-| **会话归档** | ❌ | ✅ |
-
-**建议**：对于大多数场景，直接使用 `agent-memory`，它提供了 `checkpoint-manager` 的所有功能，还有额外的记忆管理能力。
-
-### 创建 agent-memory
-
-```lisp
-;; 单 Store 模式（简单场景）
-(defparameter *memory*
+(defvar *memory*
   (make-agent-memory
-   :context-store (make-memory-store-backend)
-   :default-thread-id "main"))
+    :persistent-store (make-sqlite-store-backend :db-path "chat.db")))
 
-;; 双 Store 模式（推荐）
-(defparameter *memory*
-  (make-agent-memory
-   :context-store (make-memory-store-backend
-                   :max-size 1000
-                   :eviction-policy :lru)
-   :persistent-store (make-sqlite-store-backend
-                      :db-path "/data/agent-memory.db")
-   :auto-archive t  ; 自动归档
-   :default-thread-id "main"))
+(defvar *agent*
+  (make-kernel-agent *kernel*
+    :memory *memory*
+    :system-prompt "记住用户的偏好和历史对话。"))
 
-;; 使用 Agent 创建时的便捷配置
-(defparameter *agent*
-  (create-agent
-   :model (list :provider :anthropic
-               :model "glm-4.7"
-               :api-key (get-env "ZHIPU_API_KEY")
-               :base-url "https://open.bigmodel.cn/api/anthropic/v1")
-   :checkpointer (make-agent-memory
-                  :context-store (make-memory-store-backend)
-                  :persistent-store (make-memory-store-backend))
-   :name "time-travel-agent"))
+;; 第一次会话
+(agent-chat *agent* "我叫小明，我喜欢编程")
+(am-save-checkpoint *memory* "user-xiaoming"
+  '(:name "小明" :interests ("编程")))
+
+;; 重启后...
+(let ((cp (am-load-checkpoint *memory* "user-xiaoming")))
+  (format t "欢迎回来，~A！~%" (getf (checkpoint-state cp) :name)))
 ```
 
-### 时间旅行功能
-
-时间旅行允许你回退到之前的状态，或前进到未来的状态。
+### 多用户支持
 
 ```lisp
-;; 1. 模拟对话，保存多个检查点
-(memory-save-state *memory*
-                    '(:message "你好" :step 1)
-                    :thread-id "main")
+;; 使用不同的 thread-id 区分用户
+(am-add-message *memory* "user-alice" :user "Hello")
+(am-add-message *memory* "user-bob" :user "Hi")
 
-(memory-save-state *memory*
-                    '(:message "今天天气" :step 2)
-                    :thread-id "main")
-
-(memory-save-state *memory*
-                    '(:message "再见" :step 3)
-                    :thread-id "main")
-
-;; 2. 回退 1 步（回到 step 2）
-(memory-go-back *memory* :thread-id "main" :steps 1)
-
-;; 3. 回退 2 步（回到 step 1）
-(memory-go-back *memory* :thread-id "main" :steps 2)
-
-;; 4. 前进 1 步（前进到 step 2）
-(memory-go-forward *memory* :thread-id "main" :steps 1)
-
-;; 5. 跳转到指定检查点
-(memory-load-state *memory*
-                   :thread-id "main"
-                   :checkpoint-id "cp-123")
-
-;; 6. 列出所有历史
-(memory-list *memory* :thread-id "main")
-;; => ((:checkpoint-id "cp-1" :timestamp ...) ...)
+;; 各自独立的对话历史
+(am-get-messages *memory* "user-alice")
+(am-get-messages *memory* "user-bob")
 ```
 
-### 分支功能
-
-分支功能允许你创建"平行宇宙"，尝试不同的对话路径。
+### 知识库集成
 
 ```lisp
-;; 1. 创建新分支（从当前状态）
-(memory-branch *memory* "experiment-branch"
-               :thread-id "main"
-               :from-checkpoint-id "cp-2")
+(defvar *knowledge* (make-semantic-memory *store*))
 
-;; 2. 切换到新分支
-(memory-switch-branch *memory* "experiment-branch")
+;; 导入知识
+(semantic-store *knowledge* "product-a"
+  '(:name "产品A"
+    :price 99.99
+    :features ("功能1" "功能2")))
 
-;; 3. 在新分支上继续对话
-(memory-save-state *memory*
-                    '(:message "尝试不同的回复" :step 4)
-                    :thread-id "experiment-branch")
-
-;; 4. 切换回主分支
-(memory-switch-branch *memory* "main")
-
-;; 5. 列出所有分支
-(memory-list-branches *memory*)
-;; => (("main" . (...)) ("experiment-branch" . (...)))
-
-;; 6. 删除分支
-(memory-delete-branch *memory* "old-branch")
+;; Agent 可以检索知识回答问题
+(let ((product (semantic-recall *knowledge* "product-a")))
+  (format nil "~A 的价格是 ~A 元"
+          (getf product :name)
+          (getf product :price)))
 ```
-
-### 实战示例：尝试不同的对话策略
-
-```lisp
-(defun try-different-response (memory user-message)
-  "创建分支尝试不同的回复策略"
-
-  ;; 1. 保存当前状态
-  (let ((current-state (memory-load-state memory)))
-    (memory-save-state memory current-state))
-
-  ;; 2. 创建"正式回复"分支
-  (memory-branch memory "formal"
-                 :from-checkpoint-id (get-current-cp-id memory))
-  (memory-switch-branch memory "formal")
-  (let ((formal-response (generate-response user-message :style :formal)))
-    (memory-save-state memory formal-response))
-
-  ;; 3. 切换回主分支，创建"随意回复"分支
-  (memory-switch-branch memory "main")
-  (memory-branch memory "casual"
-                 :from-checkpoint-id (get-current-cp-id memory))
-  (memory-switch-branch memory "casual")
-  (let ((casual-response (generate-response user-message :style :casual)))
-    (memory-save-state memory casual-response))
-
-  ;; 4. 比较两个分支的结果
-  (let ((formal-response (memory-load-state memory
-                                          :thread-id "formal"))
-        (casual-response (memory-load-state memory
-                                          :thread-id "casual")))
-    (list :formal formal-response
-          :casual casual-response)))
-
-;; 使用示例
-(try-different-response *memory* "介绍一下你自己")
-;; => (:FORMAL "您好，我是..." :CASUAL "嘿！我是...")
-```
-
-### 知识库功能
-
-使用 `persistent-store` 存储长期知识。
-
-```lisp
-;; 1. 存储知识（默认到 persistent-store）
-(memory-put-item *memory*
-                 '("knowledge" "facts")
-                 "fact-1"
-                 "CL-Agent 是一个 Lisp AI 框架"
-                 :metadata '(:source "internal" :confidence 1.0))
-
-;; 2. 存储用户偏好
-(memory-put-item *memory*
-                 '("user" "123" "preferences")
-                 "theme"
-                 "dark"
-                 :metadata '(:type "preference"))
-
-;; 3. 搜索知识
-(memory-search-items *memory*
-                      '("knowledge")
-                      :query "Lisp"
-                      :limit 10)
-
-;; 4. 获取用户偏好
-(memory-get-item *memory*
-                 '("user" "123" "preferences")
-                 "theme")
-;; => "dark"
-```
-
-### 会话归档
-
-将当前会话从 `context-store` 归档到 `persistent-store`。
-
-```lisp
-;; 1. 手动归档
-(memory-archive-session *memory*
-                        :thread-id "session-1"
-                        :summarize-fn (lambda (messages)
-                                       (summarize-conversation messages)))
-
-;; 2. 列出已归档会话
-(memory-list-archived *memory* :limit 20)
-
-;; 3. 加载已归档会话
-(memory-load-archived *memory* "session-id-123")
-
-;; 4. 自动归档（创建时设置）
-(defparameter *memory*
-  (make-agent-memory
-   :context-store (make-memory-store-backend)
-   :persistent-store (make-sqlite-store-backend
-                      :db-path "/data/memory.db")
-   :auto-archive t))  ; 会话结束时自动归档
-```
-
-### 直接访问 Checkpointer（高级用法）
-
-如果你想直接使用底层的 `checkpoint-manager` API：
-
-```lisp
-;; 获取内嵌的 checkpointer
-(defparameter *checkpointer*
-  (agent-memory-checkpointer *memory*))
-
-;; 使用 checkpoint-manager 的所有功能
-(let ((config (make-checkpoint-config :thread-id "main")))
-  (checkpointer-go-back *checkpointer* config :steps 1)
-  (checkpointer-branch *checkpointer* config "new-branch")
-  (checkpointer-switch-branch *checkpointer* config "new-branch")
-  (checkpointer-delete-branch *checkpointer* config "old-branch"))
-```
-
-### 完整 Agent 示例
-
-```lisp
-;; 创建支持时间旅行的 Agent
-(defparameter *agent*
-  (create-agent
-   :model (list :provider :anthropic
-               :model "glm-4.7"
-               :api-key (get-env "ZHIPU_API_KEY")
-               :base-url "https://open.bigmodel.cn/api/anthropic/v1")
-   :checkpointer (make-agent-memory
-                  :context-store (make-memory-store-backend)
-                  :persistent-store (make-sqlite-store-backend
-                                     :db-path "/data/agent.db")
-                  :auto-archive t)
-   :name "time-travel-agent"))
-
-;; 使用 Agent
-(agent-run *agent* "你好")
-;; => 自动保存为 checkpoint-1
-
-(agent-run *agent* "今天天气怎么样")
-;; => 自动保存为 checkpoint-2
-
-;; 回退重试
-(let ((memory (agent-get-checkpointer *agent*)))
-  (memory-go-back memory :steps 1))
-;; => 回到 checkpoint-1
-
-;; 创建分支尝试不同回复
-(let ((memory (agent-get-checkpointer *agent*)))
-  (memory-branch memory "alternative")
-  (memory-switch-branch memory "alternative"))
-
-(agent-run *agent* "用幽默的方式回答")
-;; => 在新分支上继续
-```
-
-## 与 LangGraph 对比
-
-| 特性 | CL-Agent | LangGraph |
-|------|----------|-----------|
-| Saver/Store | 统一（Checkpointer 使用 Store） | 分离 |
-| 后端选择 | 传入实例 | 配置参数 |
-| 全局变量 | 无（显式传值） | 有 |
-| 双存储 | context + persistent | 需自行实现 |
-
-## 文件结构
-
-```
-memory/
-├── README.md                 # 本文档
-├── cl-agent-memory.asd       # 系统定义
-├── package-memory.lisp       # 包导出
-├── utils.lisp                # 工具函数
-├── store/
-│   ├── protocol.lisp         # Store 协议定义
-│   ├── memory-backend.lisp   # 内存后端实现
-│   └── sqlite-backend.lisp   # SQLite 后端实现
-├── checkpoint/
-│   ├── protocol.lisp         # Checkpoint 协议
-│   └── manager.lisp          # Checkpoint 管理器
-├── api/
-│   ├── message.lisp          # 消息数据结构
-│   ├── agent-memory.lisp     # Agent Memory API
-│   └── summary-buffer.lisp   # 对话总结缓冲区
-└── [legacy components]       # 兼容性组件
-```
-
-## 版本历史
-
-- **3.0.0** - 重命名 unified-memory → agent-memory
-- **2.2.0** - 添加 SQLite Store 后端
-- **2.1.0** - 添加对话总结缓冲区 (ConversationSummaryBuffer)
-- **2.0.0** - 双 Store 架构，废弃全局变量
-- **1.0.0** - 初始版本，统一 Store + Checkpointer
