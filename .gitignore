@@ -1,3 +1,4 @@
+# Common Lisp FASL files
 *.FASL
 *.fasl
 *.lisp-temp
@@ -15,3 +16,29 @@
 *.sx32fsl
 *.wx64fsl
 *.wx32fsl
+
+# ASDF cache
+.cache/
+
+# Emacs
+*~
+\#*\#
+.\#*
+
+# Vim
+*.swp
+*.swo
+
+# SLIME/SLY
+*.slime-repl-history
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Local config
+.env
+*.local.lisp
