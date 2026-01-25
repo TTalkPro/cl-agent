@@ -1,37 +1,37 @@
-# Memory 模块
+# Memory Module
 
-中文 | [English](README_EN.md)
+[中文](README.md) | English
 
-统一记忆管理模块，提供短期检查点和长期持久化存储。
+Unified memory management module providing short-term checkpoints and long-term persistent storage.
 
-## 目录结构
+## Directory Structure
 
 ```
 memory/
-├── package.lisp              # 包定义
-├── protocol.lisp             # 统一协议
-├── utils.lisp                # 工具函数
-├── store/                    # 长期存储
-│   ├── protocol.lisp         # Store 协议
-│   ├── memory-backend.lisp   # 内存后端
-│   ├── sqlite-backend.lisp   # SQLite 后端
-│   └── vector-memory.lisp    # 向量存储
-├── checkpoint/               # 检查点
-│   ├── protocol.lisp         # Checkpoint 协议
-│   └── manager.lisp          # Checkpoint 管理器
-├── long-term/                # 长期记忆类型
-│   ├── semantic.lisp         # 语义记忆
-│   ├── episodic.lisp         # 情节记忆
-│   └── procedural.lisp       # 程序性记忆
-├── retrieval/                # 检索策略
+├── package.lisp              # Package definition
+├── protocol.lisp             # Unified protocol
+├── utils.lisp                # Utility functions
+├── store/                    # Long-term storage
+│   ├── protocol.lisp         # Store protocol
+│   ├── memory-backend.lisp   # Memory backend
+│   ├── sqlite-backend.lisp   # SQLite backend
+│   └── vector-memory.lisp    # Vector storage
+├── checkpoint/               # Checkpoints
+│   ├── protocol.lisp         # Checkpoint protocol
+│   └── manager.lisp          # Checkpoint manager
+├── long-term/                # Long-term memory types
+│   ├── semantic.lisp         # Semantic memory
+│   ├── episodic.lisp         # Episodic memory
+│   └── procedural.lisp       # Procedural memory
+├── retrieval/                # Retrieval strategies
 │   └── strategies.lisp
-└── api/                      # 统一 API
-    ├── message.lisp          # 消息结构
-    ├── agent-memory.lisp     # Agent Memory 类
-    └── summary-buffer.lisp   # 摘要缓冲
+└── api/                      # Unified API
+    ├── message.lisp          # Message structure
+    ├── agent-memory.lisp     # Agent Memory class
+    └── summary-buffer.lisp   # Summary buffer
 ```
 
-## 架构概览
+## Architecture Overview
 
 ```
 ┌─────────────────────────────────────────┐
@@ -43,7 +43,7 @@ memory/
     ▼             ▼   ▼             ▼
 ┌─────────┐  ┌─────────┐  ┌─────────────┐
 │Checkpoint│  │ Message │  │   Store     │
-│ (短期)   │  │  结构   │  │  (长期)     │
+│ (short)  │  │Structure│  │  (long)     │
 └─────────┘  └─────────┘  └─────────────┘
                               │
               ┌───────────────┼───────────────┐
@@ -55,242 +55,242 @@ memory/
          └────────┘     └────────┘     └────────┘
 ```
 
-## 消息结构
+## Message Structure
 
 ```lisp
-;; 创建消息
+;; Create message
 (make-memory-message :role :user :content "Hello")
 
-;; 快捷方式
+;; Shortcuts
 (make-user-message "Hello")
 (make-assistant-message "Hi there!")
 (make-system-message "You are helpful.")
 (make-tool-message "Result" :tool-call-id "call_123")
 
-;; 访问属性
+;; Access properties
 (memory-message-role msg)       ; => :USER
 (memory-message-content msg)    ; => "Hello"
 (memory-message-timestamp msg)  ; => "2024-01-15T10:30:00Z"
 (memory-message-metadata msg)   ; => (:key "value")
 ```
 
-## Store 后端
+## Store Backends
 
-### 内存后端
+### Memory Backend
 
-快速、会话级存储：
+Fast, session-level storage:
 
 ```lisp
 (defvar *store* (make-memory-store-backend))
 
-;; 基本操作
+;; Basic operations
 (store-put *store* '("namespace") "key" "value")
 (store-get *store* '("namespace") "key")  ; => "value"
 (store-delete *store* '("namespace") "key")
 
-;; 列表和计数
+;; List and count
 (store-list-keys *store* '("namespace"))  ; => ("key1" "key2")
 (store-count *store* '("namespace"))      ; => 2
 
-;; 清空
+;; Clear
 (store-clear *store* '("namespace"))
 ```
 
-### SQLite 后端
+### SQLite Backend
 
-持久化文件存储：
+Persistent file storage:
 
 ```lisp
 (defvar *store*
   (make-sqlite-store-backend
     :db-path "~/.cl-agent/memory.db"))
 
-;; API 与内存后端相同
+;; API same as memory backend
 (store-put *store* '("facts") "lisp-creator" "John McCarthy")
 (store-get *store* '("facts") "lisp-creator")
 
-;; 数据在应用重启后保留
+;; Data persists across application restarts
 ```
 
-### 向量存储后端
+### Vector Store Backend
 
-支持语义搜索：
+Supports semantic search:
 
 ```lisp
 (defvar *vector-store*
   (make-vector-memory-backend
     :embedding-fn #'my-embedding-function))
 
-;; 存储带嵌入的数据
+;; Store data with embeddings
 (store-put *vector-store* '("docs") "doc1"
   '(:content "Common Lisp is..."
     :embedding #(0.1 0.2 0.3 ...)))
 
-;; 语义搜索
+;; Semantic search
 (vector-search *vector-store* '("docs")
   :query-embedding #(0.15 0.25 0.35 ...)
   :top-k 5)
 ```
 
-## Checkpoint 系统
+## Checkpoint System
 
-保存和恢复 Agent 状态：
+Save and restore Agent state:
 
 ```lisp
 (defvar *checkpointer* (make-checkpoint-manager *store*))
 
-;; 保存检查点
+;; Save checkpoint
 (let ((cp (save-checkpoint *checkpointer* "thread-1"
-            '(:summary "用户讨论了旅行计划"
-              :facts ((:destination "日本")
-                      (:date "四月"))
-              :preferences (:style "文化")))))
-  (format t "检查点 ID: ~A~%" (checkpoint-id cp)))
+            '(:summary "User discussed travel plans"
+              :facts ((:destination "Japan")
+                      (:date "April"))
+              :preferences (:style "culture")))))
+  (format t "Checkpoint ID: ~A~%" (checkpoint-id cp)))
 
-;; 加载最新检查点
+;; Load latest checkpoint
 (let ((cp (load-checkpoint *checkpointer* "thread-1")))
   (when cp
-    (format t "状态: ~A~%" (checkpoint-state cp))))
+    (format t "State: ~A~%" (checkpoint-state cp))))
 
-;; 列出所有检查点
+;; List all checkpoints
 (list-checkpoints *checkpointer* :thread-id "thread-1")
 
-;; 删除检查点
+;; Delete checkpoint
 (delete-checkpoint *checkpointer* checkpoint-id)
 
-;; 创建分支
+;; Create branch
 (create-branch *checkpointer* "thread-1" "experiment-branch")
 ```
 
 ## Agent Memory
 
-统一的记忆接口：
+Unified memory interface:
 
 ```lisp
-;; 创建 Agent Memory
+;; Create Agent Memory
 (defvar *memory*
   (make-agent-memory
-    :context-store (make-memory-store-backend)      ; 快速上下文
-    :persistent-store (make-sqlite-store-backend    ; 持久化
+    :context-store (make-memory-store-backend)      ; Fast context
+    :persistent-store (make-sqlite-store-backend    ; Persistent
                         :db-path "memory.db")
     :default-thread-id "default"
-    :auto-archive t))                               ; 自动归档
+    :auto-archive t))                               ; Auto archive
 
-;; 消息操作
+;; Message operations
 (am-add-message *memory* "thread-1" :user "Hello")
 (am-add-message *memory* "thread-1" :assistant "Hi!")
 (am-get-messages *memory* "thread-1")
 (am-get-last-n-messages *memory* "thread-1" 5)
 (am-clear-messages *memory* "thread-1")
 
-;; 检查点
+;; Checkpoints
 (am-save-checkpoint *memory* "thread-1" '(:state ...))
 (am-load-checkpoint *memory* checkpoint-id)
 
-;; 事实存储
-(am-store-fact *memory* "user-name" "小明")
+;; Fact storage
+(am-store-fact *memory* "user-name" "John")
 (am-recall-facts *memory* "user-*")
 
-;; 归档（移动到持久化存储）
+;; Archive (move to persistent storage)
 (am-archive-messages *memory* "thread-1")
 ```
 
-## 长期记忆类型
+## Long-term Memory Types
 
-### 语义记忆（Semantic）
+### Semantic Memory
 
-存储事实和知识：
+Store facts and knowledge:
 
 ```lisp
 (defvar *semantic* (make-semantic-memory *store*))
 
-;; 存储事实
+;; Store facts
 (semantic-store *semantic* "lisp"
   '(:type :programming-language
     :created 1958
     :creator "John McCarthy"))
 
-;; 检索
+;; Recall
 (semantic-recall *semantic* "lisp")
 
-;; 关联搜索
+;; Associative search
 (semantic-search *semantic* :type :programming-language)
 ```
 
-### 情节记忆（Episodic）
+### Episodic Memory
 
-存储事件和经历：
+Store events and experiences:
 
 ```lisp
 (defvar *episodic* (make-episodic-memory *store*))
 
-;; 记录事件
+;; Record event
 (episodic-record *episodic*
-  '(:event "用户询问天气"
-    :context (:location "北京" :mood "curious")
-    :outcome "提供了天气信息"))
+  '(:event "User asked about weather"
+    :context (:location "Beijing" :mood "curious")
+    :outcome "Provided weather information"))
 
-;; 按时间检索
+;; Retrieve by time
 (episodic-recall *episodic*
   :from "2024-01-01"
   :to "2024-01-31")
 
-;; 按上下文检索
-(episodic-search *episodic* :location "北京")
+;; Retrieve by context
+(episodic-search *episodic* :location "Beijing")
 ```
 
-### 程序性记忆（Procedural）
+### Procedural Memory
 
-存储技能和过程：
+Store skills and procedures:
 
 ```lisp
 (defvar *procedural* (make-procedural-memory *store*))
 
-;; 存储过程
+;; Store procedure
 (procedural-store *procedural* "book-flight"
-  '(:steps ("1. 确认目的地"
-            "2. 选择日期"
-            "3. 搜索航班"
-            "4. 完成预订")
+  '(:steps ("1. Confirm destination"
+            "2. Select dates"
+            "3. Search flights"
+            "4. Complete booking")
     :preconditions (:has-destination t :has-dates t)
     :tools ("flight-search" "booking-api")))
 
-;; 检索过程
+;; Retrieve procedure
 (procedural-recall *procedural* "book-flight")
 
-;; 按工具检索
+;; Retrieve by tool
 (procedural-search *procedural* :uses-tool "flight-search")
 ```
 
-## 检索策略
+## Retrieval Strategies
 
 ```lisp
-;; 语义检索（向量相似度）
+;; Semantic retrieval (vector similarity)
 (make-retrieval-strategy :semantic
   :embedding-fn #'embed
   :top-k 5)
 
-;; 时间检索（最近优先）
+;; Recency retrieval (most recent first)
 (make-retrieval-strategy :recency
   :decay-factor 0.9)
 
-;; 频率检索（访问频率）
+;; Frequency retrieval (access frequency)
 (make-retrieval-strategy :frequency)
 
-;; 重要性检索（优先级排序）
+;; Importance retrieval (priority ranking)
 (make-retrieval-strategy :importance
   :importance-fn #'calculate-importance)
 
-;; 混合检索
+;; Hybrid retrieval
 (make-retrieval-strategy :hybrid
   :strategies '((:semantic :weight 0.5)
                 (:recency :weight 0.3)
                 (:importance :weight 0.2)))
 ```
 
-## 摘要缓冲
+## Summary Buffer
 
-自动摘要长对话：
+Auto-summarize long conversations:
 
 ```lisp
 (defvar *buffer*
@@ -298,20 +298,20 @@ memory/
     :max-messages 20
     :summarize-fn #'summarize-with-llm))
 
-;; 添加消息（自动摘要）
+;; Add message (auto-summarizes)
 (buffer-add *buffer* message)
 
-;; 获取上下文（包含摘要）
+;; Get context (includes summary)
 (buffer-get-context *buffer*)
-;; => ((:role :system :content "之前的对话摘要: ...")
-;;     (:role :user :content "最近的消息1")
-;;     (:role :assistant :content "最近的消息2")
+;; => ((:role :system :content "Previous conversation summary: ...")
+;;     (:role :user :content "Recent message 1")
+;;     (:role :assistant :content "Recent message 2")
 ;;     ...)
 ```
 
-## 使用示例
+## Usage Examples
 
-### 带持久化的聊天机器人
+### Chatbot with Persistence
 
 ```lisp
 (defvar *memory*
@@ -321,44 +321,44 @@ memory/
 (defvar *agent*
   (make-kernel-agent *kernel*
     :memory *memory*
-    :system-prompt "记住用户的偏好和历史对话。"))
+    :system-prompt "Remember user preferences and conversation history."))
 
-;; 第一次会话
-(agent-chat *agent* "我叫小明，我喜欢编程")
-(am-save-checkpoint *memory* "user-xiaoming"
-  '(:name "小明" :interests ("编程")))
+;; First session
+(agent-chat *agent* "I'm John, I like programming")
+(am-save-checkpoint *memory* "user-john"
+  '(:name "John" :interests ("programming")))
 
-;; 重启后...
-(let ((cp (am-load-checkpoint *memory* "user-xiaoming")))
-  (format t "欢迎回来，~A！~%" (getf (checkpoint-state cp) :name)))
+;; After restart...
+(let ((cp (am-load-checkpoint *memory* "user-john")))
+  (format t "Welcome back, ~A!~%" (getf (checkpoint-state cp) :name)))
 ```
 
-### 多用户支持
+### Multi-user Support
 
 ```lisp
-;; 使用不同的 thread-id 区分用户
+;; Use different thread-ids to separate users
 (am-add-message *memory* "user-alice" :user "Hello")
 (am-add-message *memory* "user-bob" :user "Hi")
 
-;; 各自独立的对话历史
+;; Each has independent conversation history
 (am-get-messages *memory* "user-alice")
 (am-get-messages *memory* "user-bob")
 ```
 
-### 知识库集成
+### Knowledge Base Integration
 
 ```lisp
 (defvar *knowledge* (make-semantic-memory *store*))
 
-;; 导入知识
+;; Import knowledge
 (semantic-store *knowledge* "product-a"
-  '(:name "产品A"
+  '(:name "Product A"
     :price 99.99
-    :features ("功能1" "功能2")))
+    :features ("Feature 1" "Feature 2")))
 
-;; Agent 可以检索知识回答问题
+;; Agent can retrieve knowledge to answer questions
 (let ((product (semantic-recall *knowledge* "product-a")))
-  (format nil "~A 的价格是 ~A 元"
+  (format nil "~A costs ~A"
           (getf product :name)
           (getf product :price)))
 ```

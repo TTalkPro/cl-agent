@@ -1,24 +1,24 @@
-# CL-Agent Kernel Plugin 设计方案
+# CL-Agent Kernel Plugin Design
 
-中文 | [English](KERNEL-DESIGN_EN.md)
+[中文](KERNEL-DESIGN.md) | English
 
-## 设计原则
+## Design Principles
 
-1. **无全局变量** —— 工具实例由 plugin 对象持有，不依赖 `defparameter`
-2. **CLOS 双分派** —— `tool-invoke (plugin-class × eql-tool-name)` 编译期确定调用路径
-3. **协议为骨架** —— 框架只定义 `defgeneric`，用户实现 `defmethod`
-4. **宏为语法糖** —— `defplugin` / `deftool` 简化声明，但非必须
+1. **No Global Variables** — Tool instances are held by plugin objects, no dependency on `defparameter`
+2. **CLOS Double Dispatch** — `tool-invoke (plugin-class × eql-tool-name)` determines call path at compile time
+3. **Protocol as Skeleton** — Framework only defines `defgeneric`, users implement `defmethod`
+4. **Macros as Syntactic Sugar** — `defplugin` / `deftool` simplify declarations but are not required
 
 ---
 
-## 架构总览
+## Architecture Overview
 
 ```
 ┌──────────────────────────────────────────────────┐
-│  用户代码                                         │
+│  User Code                                        │
 │  ┌──────────────┐   ┌──────────────────────────┐ │
 │  │ defplugin    │   │ deftool                  │ │
-│  │ (语法糖)     │   │ (语法糖)                  │ │
+│  │ (sugar)      │   │ (sugar)                  │ │
 │  └──────┬───────┘   └───────────┬──────────────┘ │
 │         │                       │                 │
 │         ▼                       ▼                 │
@@ -29,107 +29,107 @@
 │  │  plugin-desc │   │  tool-schema             │ │
 │  └──────┬───────┘   └───────────┬──────────────┘ │
 ├─────────┼───────────────────────┼─────────────────┤
-│  框架协议层                                        │
+│  Framework Protocol Layer                         │
 │         ▼                       ▼                 │
 │  ┌────────────────────────────────────────────┐   │
-│  │ CLOS 双分派                                 │   │
-│  │ (plugin-class × eql-tool-name) → 方法体    │   │
+│  │ CLOS Double Dispatch                       │   │
+│  │ (plugin-class × eql-tool-name) → method    │   │
 │  └────────────────────────────────────────────┘   │
 └──────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 第一层：CLOS 协议（核心，无宏）
+## Layer 1: CLOS Protocol (Core, No Macros)
 
-### 基类
+### Base Class
 
 ```lisp
 (defclass kernel-plugin ()
   ((tools-cache :initform nil :accessor plugin-tools-cache))
-  (:documentation "所有插件的基类"))
+  (:documentation "Base class for all plugins"))
 ```
 
-### 插件级协议
+### Plugin-Level Protocol
 
 ```lisp
 (defgeneric plugin-name (plugin)
-  (:documentation "返回插件名称 keyword"))
+  (:documentation "Returns plugin name keyword"))
 
 (defgeneric plugin-description (plugin)
-  (:documentation "返回插件描述字符串"))
+  (:documentation "Returns plugin description string"))
 
 (defgeneric plugin-tools (plugin)
-  (:documentation "返回此插件支持的工具名称 keyword 列表"))
+  (:documentation "Returns list of tool name keywords supported by this plugin"))
 ```
 
-### 工具级协议（双分派）
+### Tool-Level Protocol (Double Dispatch)
 
 ```lisp
 (defgeneric tool-invoke (plugin tool-name args)
-  (:documentation "执行工具。
-  PLUGIN    - 插件实例（提供 class 分派）
-  TOOL-NAME - 工具名称 keyword（提供 EQL 分派）
-  ARGS      - 参数 plist"))
+  (:documentation "Execute tool.
+  PLUGIN    - Plugin instance (provides class dispatch)
+  TOOL-NAME - Tool name keyword (provides EQL dispatch)
+  ARGS      - Arguments plist"))
 
 (defgeneric tool-description (plugin tool-name)
-  (:documentation "返回工具描述字符串"))
+  (:documentation "Returns tool description string"))
 
 (defgeneric tool-schema (plugin tool-name)
-  (:documentation "返回工具参数的 JSON Schema（hash-table）"))
+  (:documentation "Returns tool parameter JSON Schema (hash-table)"))
 ```
 
-### 纯协议使用方式（不用任何宏）
+### Pure Protocol Usage (Without Any Macros)
 
 ```lisp
 (defclass weather-plugin (kernel-plugin)
   ((api-key :initarg :api-key :reader plugin-api-key)))
 
 (defmethod plugin-name ((p weather-plugin)) :weather-plugin)
-(defmethod plugin-description ((p weather-plugin)) "天气工具集")
+(defmethod plugin-description ((p weather-plugin)) "Weather tools collection")
 (defmethod plugin-tools ((p weather-plugin)) '(:get-weather :get-forecast))
 
 ;; --- :get-weather ---
 (defmethod tool-description ((p weather-plugin) (name (eql :get-weather)))
-  "获取指定城市的当前天气信息")
+  "Get current weather for specified city")
 
 (defmethod tool-schema ((p weather-plugin) (name (eql :get-weather)))
   (params->json-schema
-   '((city :string "城市名称" :required t)
-     (unit :string "温度单位" :default "celsius"))))
+   '((city :string "City name" :required t)
+     (unit :string "Temperature unit" :default "celsius"))))
 
 (defmethod tool-invoke ((p weather-plugin) (name (eql :get-weather)) args)
   (let ((city (getf args :city))
         (unit (getf args :unit "celsius")))
-    (format nil "~A：晴，22°~A" city unit)))
+    (format nil "~A: sunny, 22°~A" city unit)))
 
 ;; --- :get-forecast ---
 (defmethod tool-description ((p weather-plugin) (name (eql :get-forecast)))
-  "获取天气预报")
+  "Get weather forecast")
 
 (defmethod tool-schema ((p weather-plugin) (name (eql :get-forecast)))
   (params->json-schema
-   '((city :string "城市名称" :required t)
-     (days :int "预报天数" :default 3))))
+   '((city :string "City name" :required t)
+     (days :int "Forecast days" :default 3))))
 
 (defmethod tool-invoke ((p weather-plugin) (name (eql :get-forecast)) args)
-  (format nil "~A未来~A天：晴转多云" (getf args :city) (getf args :days 3)))
+  (format nil "~A next ~A days: sunny to cloudy" (getf args :city) (getf args :days 3)))
 ```
 
 ---
 
-## 第二层：宏语法糖
+## Layer 2: Macro Syntactic Sugar
 
 ### defplugin
 
 ```lisp
 (defplugin weather-plugin ()
-  "天气工具集"
+  "Weather tools collection"
   ((api-key :initarg :api-key :reader plugin-api-key)
    (base-url :initarg :base-url :initform "https://api.weather.com")))
 ```
 
-展开为：
+Expands to:
 
 ```lisp
 (progn
@@ -141,81 +141,81 @@
     :weather-plugin)
 
   (defmethod plugin-description ((p weather-plugin))
-    "天气工具集"))
+    "Weather tools collection"))
 ```
 
 ### deftool
 
 ```lisp
 (deftool (weather-plugin :get-weather)
-  "获取指定城市的天气信息"
-  ((city :string "城市名称" :required t)
-   (unit :string "温度单位" :default "celsius"))
-  (format nil "~A：晴，22°~A（via ~A）"
+  "Get weather information for specified city"
+  ((city :string "City name" :required t)
+   (unit :string "Temperature unit" :default "celsius"))
+  (format nil "~A: sunny, 22°~A (via ~A)"
           city unit (plugin-api-key plugin)))
 ```
 
-展开为：
+Expands to:
 
 ```lisp
 (progn
-  ;; 注册工具名到类元数据
+  ;; Register tool name to class metadata
   (register-tool-name 'weather-plugin :get-weather)
 
-  ;; 描述
+  ;; Description
   (defmethod tool-description ((plugin weather-plugin)
                                (name (eql :get-weather)))
-    "获取指定城市的天气信息")
+    "Get weather information for specified city")
 
   ;; Schema
   (defmethod tool-schema ((plugin weather-plugin)
                           (name (eql :get-weather)))
     (params->json-schema
-     '((city :string "城市名称" :required t)
-       (unit :string "温度单位" :default "celsius"))))
+     '((city :string "City name" :required t)
+       (unit :string "Temperature unit" :default "celsius"))))
 
-  ;; 执行（body 中 plugin 变量可用）
+  ;; Execution (plugin variable available in body)
   (defmethod tool-invoke ((plugin weather-plugin)
                           (name (eql :get-weather))
                           args)
     (let ((city (getf args :city))
           (unit (getf args :unit "celsius")))
-      (format nil "~A：晴，22°~A（via ~A）"
+      (format nil "~A: sunny, 22°~A (via ~A)"
               city unit (plugin-api-key plugin)))))
 ```
 
-### 工具名注册（plugin-tools 自动实现）
+### Tool Name Registration (plugin-tools Auto Implementation)
 
 ```lisp
-;; 编译期元数据（仅存 class-name → tool-names 映射）
+;; Compile-time metadata (only stores class-name → tool-names mapping)
 (defvar *plugin-tool-registry* (make-hash-table :test #'eq))
 
 (defun register-tool-name (class-name tool-name)
   (pushnew tool-name (gethash class-name *plugin-tool-registry*)))
 
-;; plugin-tools 默认实现：从 registry 读取
+;; plugin-tools default implementation: read from registry
 (defmethod plugin-tools ((p kernel-plugin))
   (gethash (class-name (class-of p)) *plugin-tool-registry*))
 ```
 
-注意：`*plugin-tool-registry*` 是**编译期元数据**（类似 CLOS 自身的 class registry），不是工具实例。用户手动 `defmethod plugin-tools` 可覆盖此行为。
+Note: `*plugin-tool-registry*` is **compile-time metadata** (similar to CLOS's own class registry), not tool instances. Users can manually `defmethod plugin-tools` to override this behavior.
 
 ---
 
-## 第三层：Kernel 集成
+## Layer 3: Kernel Integration
 
-### tool_call 阶段的分派路径
+### tool_call Stage Dispatch Path
 
 ```
-LLM 返回: {name: "get_weather", arguments: {"city": "北京"}}
+LLM returns: {name: "get_weather", arguments: {"city": "Beijing"}}
         │
         ▼
-kernel-execute-tool(kernel, :get-weather, (:city "北京"))
+kernel-execute-tool(kernel, :get-weather, (:city "Beijing"))
         │
-        ├── find-plugin-for-tool  →  遍历 plugins，检查 plugin-tools
+        ├── find-plugin-for-tool  →  Iterate plugins, check plugin-tools
         │
         ▼
-(tool-invoke <weather-plugin> :get-weather (:city "北京"))
+(tool-invoke <weather-plugin> :get-weather (:city "Beijing"))
         │
         ▼
 CLOS discriminating function:
@@ -223,14 +223,14 @@ CLOS discriminating function:
    specializer-2: (eq name :get-weather)       → eq test
         │
         ▼
-直接跳转方法体（无 hash-table 查找）
+Direct jump to method body (no hash-table lookup)
 ```
 
-### Kernel 实现
+### Kernel Implementation
 
 ```lisp
 (defun kernel-get-tools (kernel)
-  "收集所有插件的工具 schema 列表（传给 LLM 的 tools 参数）"
+  "Collect all plugin tool schemas (passed to LLM tools parameter)"
   (loop for plugin in (kernel-plugins kernel)
         nconc (loop for tool-name in (plugin-tools plugin)
                     collect
@@ -239,14 +239,14 @@ CLOS discriminating function:
                           :input-schema (tool-schema plugin tool-name)))))
 
 (defun kernel-execute-tool (kernel fn-name args)
-  "查找并执行工具"
+  "Find and execute tool"
   (let ((plugin (find-plugin-for-tool kernel fn-name)))
     (unless plugin
       (error "Tool ~A not found in any plugin" fn-name))
     (tool-invoke plugin fn-name args)))
 
 (defun find-plugin-for-tool (kernel fn-name)
-  "查找包含指定工具的插件"
+  "Find plugin containing specified tool"
   (loop for plugin in (kernel-plugins kernel)
         when (member fn-name (plugin-tools plugin))
           return plugin))
@@ -254,57 +254,57 @@ CLOS discriminating function:
 
 ---
 
-## 使用示例
+## Usage Examples
 
-### 使用宏（推荐，简洁）
+### Using Macros (Recommended, Concise)
 
 ```lisp
 (defplugin weather-plugin ()
-  "天气工具集"
+  "Weather tools collection"
   ((api-key :initarg :api-key :reader plugin-api-key)))
 
 (deftool (weather-plugin :get-weather)
-  "获取指定城市的天气信息"
-  ((city :string "城市名称" :required t)
-   (unit :string "温度单位" :default "celsius"))
-  (format nil "~A：晴，22°~A（via ~A）"
+  "Get weather information for specified city"
+  ((city :string "City name" :required t)
+   (unit :string "Temperature unit" :default "celsius"))
+  (format nil "~A: sunny, 22°~A (via ~A)"
           city unit (plugin-api-key plugin)))
 
 (deftool (weather-plugin :get-forecast)
-  "获取天气预报"
-  ((city :string "城市名称" :required t)
-   (days :int "预报天数" :default 3))
-  (format nil "~A未来~A天：晴转多云" city days))
+  "Get weather forecast"
+  ((city :string "City name" :required t)
+   (days :int "Forecast days" :default 3))
+  (format nil "~A next ~A days: sunny to cloudy" city days))
 
-;; 实例化（无全局变量）
+;; Instantiate (no global variables)
 (let* ((wp (make-instance 'weather-plugin :api-key "my-key"))
        (kernel (make-kernel
                  :chat-service provider
                  :plugins (list wp))))
   (chat-completion kernel history
-    :settings '(:system-prompt "你是有用的助手")))
+    :settings '(:system-prompt "You are a helpful assistant")))
 ```
 
-### 不使用宏（纯 CLOS）
+### Without Macros (Pure CLOS)
 
 ```lisp
 (defclass weather-plugin (kernel-plugin)
   ((api-key :initarg :api-key :reader plugin-api-key)))
 
 (defmethod plugin-name ((p weather-plugin)) :weather-plugin)
-(defmethod plugin-description ((p weather-plugin)) "天气工具集")
+(defmethod plugin-description ((p weather-plugin)) "Weather tools collection")
 (defmethod plugin-tools ((p weather-plugin)) '(:get-weather))
 
 (defmethod tool-description ((p weather-plugin) (name (eql :get-weather)))
-  "获取天气")
+  "Get weather")
 
 (defmethod tool-schema ((p weather-plugin) (name (eql :get-weather)))
-  (params->json-schema '((city :string "城市名" :required t))))
+  (params->json-schema '((city :string "City name" :required t))))
 
 (defmethod tool-invoke ((p weather-plugin) (name (eql :get-weather)) args)
-  (format nil "~A：晴" (getf args :city)))
+  (format nil "~A: sunny" (getf args :city)))
 
-;; 使用方式完全相同
+;; Usage is exactly the same
 (let* ((wp (make-instance 'weather-plugin :api-key "my-key"))
        (kernel (make-kernel :chat-service provider :plugins (list wp))))
   (chat-completion kernel history :settings ...))
@@ -312,14 +312,14 @@ CLOS discriminating function:
 
 ---
 
-## 关键优势
+## Key Advantages
 
-| 特性 | 说明 |
-|------|------|
-| 无全局变量 | 工具生命周期由 plugin 实例管理 |
-| 编译期分派 | CLOS 方法缓存，无运行时 hash-table |
-| 插件可持有状态 | api-key、config 等通过 slots 访问 |
-| 多实例共存 | 同一 plugin 类可创建多个不同配置的实例 |
-| 可测试 | 传入 mock plugin 实例即可，无需 mock 全局状态 |
-| 可扩展 | 任何包可 defmethod 添加新工具到已有 plugin |
-| 两种风格共存 | 宏和纯 CLOS 可混用，宏只是语法糖 |
+| Feature | Description |
+|---------|-------------|
+| No Global Variables | Tool lifecycle managed by plugin instances |
+| Compile-time Dispatch | CLOS method caching, no runtime hash-table |
+| Plugin Can Hold State | api-key, config etc. accessed via slots |
+| Multiple Instances Coexist | Same plugin class can create multiple differently configured instances |
+| Testable | Pass in mock plugin instances, no need to mock global state |
+| Extensible | Any package can defmethod to add new tools to existing plugin |
+| Two Styles Coexist | Macros and pure CLOS can be mixed, macros are just sugar |

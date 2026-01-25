@@ -1,78 +1,78 @@
-# RAG 模块
+# RAG Module
 
-中文 | [English](README_EN.md)
+[中文](README.md) | English
 
-检索增强生成（Retrieval-Augmented Generation）模块。
+Retrieval-Augmented Generation module.
 
-## 目录结构
+## Directory Structure
 
 ```
 rag/
-├── package-rag.lisp          # 包定义
-├── utils.lisp                # 工具函数
-├── splitter.lisp             # 文本分割器
-├── embeddings.lisp           # 嵌入模型
-├── vector-store.lisp         # 向量存储
-├── pipeline.lisp             # RAG 管道
-└── rag-plugin.lisp           # Kernel 插件集成
+├── package-rag.lisp          # Package definition
+├── utils.lisp                # Utility functions
+├── splitter.lisp             # Text splitters
+├── embeddings.lisp           # Embedding models
+├── vector-store.lisp         # Vector storage
+├── pipeline.lisp             # RAG pipeline
+└── rag-plugin.lisp           # Kernel plugin integration
 ```
 
-## RAG 流程
+## RAG Flow
 
 ```
-文档 → 分割 → 嵌入 → 向量存储
+Document → Split → Embed → Vector Store
                          ↑
-查询 → 嵌入 → 检索 ────────┘
+Query → Embed → Retrieve ─┘
                 ↓
-           相关上下文
+           Relevant Context
                 ↓
-         LLM 生成回答
+         LLM Generates Answer
 ```
 
-## 文本分割
+## Text Splitting
 
-### 基本分割器
+### Basic Splitter
 
 ```lisp
-;; 按字符数分割
+;; Split by character count
 (defvar *splitter*
   (make-text-splitter
-    :chunk-size 1000        ; 每块大小
-    :chunk-overlap 200))    ; 重叠大小
+    :chunk-size 1000        ; Chunk size
+    :chunk-overlap 200))    ; Overlap size
 
-(split-text *splitter* "长文本内容...")
-;; => ("块1..." "块2..." "块3...")
+(split-text *splitter* "Long text content...")
+;; => ("chunk1..." "chunk2..." "chunk3...")
 ```
 
-### 分割策略
+### Splitting Strategies
 
 ```lisp
-;; 按段落分割
+;; Split by paragraph
 (make-text-splitter
   :strategy :paragraph
   :chunk-size 1000)
 
-;; 按句子分割
+;; Split by sentence
 (make-text-splitter
   :strategy :sentence
   :chunk-size 500)
 
-;; 按标记分割（Markdown）
+;; Split by markers (Markdown)
 (make-text-splitter
   :strategy :markdown
   :chunk-size 1000)
 
-;; 递归分割（先段落，再句子，最后字符）
+;; Recursive splitting (paragraph first, then sentence, then character)
 (make-text-splitter
   :strategy :recursive
   :separators '("\n\n" "\n" ". " " ")
   :chunk-size 1000)
 ```
 
-### 代码分割
+### Code Splitting
 
 ```lisp
-;; 按函数/类分割代码
+;; Split code by function/class
 (make-code-splitter
   :language :python
   :chunk-size 2000)
@@ -82,12 +82,12 @@ rag/
   :chunk-size 1500)
 ```
 
-## 嵌入模型
+## Embedding Models
 
-### 本地嵌入
+### Local Embeddings
 
 ```lisp
-;; 使用本地模型
+;; Use local model
 (defvar *embeddings*
   (make-local-embeddings
     :model "all-MiniLM-L6-v2"
@@ -97,17 +97,17 @@ rag/
 ;; => #(0.123 0.456 ...)
 ```
 
-### API 嵌入
+### API Embeddings
 
 ```lisp
-;; OpenAI 嵌入
+;; OpenAI embeddings
 (defvar *openai-embeddings*
   (make-embedding-client
     :provider :openai
     :model "text-embedding-3-small"
     :api-key (uiop:getenv "OPENAI_API_KEY")))
 
-;; 智谱嵌入
+;; ZhipuAI embeddings
 (defvar *zhipu-embeddings*
   (make-embedding-client
     :provider :zhipu
@@ -115,86 +115,86 @@ rag/
     :api-key (uiop:getenv "ZHIPU_API_KEY")))
 ```
 
-### 批量嵌入
+### Batch Embeddings
 
 ```lisp
-;; 单次调用嵌入多个文本
+;; Embed multiple texts in single call
 (embed-batch *embeddings*
-  '("文本1" "文本2" "文本3"))
+  '("Text 1" "Text 2" "Text 3"))
 ;; => (#(...) #(...) #(...))
 ```
 
-## 向量存储
+## Vector Store
 
-### 内存向量存储
+### In-Memory Vector Store
 
 ```lisp
 (defvar *store* (make-vector-store))
 
-;; 添加文档
+;; Add document
 (vector-store-add-document *store*
-  "Common Lisp 是一种编程语言"
-  (embed *embeddings* "Common Lisp 是一种编程语言")
+  "Common Lisp is a programming language"
+  (embed *embeddings* "Common Lisp is a programming language")
   :metadata '(:source "intro.txt" :page 1))
 
-;; 搜索
+;; Search
 (vector-store-search *store*
-  (embed *embeddings* "什么是 Lisp?")
+  (embed *embeddings* "What is Lisp?")
   :top-k 5)
 ;; => ((0.92 . document1) (0.85 . document2) ...)
 ```
 
-### 持久化向量存储
+### Persistent Vector Store
 
 ```lisp
-;; SQLite 向量存储
+;; SQLite vector store
 (defvar *persistent-store*
   (make-persistent-vector-store
     :path "vectors.db"))
 
-;; 保存
+;; Save
 (vector-store-save *persistent-store*)
 
-;; 加载
+;; Load
 (vector-store-load *persistent-store*)
 ```
 
-### 相似度计算
+### Similarity Metrics
 
 ```lisp
-;; 余弦相似度（默认）
+;; Cosine similarity (default)
 (make-vector-store :similarity :cosine)
 
-;; 欧氏距离
+;; Euclidean distance
 (make-vector-store :similarity :euclidean)
 
-;; 点积
+;; Dot product
 (make-vector-store :similarity :dot-product)
 ```
 
-## 文档结构
+## Document Structure
 
 ```lisp
-;; 文档对象
+;; Document object
 (defstruct document
-  id          ; 唯一标识
-  content     ; 文本内容
-  embedding   ; 嵌入向量
-  metadata)   ; 元数据
+  id          ; Unique identifier
+  content     ; Text content
+  embedding   ; Embedding vector
+  metadata)   ; Metadata
 
-;; 创建文档
+;; Create document
 (make-document
   :id "doc-001"
-  :content "文档内容..."
+  :content "Document content..."
   :embedding #(0.1 0.2 ...)
   :metadata '(:source "file.txt"
               :created "2024-01-15"
-              :author "作者"))
+              :author "Author"))
 ```
 
-## RAG 管道
+## RAG Pipeline
 
-### 创建管道
+### Creating Pipeline
 
 ```lisp
 (defvar *rag*
@@ -205,64 +205,64 @@ rag/
     :llm-client *llm*))
 ```
 
-### 索引文档
+### Indexing Documents
 
 ```lisp
-;; 索引单个文档
-(rag-index *rag* "文档内容..."
+;; Index single document
+(rag-index *rag* "Document content..."
   :metadata '(:source "doc.txt"))
 
-;; 索引文件
+;; Index file
 (rag-index-file *rag* "/path/to/document.txt")
 
-;; 批量索引
+;; Batch indexing
 (rag-index-directory *rag* "/path/to/docs/"
   :pattern "*.txt"
   :recursive t)
 ```
 
-### 检索
+### Retrieval
 
 ```lisp
-;; 检索相关文档
-(rag-retrieve *rag* "什么是 Common Lisp?"
+;; Retrieve relevant documents
+(rag-retrieve *rag* "What is Common Lisp?"
   :top-k 5
-  :threshold 0.7)  ; 最小相似度阈值
+  :threshold 0.7)  ; Minimum similarity threshold
 ;; => (document1 document2 ...)
 ```
 
-### 查询
+### Query
 
 ```lisp
-;; 检索 + 生成
-(rag-query *rag* "Common Lisp 有什么特点?"
+;; Retrieve + Generate
+(rag-query *rag* "What are the features of Common Lisp?"
   :top-k 5
-  :system-prompt "基于提供的上下文回答问题。")
-;; => "根据文档，Common Lisp 的特点包括..."
+  :system-prompt "Answer questions based on provided context.")
+;; => "According to the documents, Common Lisp features include..."
 ```
 
-### 对话
+### Conversation
 
 ```lisp
-;; 多轮 RAG 对话
+;; Multi-turn RAG conversation
 (rag-chat *rag*
-  '((:role :user :content "什么是 SBCL?")
-    (:role :assistant :content "SBCL 是...")
-    (:role :user :content "它有什么优点?")))
+  '((:role :user :content "What is SBCL?")
+    (:role :assistant :content "SBCL is...")
+    (:role :user :content "What are its advantages?")))
 ```
 
-## 与 Kernel 集成
+## Integration with Kernel
 
 ### RAG Filter
 
 ```lisp
-;; 创建 RAG 过滤器
+;; Create RAG filter
 (defvar *rag-filter*
   (make-rag-filter *rag*
     :top-k 5
-    :inject-as :system))  ; 注入为系统消息
+    :inject-as :system))  ; Inject as system message
 
-;; 添加到 Kernel
+;; Add to Kernel
 (defvar *kernel*
   (make-kernel
     :service *service*
@@ -272,27 +272,27 @@ rag/
 ### RAG Plugin
 
 ```lisp
-;; 作为工具暴露
+;; Expose as tool
 (defvar *rag-plugin*
   (make-rag-plugin *rag*
     :name "knowledge-base"
-    :description "搜索知识库"))
+    :description "Search knowledge base"))
 
 (defvar *kernel*
   (make-kernel
     :service *service*
     :plugins (list *rag-plugin*)))
 
-;; Agent 可以主动调用
-(agent-chat *agent* "在知识库中搜索关于 Lisp 宏的信息")
+;; Agent can actively call
+(agent-chat *agent* "Search knowledge base for Lisp macros information")
 ```
 
-## 高级配置
+## Advanced Configuration
 
-### 重排序
+### Reranking
 
 ```lisp
-;; 使用重排序模型提高精度
+;; Use reranking model to improve precision
 (make-rag-pipeline
   :embeddings-model *embeddings*
   :vector-store *store*
@@ -301,84 +301,84 @@ rag/
               :top-k 3))
 ```
 
-### 混合检索
+### Hybrid Retrieval
 
 ```lisp
-;; 结合关键词和语义搜索
+;; Combine keyword and semantic search
 (make-rag-pipeline
   :retriever (make-hybrid-retriever
                :keyword-weight 0.3
                :semantic-weight 0.7))
 ```
 
-### 上下文压缩
+### Context Compression
 
 ```lisp
-;; 压缩检索到的上下文
+;; Compress retrieved context
 (make-rag-pipeline
   :context-compressor (make-context-compressor
                         :max-tokens 2000
                         :strategy :extractive))
 ```
 
-## 使用示例
+## Usage Examples
 
-### 文档问答系统
+### Document Q&A System
 
 ```lisp
-;; 设置 RAG
+;; Setup RAG
 (defvar *qa-rag*
   (make-rag-pipeline
     :embeddings-model (make-embedding-client :provider :openai)
     :vector-store (make-vector-store)
     :splitter (make-text-splitter :chunk-size 500)))
 
-;; 索引文档
+;; Index documents
 (rag-index-directory *qa-rag* "/docs/" :pattern "*.md")
 
-;; 创建 QA Agent
+;; Create QA Agent
 (defvar *qa-agent*
   (make-kernel-agent
     (make-kernel
       :service *service*
       :filters (list (make-rag-filter *qa-rag*)))
-    :system-prompt "基于文档回答问题。如果文档中没有相关信息，请说明。"))
+    :system-prompt "Answer questions based on documents. If information is not in documents, say so."))
 
-;; 使用
-(agent-chat *qa-agent* "如何配置系统?")
+;; Use
+(agent-chat *qa-agent* "How to configure the system?")
 ```
 
-### 代码搜索
+### Code Search
 
 ```lisp
-;; 专门用于代码的 RAG
+;; RAG specialized for code
 (defvar *code-rag*
   (make-rag-pipeline
     :embeddings-model *embeddings*
     :vector-store (make-vector-store)
     :splitter (make-code-splitter :language :lisp)))
 
-;; 索引代码库
+;; Index codebase
 (rag-index-directory *code-rag* "/src/"
   :pattern "*.lisp"
   :recursive t)
 
-;; 搜索代码
-(rag-retrieve *code-rag* "HTTP 请求处理函数")
+;; Search code
+(rag-retrieve *code-rag* "HTTP request handling function")
 ```
 
-### 知识库 Agent
+### Knowledge Base Agent
 
 ```lisp
-;; 结合多个知识源
+;; Combine multiple knowledge sources
 (defvar *docs-store* (make-vector-store))
 (defvar *faq-store* (make-vector-store))
 
-;; 索引不同来源
+;; Index different sources
 (rag-index *docs-rag* docs :metadata '(:type :documentation))
 (rag-index *faq-rag* faqs :metadata '(:type :faq))
 
-;; 合并检索
+;; Combined retrieval
 (defun multi-source-retrieve (query)
   (append
     (rag-retrieve *docs-rag* query :top-k 3)

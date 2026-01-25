@@ -1,3 +1,5 @@
+中文 | [English](KERNEL-MACROS_EN.md)
+
 ## `defkernel` - 声明式定义工具函数
 
 核心作用：**一次声明，同时生成可调用函数和 LLM 工具 schema**。

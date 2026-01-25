@@ -1,36 +1,36 @@
-# Protocols 模块
+# Protocols Module
 
-中文 | [English](README_EN.md)
+[中文](README.md) | English
 
-协议支持模块，提供 MCP 和 A2A（Agent-to-Agent）通信协议实现。
+Protocol support module providing MCP and A2A (Agent-to-Agent) communication protocol implementations.
 
-## 目录结构
+## Directory Structure
 
 ```
 protocols/
-├── package-protocols.lisp    # 包定义
-├── mcp.lisp                  # MCP 协议
-├── mcp-client.lisp           # MCP 客户端
-├── mcp-server.lisp           # MCP 服务器
-├── a2a-types.lisp            # A2A 类型定义
-├── a2a-endpoint.lisp         # A2A 端点
-├── a2a-bus.lisp              # A2A 消息总线
-├── a2a-messaging.lisp        # A2A 消息传递
-├── a2a-handlers.lisp         # A2A 处理器
-├── a2a-listeners.lisp        # A2A 监听器
-├── a2a-service.lisp          # A2A 服务
-└── a2a.lisp                  # A2A 入口
+├── package-protocols.lisp    # Package definition
+├── mcp.lisp                  # MCP protocol
+├── mcp-client.lisp           # MCP client
+├── mcp-server.lisp           # MCP server
+├── a2a-types.lisp            # A2A type definitions
+├── a2a-endpoint.lisp         # A2A endpoint
+├── a2a-bus.lisp              # A2A message bus
+├── a2a-messaging.lisp        # A2A messaging
+├── a2a-handlers.lisp         # A2A handlers
+├── a2a-listeners.lisp        # A2A listeners
+├── a2a-service.lisp          # A2A service
+└── a2a.lisp                  # A2A entry point
 ```
 
-## MCP 协议
+## MCP Protocol
 
-详见 [MCP 模块文档](../mcp/README.md)。
+See [MCP Module Documentation](../mcp/README_EN.md).
 
-## A2A 协议
+## A2A Protocol
 
-A2A（Agent-to-Agent）是用于 Agent 间通信的协议。
+A2A (Agent-to-Agent) is a protocol for inter-Agent communication.
 
-### 核心概念
+### Core Concepts
 
 ```
 ┌─────────┐         ┌─────────┐
@@ -46,21 +46,21 @@ A2A（Agent-to-Agent）是用于 Agent 间通信的协议。
 └─────────┘ └─────────┘ └─────────┘
 ```
 
-### A2A 消息
+### A2A Messages
 
 ```lisp
-;; 消息结构
+;; Message structure
 (defstruct a2a-message
-  id              ; 消息 ID
-  from            ; 发送者 Agent ID
-  to              ; 接收者 Agent ID（可选，nil 表示广播）
-  type            ; 消息类型
-  content         ; 消息内容
-  correlation-id  ; 关联 ID（用于请求-响应）
-  timestamp       ; 时间戳
-  metadata)       ; 元数据
+  id              ; Message ID
+  from            ; Sender Agent ID
+  to              ; Receiver Agent ID (optional, nil for broadcast)
+  type            ; Message type
+  content         ; Message content
+  correlation-id  ; Correlation ID (for request-response)
+  timestamp       ; Timestamp
+  metadata)       ; Metadata
 
-;; 创建消息
+;; Create message
 (make-a2a-message
   :from "agent-a"
   :to "agent-b"
@@ -68,19 +68,19 @@ A2A（Agent-to-Agent）是用于 Agent 间通信的协议。
   :content '(:action "analyze" :data "..."))
 ```
 
-### 消息类型
+### Message Types
 
 ```lisp
-:request    ; 请求消息（期望响应）
-:response   ; 响应消息
-:notify     ; 通知消息（不期望响应）
-:broadcast  ; 广播消息
-:error      ; 错误消息
+:request    ; Request message (expects response)
+:response   ; Response message
+:notify     ; Notification message (no response expected)
+:broadcast  ; Broadcast message
+:error      ; Error message
 ```
 
-## A2A 端点
+## A2A Endpoint
 
-### 创建端点
+### Creating Endpoint
 
 ```lisp
 (defvar *endpoint*
@@ -90,10 +90,10 @@ A2A（Agent-to-Agent）是用于 Agent 间通信的协议。
     :capabilities '(:chat :tools :rag)))
 ```
 
-### 注册处理器
+### Registering Handlers
 
 ```lisp
-;; 处理特定类型的消息
+;; Handle specific message types
 (a2a-register-handler *endpoint* :request
   (lambda (message)
     (let ((action (getf (a2a-message-content message) :action)))
@@ -102,73 +102,73 @@ A2A（Agent-to-Agent）是用于 Agent 间通信的协议。
         (:summarize (handle-summarize message))
         (t (make-error-response "Unknown action"))))))
 
-;; 处理所有消息
+;; Handle all messages
 (a2a-register-handler *endpoint* :all
   (lambda (message)
-    (format t "收到消息: ~A~%" message)))
+    (format t "Received message: ~A~%" message)))
 ```
 
-### 发送消息
+### Sending Messages
 
 ```lisp
-;; 发送请求（等待响应）
+;; Send request (wait for response)
 (let ((response (a2a-request *endpoint* "other-agent"
                   '(:action "analyze" :data "..."))))
-  (format t "响应: ~A~%" response))
+  (format t "Response: ~A~%" response))
 
-;; 发送通知（不等待响应）
+;; Send notification (don't wait for response)
 (a2a-notify *endpoint* "other-agent"
   '(:event "task-completed" :result "..."))
 
-;; 广播
+;; Broadcast
 (a2a-broadcast *endpoint*
   '(:announcement "New capability available"))
 ```
 
-## A2A 消息总线
+## A2A Message Bus
 
-### 创建消息总线
+### Creating Message Bus
 
 ```lisp
 (defvar *bus* (make-a2a-bus))
 
-;; 注册端点
+;; Register endpoints
 (a2a-bus-register *bus* *endpoint-a*)
 (a2a-bus-register *bus* *endpoint-b*)
 (a2a-bus-register *bus* *endpoint-c*)
 ```
 
-### 消息路由
+### Message Routing
 
 ```lisp
-;; 点对点
+;; Point-to-point
 (a2a-bus-send *bus*
   (make-a2a-message :from "a" :to "b" :content "..."))
 
-;; 广播
+;; Broadcast
 (a2a-bus-broadcast *bus*
   (make-a2a-message :from "a" :content "..."))
 
-;; 基于能力路由
+;; Route by capability
 (a2a-bus-route-by-capability *bus* :rag
   (make-a2a-message :from "a" :content "..."))
 ```
 
-### 订阅模式
+### Subscription Pattern
 
 ```lisp
-;; 订阅特定主题
+;; Subscribe to specific topics
 (a2a-bus-subscribe *bus* "agent-a" "news/*")
 (a2a-bus-subscribe *bus* "agent-b" "alerts/critical")
 
-;; 发布到主题
+;; Publish to topic
 (a2a-bus-publish *bus* "news/tech"
   (make-a2a-message :content '(:headline "...")))
 ```
 
-## A2A 服务
+## A2A Service
 
-### 创建服务
+### Creating Service
 
 ```lisp
 (defvar *service*
@@ -176,39 +176,39 @@ A2A（Agent-to-Agent）是用于 Agent 间通信的协议。
     :endpoint *endpoint*
     :bus *bus*))
 
-;; 启动服务
+;; Start service
 (a2a-service-start *service*)
 ```
 
-### 服务发现
+### Service Discovery
 
 ```lisp
-;; 发现其他 Agent
+;; Discover other Agents
 (a2a-service-discover *service*)
 ;; => ((:id "agent-b" :name "Agent B" :capabilities (:chat :tools))
 ;;     (:id "agent-c" :name "Agent C" :capabilities (:rag)))
 
-;; 按能力查找
+;; Find by capability
 (a2a-service-find-by-capability *service* :rag)
 ;; => ((:id "agent-c" ...))
 ```
 
-### 健康检查
+### Health Check
 
 ```lisp
-;; 检查 Agent 状态
+;; Check Agent status
 (a2a-service-ping *service* "agent-b")
 ;; => (:status :alive :latency 50)
 
-;; 检查所有
+;; Check all
 (a2a-service-health-check *service*)
 ;; => ((:id "agent-b" :status :alive)
 ;;     (:id "agent-c" :status :unreachable))
 ```
 
-## 与 Kernel 集成
+## Integration with Kernel
 
-### 创建 A2A Agent
+### Creating A2A Agent
 
 ```lisp
 (defvar *kernel* (make-kernel :service *llm-service*))
@@ -219,17 +219,17 @@ A2A（Agent-to-Agent）是用于 Agent 间通信的协议。
     :name "Smart Agent"
     :capabilities '(:chat :tools :reasoning)))
 
-;; 注册到总线
+;; Register to bus
 (a2a-bus-register *bus* (a2a-agent-endpoint *a2a-agent*))
 ```
 
-### 处理 A2A 请求
+### Handling A2A Requests
 
 ```lisp
-;; 自动将 A2A 请求转发给 Kernel
+;; Auto-forward A2A requests to Kernel
 (a2a-agent-enable-auto-dispatch *a2a-agent*)
 
-;; 或自定义处理
+;; Or custom handling
 (a2a-agent-on-request *a2a-agent*
   (lambda (message)
     (let ((content (a2a-message-content message)))
@@ -237,10 +237,10 @@ A2A（Agent-to-Agent）是用于 Agent 间通信的协议。
                   (getf content :query)))))
 ```
 
-### 代理其他 Agent
+### Delegating to Other Agents
 
 ```lisp
-;; 将任务委托给其他 Agent
+;; Delegate task to other Agents
 (defun delegate-to-rag-agent (query)
   (let ((rag-agents (a2a-service-find-by-capability *service* :rag)))
     (when rag-agents
@@ -249,12 +249,12 @@ A2A（Agent-to-Agent）是用于 Agent 间通信的协议。
                    `(:action "search" :query ,query)))))
 ```
 
-## 使用示例
+## Usage Examples
 
-### 多 Agent 协作
+### Multi-Agent Collaboration
 
 ```lisp
-;; 创建专门的 Agent
+;; Create specialized Agents
 (defvar *research-agent*
   (make-a2a-agent *research-kernel*
     :id "researcher"
@@ -270,18 +270,18 @@ A2A（Agent-to-Agent）是用于 Agent 间通信的协议。
     :id "coordinator"
     :capabilities '(:coordination :planning)))
 
-;; 注册到总线
+;; Register to bus
 (dolist (agent (list *research-agent* *writer-agent* *coordinator-agent*))
   (a2a-bus-register *bus* (a2a-agent-endpoint agent)))
 
-;; 协调者分配任务
+;; Coordinator assigns tasks
 (defun coordinate-article (topic)
-  ;; 1. 让研究 Agent 收集信息
+  ;; 1. Have research Agent collect information
   (let ((research-result
           (a2a-request (a2a-agent-endpoint *coordinator-agent*)
                        "researcher"
                        `(:action "research" :topic ,topic))))
-    ;; 2. 让写作 Agent 撰写文章
+    ;; 2. Have writer Agent write article
     (a2a-request (a2a-agent-endpoint *coordinator-agent*)
                  "writer"
                  `(:action "write-article"
@@ -289,44 +289,44 @@ A2A（Agent-to-Agent）是用于 Agent 间通信的协议。
                    :research ,(getf research-result :data)))))
 ```
 
-### 负载均衡
+### Load Balancing
 
 ```lisp
-;; 创建多个工作 Agent
+;; Create multiple worker Agents
 (defvar *workers*
   (loop for i from 1 to 5
         collect (make-a2a-agent (make-kernel :service *service*)
                   :id (format nil "worker-~A" i)
                   :capabilities '(:processing))))
 
-;; 负载均衡器
+;; Load balancer
 (defvar *load-balancer*
   (make-a2a-load-balancer
-    :strategy :round-robin  ; 或 :least-connections, :random
+    :strategy :round-robin  ; Or :least-connections, :random
     :agents *workers*))
 
-;; 分发任务
+;; Dispatch tasks
 (a2a-lb-dispatch *load-balancer*
   '(:action "process" :data "..."))
 ```
 
-### 事件驱动架构
+### Event-Driven Architecture
 
 ```lisp
-;; 定义事件
+;; Define events
 (a2a-define-event :task-completed
   :schema '(:task-id :string
             :result :any
             :duration :number))
 
-;; 订阅事件
+;; Subscribe to events
 (a2a-subscribe *endpoint* :task-completed
   (lambda (event)
-    (format t "任务 ~A 完成，耗时 ~A ms~%"
+    (format t "Task ~A completed, took ~A ms~%"
             (getf event :task-id)
             (getf event :duration))))
 
-;; 发布事件
+;; Publish events
 (a2a-publish *endpoint* :task-completed
   '(:task-id "task-123"
     :result "success"

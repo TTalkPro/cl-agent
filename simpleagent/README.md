@@ -1,5 +1,7 @@
 # SimpleAgent 模块
 
+中文 | [English](README_EN.md)
+
 简单 Agent 实现模块，提供开箱即用的 Agent 类。
 
 ## 目录结构

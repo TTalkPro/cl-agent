@@ -1,5 +1,7 @@
 # CL-Agent 示例
 
+中文 | [English](README_EN.md)
+
 本目录包含 CL-Agent 框架的各种使用示例。
 
 ---

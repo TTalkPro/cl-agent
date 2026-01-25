@@ -1,37 +1,37 @@
-# MCP 模块
+# MCP Module
 
-中文 | [English](README_EN.md)
+[中文](README.md) | English
 
-Model Context Protocol（模型上下文协议）实现模块。
+Model Context Protocol implementation module.
 
-## 目录结构
+## Directory Structure
 
 ```
 mcp/
-├── package.lisp              # 包定义
-├── protocol.lisp             # 协议定义
-├── json-rpc.lisp             # JSON-RPC 2.0 实现
-├── transport/                # 传输层
-│   ├── base.lisp            # 基础传输接口
-│   ├── stdio.lisp           # 标准输入/输出
+├── package.lisp              # Package definition
+├── protocol.lisp             # Protocol definition
+├── json-rpc.lisp             # JSON-RPC 2.0 implementation
+├── transport/                # Transport layer
+│   ├── base.lisp            # Base transport interface
+│   ├── stdio.lisp           # Standard I/O
 │   └── sse.lisp             # Server-Sent Events
 ├── client/
-│   └── core.lisp            # MCP 客户端
+│   └── core.lisp            # MCP client
 └── server/
-    ├── core.lisp            # MCP 服务器核心
-    └── main.lisp            # MCP 服务器入口
+    ├── core.lisp            # MCP server core
+    └── main.lisp            # MCP server entry point
 ```
 
-## MCP 概述
+## MCP Overview
 
-MCP（Model Context Protocol）是一种标准化协议，用于：
-- AI 模型与外部工具的通信
-- 上下文信息的传递
-- 资源访问和管理
+MCP (Model Context Protocol) is a standardized protocol for:
+- Communication between AI models and external tools
+- Context information passing
+- Resource access and management
 
-## JSON-RPC 消息
+## JSON-RPC Messages
 
-### 请求
+### Request
 
 ```lisp
 (defclass mcp-request ()
@@ -40,14 +40,14 @@ MCP（Model Context Protocol）是一种标准化协议，用于：
    (method :accessor request-method)
    (params :accessor request-params)))
 
-;; 创建请求
+;; Create request
 (make-mcp-request
   :id "1"
   :method "tools/call"
   :params '(:name "get-weather" :arguments (:city "Tokyo")))
 ```
 
-### 响应
+### Response
 
 ```lisp
 (defclass mcp-response ()
@@ -56,18 +56,18 @@ MCP（Model Context Protocol）是一种标准化协议，用于：
    (result :accessor response-result)
    (error :accessor response-error)))
 
-;; 成功响应
+;; Success response
 (make-mcp-response
   :id "1"
   :result '(:content "Weather in Tokyo: 22°C"))
 
-;; 错误响应
+;; Error response
 (make-mcp-response
   :id "1"
   :error '(:code -32600 :message "Invalid Request"))
 ```
 
-### 通知
+### Notification
 
 ```lisp
 (defclass mcp-notification ()
@@ -80,107 +80,107 @@ MCP（Model Context Protocol）是一种标准化协议，用于：
   :params '(:level "info" :message "Processing..."))
 ```
 
-## 传输层
+## Transport Layer
 
-### STDIO 传输
+### STDIO Transport
 
-通过标准输入/输出通信：
+Communication via standard I/O:
 
 ```lisp
 (defvar *transport*
   (make-stdio-transport))
 
-;; 发送消息
+;; Send message
 (transport-send *transport* message)
 
-;; 接收消息
+;; Receive message
 (transport-receive *transport*)
 
-;; 关闭
+;; Close
 (transport-close *transport*)
 ```
 
-### SSE 传输
+### SSE Transport
 
-通过 Server-Sent Events 通信：
+Communication via Server-Sent Events:
 
 ```lisp
 (defvar *transport*
   (make-sse-transport
     :url "http://localhost:8080/events"))
 
-;; 连接
+;; Connect
 (transport-connect *transport*)
 
-;; 监听事件
+;; Listen for events
 (transport-on-event *transport*
   (lambda (event)
-    (format t "收到事件: ~A~%" event)))
+    (format t "Received event: ~A~%" event)))
 ```
 
-## MCP 客户端
+## MCP Client
 
-### 创建客户端
+### Creating Client
 
 ```lisp
 (defvar *client*
   (make-mcp-client
     :transport (make-stdio-transport)))
 
-;; 连接
+;; Connect
 (mcp-client-connect *client*)
 ```
 
-### 初始化
+### Initialization
 
 ```lisp
-;; 发送初始化请求
+;; Send initialize request
 (mcp-client-initialize *client*
   :protocol-version "2024-11-05"
   :capabilities '(:tools t :resources t)
   :client-info '(:name "cl-agent" :version "1.0.0"))
 ```
 
-### 工具操作
+### Tool Operations
 
 ```lisp
-;; 列出可用工具
+;; List available tools
 (mcp-client-list-tools *client*)
-;; => ((:name "get-weather" :description "获取天气" :input-schema {...})
-;;     (:name "search" :description "搜索" :input-schema {...}))
+;; => ((:name "get-weather" :description "Get weather" :input-schema {...})
+;;     (:name "search" :description "Search" :input-schema {...}))
 
-;; 调用工具
+;; Call tool
 (mcp-client-call-tool *client* "get-weather"
   '(:city "Tokyo"))
 ;; => (:content "Weather in Tokyo: 22°C, sunny")
 ```
 
-### 资源操作
+### Resource Operations
 
 ```lisp
-;; 列出资源
+;; List resources
 (mcp-client-list-resources *client*)
 ;; => ((:uri "file:///docs/readme.md" :name "README" :mime-type "text/markdown"))
 
-;; 读取资源
+;; Read resource
 (mcp-client-read-resource *client* "file:///docs/readme.md")
 ;; => (:contents "# README\n...")
 ```
 
-### 提示操作
+### Prompt Operations
 
 ```lisp
-;; 列出提示
+;; List prompts
 (mcp-client-list-prompts *client*)
 
-;; 获取提示
+;; Get prompt
 (mcp-client-get-prompt *client* "code-review"
   '(:language "lisp"))
 ```
 
-## MCP 服务器
+## MCP Server
 
-### 创建服务器
+### Creating Server
 
 ```lisp
 (defvar *server*
@@ -190,23 +190,23 @@ MCP（Model Context Protocol）是一种标准化协议，用于：
     :version "1.0.0"))
 ```
 
-### 注册工具
+### Registering Tools
 
 ```lisp
-;; 注册工具
+;; Register tool
 (mcp-register-tool *server* "get-weather"
-  :description "获取指定城市的天气"
+  :description "Get weather for specified city"
   :input-schema '(:type "object"
                   :properties (:city (:type "string"
-                                      :description "城市名"))
+                                      :description "City name"))
                   :required ("city"))
   :handler (lambda (args)
              (let ((city (getf args :city)))
                `(:content ,(format nil "~A: 22°C" city)))))
 
-;; 注册带验证的工具
+;; Register tool with validation
 (mcp-register-tool *server* "calculate"
-  :description "执行计算"
+  :description "Perform calculation"
   :input-schema '(:type "object"
                   :properties (:expression (:type "string")))
   :validator (lambda (args)
@@ -216,10 +216,10 @@ MCP（Model Context Protocol）是一种标准化协议，用于：
   :handler #'handle-calculate)
 ```
 
-### 注册资源
+### Registering Resources
 
 ```lisp
-;; 静态资源
+;; Static resource
 (mcp-register-resource *server*
   :uri "file:///config.json"
   :name "Configuration"
@@ -227,7 +227,7 @@ MCP（Model Context Protocol）是一种标准化协议，用于：
   :handler (lambda ()
              (read-file-into-string "/path/to/config.json")))
 
-;; 动态资源
+;; Dynamic resource
 (mcp-register-resource-template *server*
   :uri-template "db://records/{id}"
   :name "Database Record"
@@ -235,83 +235,83 @@ MCP（Model Context Protocol）是一种标准化协议，用于：
              (get-record (getf params :id))))
 ```
 
-### 注册提示
+### Registering Prompts
 
 ```lisp
 (mcp-register-prompt *server* "code-review"
-  :description "代码审查提示"
-  :arguments '((:name "language" :description "编程语言" :required t))
+  :description "Code review prompt"
+  :arguments '((:name "language" :description "Programming language" :required t))
   :handler (lambda (args)
              `(:messages ((:role "user"
-                           :content ,(format nil "请审查以下 ~A 代码："
+                           :content ,(format nil "Please review the following ~A code:"
                                             (getf args :language)))))))
 ```
 
-### 启动服务器
+### Starting Server
 
 ```lisp
-;; 启动（阻塞）
+;; Start (blocking)
 (mcp-server-start *server*)
 
-;; 后台启动
+;; Start in background
 (mcp-server-start-async *server*)
 
-;; 停止
+;; Stop
 (mcp-server-stop *server*)
 ```
 
-## 与 Kernel 集成
+## Integration with Kernel
 
-### 作为工具提供者
+### As Tool Provider
 
 ```lisp
-;; 从 MCP 服务器获取工具
+;; Get tools from MCP server
 (defvar *mcp-tools*
   (mcp-client-list-tools *client*))
 
-;; 创建 MCP 工具插件
+;; Create MCP tool plugin
 (defvar *mcp-plugin*
   (make-mcp-plugin *client*))
 
-;; 添加到 Kernel
+;; Add to Kernel
 (defvar *kernel*
   (make-kernel
     :service *service*
     :plugins (list *mcp-plugin*)))
 ```
 
-### 暴露 Kernel 工具
+### Exposing Kernel Tools
 
 ```lisp
-;; 将 Kernel 插件暴露为 MCP 工具
+;; Expose Kernel plugin as MCP tools
 (mcp-expose-plugin *server* 'my-plugin)
 
-;; 或暴露所有工具
+;; Or expose all tools
 (mcp-expose-kernel *server* *kernel*)
 ```
 
-## 错误处理
+## Error Handling
 
 ```lisp
-;; MCP 标准错误码
+;; MCP standard error codes
 -32700  ; Parse error
 -32600  ; Invalid Request
 -32601  ; Method not found
 -32602  ; Invalid params
 -32603  ; Internal error
 
-;; 处理错误
+;; Handle errors
 (handler-case
     (mcp-client-call-tool *client* "unknown-tool" '())
   (mcp-error (e)
-    (format t "MCP 错误: ~A (代码: ~A)~%"
+    (format t "MCP error: ~A (code: ~A)~%"
             (mcp-error-message e)
             (mcp-error-code e))))
 ```
 
-## 使用示例
+## Usage Examples
 
-### 天气服务 MCP 服务器
+### Weather Service MCP Server
 
 ```lisp
 (defvar *weather-server*
@@ -321,7 +321,7 @@ MCP（Model Context Protocol）是一种标准化协议，用于：
     :version "1.0.0"))
 
 (mcp-register-tool *weather-server* "get-weather"
-  :description "获取天气信息"
+  :description "Get weather information"
   :input-schema '(:type "object"
                   :properties (:city (:type "string")
                                :unit (:type "string"
@@ -330,11 +330,11 @@ MCP（Model Context Protocol）是一种标准化协议，用于：
   :handler (lambda (args)
              (let ((city (getf args :city))
                    (unit (or (getf args :unit) "celsius")))
-               ;; 调用天气 API
+               ;; Call weather API
                `(:content ,(get-weather-from-api city unit)))))
 
 (mcp-register-tool *weather-server* "get-forecast"
-  :description "获取天气预报"
+  :description "Get weather forecast"
   :input-schema '(:type "object"
                   :properties (:city (:type "string")
                                :days (:type "integer")))
@@ -343,10 +343,10 @@ MCP（Model Context Protocol）是一种标准化协议，用于：
 (mcp-server-start *weather-server*)
 ```
 
-### 连接 MCP 服务的 Agent
+### Agent Connected to MCP Service
 
 ```lisp
-;; 连接到 MCP 服务器
+;; Connect to MCP server
 (defvar *mcp-client*
   (make-mcp-client
     :transport (make-stdio-transport
@@ -355,13 +355,13 @@ MCP（Model Context Protocol）是一种标准化协议，用于：
 (mcp-client-connect *mcp-client*)
 (mcp-client-initialize *mcp-client*)
 
-;; 创建带 MCP 工具的 Agent
+;; Create Agent with MCP tools
 (defvar *agent*
   (make-kernel-agent
     (make-kernel
       :service *service*
       :plugins (list (make-mcp-plugin *mcp-client*)))
-    :system-prompt "你可以查询天气信息。"))
+    :system-prompt "You can query weather information."))
 
-(agent-chat *agent* "北京明天天气怎么样？")
+(agent-chat *agent* "What's the weather in Beijing tomorrow?")
 ```

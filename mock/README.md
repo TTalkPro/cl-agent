@@ -1,5 +1,7 @@
 # Mock 模块
 
+中文 | [English](README_EN.md)
+
 测试用 Mock 实现模块，提供 LLM 和工具的模拟。
 
 ## 目录结构

@@ -1,5 +1,7 @@
 # Core 模块
 
+中文 | [English](README_EN.md)
+
 核心基础设施模块，提供 Kernel 框架、HTTP 客户端、条件系统和工具函数。
 
 ## 目录结构

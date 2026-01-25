@@ -1,5 +1,7 @@
 # Tools 模块
 
+中文 | [English](README_EN.md)
+
 基础工具定义和工具注册系统。
 
 ## 目录结构

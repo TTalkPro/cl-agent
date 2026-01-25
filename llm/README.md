@@ -1,5 +1,7 @@
 # LLM 模块
 
+中文 | [English](README_EN.md)
+
 LLM 提供商实现和统一接口模块。
 
 ## 目录结构
