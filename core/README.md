@@ -16,6 +16,9 @@ core/
 ├── validation.lisp            # 数据验证
 ├── dependency-injection.lisp  # 依赖注入容器
 ├── data-convert.lisp          # 数据转换
+├── llm/                       # LLM 协议层（避免循环依赖）
+│   ├── response.lisp          # 统一响应类型
+│   └── provider.lisp          # Provider 协议
 ├── http/                      # HTTP 客户端模块
 │   ├── client.lisp
 │   ├── async.lisp

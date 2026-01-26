@@ -60,7 +60,14 @@
    (:file "validation")           ; Data validation
    (:file "dependency-injection") ; DI container
    (:file "data-convert")         ; Data conversion (plist <-> hash-table)
-   (:file "response")             ; Unified LLM Response Schema
+
+   ;; ============================================================
+   ;; LLM Protocol Layer (in core for dependency management)
+   ;; ============================================================
+   (:module "llm"
+    :components
+    ((:file "response")           ; Unified LLM Response Schema
+     (:file "provider")))         ; ILLMProvider protocol
 
    ;; ============================================================
    ;; Protocol Layer
@@ -91,7 +98,6 @@
      (:file "macros")         ; deftool/defplugin macros
      (:file "plugin")         ; Plugin metadata
      (:file "context")        ; Context state management
-     (:file "provider")       ; ILLMProvider protocol
      (:file "service")        ; Service abstraction
      (:file "filter")         ; 4-type filter pipeline
      (:file "kernel")         ; Kernel class + Builder

@@ -4,6 +4,27 @@
 
 LLM provider implementations and unified interface module.
 
+## Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Provider Layer (returns raw API response plist)                │
+│  ├── providers/anthropic.lisp  ──┐                              │
+│  ├── providers/bailian.lisp      │                              │
+│  ├── providers/zhipu.lisp        ├──→ llm-chat returns plist    │
+│  ├── providers/openai.lisp       │                              │
+│  └── providers.lisp            ──┘                              │
+│           │                                                     │
+│           ▼                                                     │
+│  Service Layer (service.lisp)                                   │
+│  └── normalize-response ─────────→ llm-response object          │
+│           │                                                     │
+│           ▼                                                     │
+│  Consumers (Kernel, Agent, Application code)                    │
+│  └── Use unified llm-response objects                           │
+└─────────────────────────────────────────────────────────────────┘
+```
+
 ## Directory Structure
 
 ```
@@ -12,14 +33,18 @@ llm/
 ├── client.lisp               # Unified client interface
 ├── providers.lisp            # Provider registration
 ├── streaming.lisp            # Streaming support
+├── service.lisp              # Service layer (response normalization)
 ├── schema/                   # Schema conversion
 │   ├── openai.lisp          # OpenAI format
-│   └── anthropic.lisp       # Anthropic format
+│   ├── anthropic.lisp       # Anthropic format
+│   └── response.lisp        # Response schema
 ├── providers/                # Provider implementations
 │   ├── base.lisp            # Base class
+│   ├── define-provider.lisp # Common macros and functions
 │   ├── anthropic.lisp       # Anthropic Claude
 │   ├── openai.lisp          # OpenAI GPT
-│   └── zhipu.lisp           # ZhipuAI GLM
+│   ├── zhipu.lisp           # ZhipuAI GLM
+│   └── bailian.lisp         # Alibaba Cloud DashScope
 └── factory/                  # Factory pattern
     ├── registry.lisp        # Provider registry
     ├── config.lisp          # Configuration management
@@ -32,8 +57,59 @@ llm/
 |----------|---------|---------------|----------|
 | Anthropic | `:anthropic` | claude-3-5-sonnet-20241022 | Tool calling, streaming |
 | OpenAI | `:openai` | gpt-4o | Tool calling, streaming, embeddings |
-| ZhipuAI | `:zhipu` | glm-4-turbo | Tool calling, streaming |
+| ZhipuAI | `:zhipu` | GLM-4.7 | Tool calling, streaming, reasoning chain |
+| Alibaba DashScope | `:dashscope` | qwen-plus | Tool calling, streaming |
 | Ollama | `:ollama` | llama2 | Local running |
+
+## Service Layer
+
+The Service layer normalizes raw provider responses into unified `llm-response` objects.
+
+### Response Normalization
+
+```lisp
+;; Provider returns raw plist
+(let ((raw-response (llm-chat provider messages)))
+  ;; Service layer normalizes to llm-response
+  (normalize-response raw-response :zhipu))
+
+;; Or use high-level API (auto-normalization)
+(chat-with-normalization provider messages)
+```
+
+### llm-response Object
+
+```lisp
+;; Unified response structure
+(llm-response-content response)        ; Text content
+(llm-response-tool-calls response)     ; Tool calls list
+(llm-response-usage response)          ; Token usage info
+(llm-response-model response)          ; Model name
+(llm-response-finish-reason response)  ; Finish reason (:stop, :tool-call, :length)
+(llm-response-message-id response)     ; Message ID
+(llm-response-raw response)            ; Raw response
+
+;; Convenience predicates
+(llm-response-has-tool-calls-p response)
+(llm-response-has-content-p response)
+
+;; Convenience accessors
+(llm-response-input-tokens response)
+(llm-response-output-tokens response)
+(llm-response-total-tokens response)
+```
+
+### ZhipuAI-specific: Reasoning Chain
+
+```lisp
+;; Extract ZhipuAI's reasoning chain content
+(response-reasoning-content response)
+;; => "Let me think about this..."
+
+;; Check if response is complete
+(response-complete-p response)
+;; => T or NIL
+```
 
 ## Quick Start
 

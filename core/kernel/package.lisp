@@ -217,6 +217,11 @@
    #:history-add
    #:history-add-system
 
+   ;; ==================== Plugin Query API ====================
+   #:plugin-p
+   #:plugin-tool-symbols
+   #:plugin-get-schemas
+
    ;; ==================== Helpers ====================
    #:parse-tool-arguments
    #:hash-to-plist))

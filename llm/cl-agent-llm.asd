@@ -69,7 +69,10 @@
      (:file "zhipu")
      (:file "bailian")))       ; 阿里云百炼 DashScope
 
-   ;; 6. Factory (registry, config, builder)
+   ;; 6. Service layer (response normalization)
+   (:file "service")
+
+   ;; 7. Factory (registry, config, builder)
    (:module "factory"
     :components
     ((:file "registry")

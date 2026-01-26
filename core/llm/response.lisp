@@ -1,20 +1,20 @@
 ;;;; response.lisp
-;;;; CL-Agent Core - Unified LLM Response Schema
+;;;; CL-Agent Core LLM - Unified LLM Response Schema
 ;;;;
 ;;;; Overview:
 ;;;;   Defines unified CLOS classes for LLM responses.
 ;;;;   These classes provide a consistent interface regardless of the
 ;;;;   underlying provider (Anthropic, OpenAI, etc.).
 ;;;;
+;;;; Location:
+;;;;   core/llm/response.lisp - Type definitions in core to avoid
+;;;;   circular dependencies between modules.
+;;;;
 ;;;; Design:
 ;;;;   - llm-response: Main response container
 ;;;;   - llm-usage: Token usage statistics
 ;;;;   - llm-tool-call: Normalized tool call representation
 ;;;;   - finish-reason: Unified termination reason
-;;;;
-;;;; Note:
-;;;;   This module is in core so that all other modules (kernel, llm,
-;;;;   simpleagent, etc.) can depend on it without circular dependencies.
 ;;;;
 ;;;; IMPORTANT:
 ;;;;   All functions now work ONLY with CLOS objects (llm-response, llm-usage,

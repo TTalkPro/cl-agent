@@ -2,6 +2,19 @@
 ;;;; CL-Agent - Mock 模块使用示例
 ;;;;
 ;;;; 展示如何使用 Mock 模块进行测试和演示
+;;;;
+;;;; 使用：
+;;;;   sbcl --load examples/mock-usage.lisp
+;;;;   ccl --load examples/mock-usage.lisp
+
+(require :asdf)
+
+;; Set up paths to load from current project directory first
+(let ((root (make-pathname :directory (butlast (pathname-directory *load-truename*)))))
+  (dolist (d '("" "core/" "llm/" "tools/" "mock/"))
+    (pushnew (merge-pathnames d root) asdf:*central-registry* :test #'equal)))
+
+(ql:quickload :cl-agent-mock :silent t)
 
 (in-package :cl-user)
 
@@ -243,3 +256,12 @@
   (format t "~%========================================")
   (format t "~%  所有示例运行完成")
   (format t "~%========================================~%"))
+
+;;; ============================================================
+;;; 运行示例
+;;; ============================================================
+
+(run-mock-examples)
+
+#+sbcl (sb-ext:exit :code 0)
+#+ccl (ccl:quit 0)

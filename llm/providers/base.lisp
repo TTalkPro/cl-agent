@@ -102,6 +102,11 @@
   (declare (ignore provider))
   t)
 
+;; Implement provider-name generic function from cl-agent.core
+(defmethod cl-agent.core:provider-name ((provider base-provider))
+  "获取提供商名称"
+  (base-provider-name provider))
+
 (defmethod llm-provider-name ((provider base-provider))
   "获取提供商名称"
   (base-provider-name provider))

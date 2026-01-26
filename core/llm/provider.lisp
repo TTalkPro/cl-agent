@@ -1,17 +1,21 @@
 ;;;; provider.lisp
-;;;; CL-Agent Kernel - ILLMProvider Protocol
+;;;; CL-Agent Core LLM - ILLMProvider Protocol
 ;;;;
 ;;;; Overview:
 ;;;;   Defines the generic functions protocol for LLM providers.
 ;;;;   This is the interface that all LLM provider implementations
 ;;;;   must satisfy.
 ;;;;
+;;;; Location:
+;;;;   core/llm/provider.lisp - Protocol definitions in core to avoid
+;;;;   circular dependencies between modules.
+;;;;
 ;;;; Design:
 ;;;;   Following Common Lisp idioms, we use defgeneric to define
 ;;;;   the protocol. Provider implementations in cl-agent-llm
 ;;;;   will specialize these methods.
 
-(in-package #:cl-agent.kernel)
+(in-package #:cl-agent.core)
 
 ;;; ============================================================
 ;;; Core LLM Protocol

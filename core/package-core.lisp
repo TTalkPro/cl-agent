@@ -197,4 +197,26 @@
    #:llm-response-total-tokens
    #:llm-response-first-tool-call
    #:llm-response-get-tool-calls
-   #:llm-response-get-finish-reason))
+   #:llm-response-get-finish-reason
+
+   ;; === LLM Provider Protocol ===
+   ;; Core protocol
+   #:llm-chat
+   #:llm-chat-stream
+   ;; Provider configuration
+   #:provider-name
+   #:provider-model
+   #:provider-api-key
+   #:provider-base-url
+   #:provider-supports-tools-p
+   #:provider-supports-streaming-p
+   ;; Tool schema protocol
+   #:provider-format-tools
+   #:provider-parse-tool-calls
+   ;; Capability checking
+   #:check-provider-tools-support
+   #:check-provider-streaming-support
+   ;; Base class
+   #:base-llm-provider
+   #:provider-default-max-tokens
+   #:provider-default-temperature))

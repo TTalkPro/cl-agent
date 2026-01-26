@@ -57,7 +57,7 @@
    #:make-qwen-provider
 
    ;; 提供商访问器（统一接口）
-   #:provider-name
+   ;; provider-name 使用 cl-agent.core 的泛型函数
    #:provider-api-url
    #:provider-default-model
    #:provider-chat-endpoint
@@ -67,6 +67,21 @@
    ;; 提供商类型
    #:anthropic-provider
    #:ollama-provider
+
+   ;; ==================== Service Layer (响应标准化) ====================
+   ;; 核心标准化函数
+   #:normalize-response
+   #:chat-with-normalization
+   ;; Provider 特定标准化
+   #:normalize-anthropic-response
+   #:normalize-openai-response
+   #:normalize-zhipu-response
+   #:normalize-ollama-response
+   #:normalize-dashscope-response
+   #:normalize-usage
+   ;; llm-response 工具函数
+   #:response-reasoning-content
+   #:response-complete-p
 
    ;; ==================== 聊天 API ====================
    ;; 核心 API

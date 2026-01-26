@@ -155,7 +155,7 @@ Returns:
                                                         merged-settings)
                                         :context (agent-context agent))))
       ;; Update history
-      (let ((response-text (getf response :content)))
+      (let ((response-text (cl-agent.core:llm-response-content response)))
         (push (list :role :assistant :content response-text)
               (agent-history agent))
         response-text))))

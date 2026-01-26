@@ -221,16 +221,8 @@
 ;;; 提供商访问器（统一接口）
 ;;; ============================================================
 ;;; 这些函数为所有提供商类型提供统一的访问接口
-
-(defun provider-name (provider)
-  "获取提供商名称
-
-参数：
-  PROVIDER - 提供商实例
-
-返回：
-  提供商名称关键字（:anthropic, :openai, :ollama, :zhipu）"
-  (base-provider-name provider))
+;;; 注意：provider-name 使用 cl-agent.core 中定义的泛型函数
+;;;       方法实现在 providers/base.lisp 中
 
 (defun provider-api-url (provider)
   "获取提供商 API URL

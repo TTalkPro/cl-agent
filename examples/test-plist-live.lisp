@@ -6,7 +6,12 @@
 ;;;;   ccl --load examples/test-plist-live.lisp
 
 (require :asdf)
-(asdf:initialize-source-registry)
+
+;; Set up paths to load from current project directory first
+(let ((root (make-pathname :directory (butlast (pathname-directory *load-truename*)))))
+  (dolist (d '("" "core/" "llm/" "tools/"))
+    (pushnew (merge-pathnames d root) asdf:*central-registry* :test #'equal)))
+
 (ql:quickload :cl-agent-llm :silent t)
 
 (format t "~%=== ~A ~A: deftool + defplugin + GLM-4.7 ===~%"
@@ -104,13 +109,38 @@
         (format t "[TEST 2 PASSED (response received, name recall varies)]~%"))))
 
 ;;; ============================================================
-;;; TEST 3: 工具调用
+;;; TEST 3: 工具调用（使用 deftool 定义的函数）
 ;;; ============================================================
 
 (format t "~%--- TEST 3: Tool Calling ---~%")
-(let* ((kernel (cl-agent.kernel:make-kernel
-                :service *provider*
-                :plugins '(tools-plugin)))
+
+;; Load tools module for make-simple-tool
+(ql:quickload :cl-agent-tools :silent t)
+
+;; Create tool objects using the handlers defined by deftool
+;; The deftool macro defines both metadata AND the function
+(defparameter *weather-tool*
+  (cl-agent.tools:make-simple-tool
+   :get_current_weather
+   (cl-agent.kernel:tool-description 'get-current-weather)
+   #'get-current-weather  ; Function defined by deftool
+   :parameters '((:city :type :string :description "城市名称" :required-p t)
+                 (:unit :type :string :description "温度单位" :default "celsius"))))
+
+(defparameter *calc-tool*
+  (cl-agent.tools:make-simple-tool
+   :calculate
+   (cl-agent.kernel:tool-description 'calculate)
+   #'calculate  ; Function defined by deftool
+   :parameters '((:expression :type :string :description "数学表达式" :required-p t))))
+
+;; Build kernel with the builder pattern
+(let* ((kernel (cl-agent.kernel:build-kernel
+                (cl-agent.kernel:with-tools
+                 (cl-agent.kernel:add-service
+                  (cl-agent.kernel:create-kernel-builder)
+                  *provider*)
+                 (list *weather-tool* *calc-tool*))))
        (history (cl-agent.kernel:make-chat-history)))
 
   ;; 显示注册的工具

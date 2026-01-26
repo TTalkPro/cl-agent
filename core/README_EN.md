@@ -16,6 +16,9 @@ core/
 ├── validation.lisp            # Data validation
 ├── dependency-injection.lisp  # Dependency injection container
 ├── data-convert.lisp          # Data conversion
+├── llm/                       # LLM protocol layer (avoids circular deps)
+│   ├── response.lisp          # Unified response types
+│   └── provider.lisp          # Provider protocol
 ├── http/                      # HTTP client module
 │   ├── client.lisp
 │   ├── async.lisp

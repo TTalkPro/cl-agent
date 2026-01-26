@@ -77,7 +77,7 @@
 (defclass tool-provider ()
   ((name
     :initarg :name
-    :accessor provider-name
+    :accessor tool-provider-name
     :type string
     :documentation "提供者名称")
 
@@ -100,6 +100,11 @@
     :documentation "提供者元数据（plist）"))
 
   (:documentation "工具提供者基类"))
+
+;; Provide method for core's provider-name generic function
+(defmethod cl-agent.core:provider-name ((provider tool-provider))
+  "Get the name of the tool provider."
+  (tool-provider-name provider))
 
 ;;; ============================================================
 ;;; 生命周期协议

@@ -102,7 +102,7 @@
    ;; ==================== Provider System (New) ====================
    ;; Provider 类和协议
    #:tool-provider
-   #:provider-name
+   #:tool-provider-name   ; Internal accessor (use provider-name from core for generic access)
    #:provider-enabled-p
    #:provider-tools
    #:provider-metadata

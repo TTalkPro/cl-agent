@@ -4,6 +4,27 @@
 
 LLM 提供商实现和统一接口模块。
 
+## 架构概览
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Provider 层 (返回原始 API 响应 plist)                           │
+│  ├── providers/anthropic.lisp  ──┐                               │
+│  ├── providers/bailian.lisp      │                               │
+│  ├── providers/zhipu.lisp        ├──→ llm-chat 返回原始 plist     │
+│  ├── providers/openai.lisp       │                               │
+│  └── providers.lisp            ──┘                               │
+│           │                                                      │
+│           ▼                                                      │
+│  Service 层 (service.lisp)                                       │
+│  └── normalize-response ─────────→ llm-response 对象             │
+│           │                                                      │
+│           ▼                                                      │
+│  消费者 (Kernel, Agent, 应用代码)                                 │
+│  └── 统一使用 llm-response 对象                                   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
 ## 目录结构
 
 ```
@@ -12,14 +33,18 @@ llm/
 ├── client.lisp               # 统一客户端接口
 ├── providers.lisp            # 提供商注册
 ├── streaming.lisp            # 流式支持
+├── service.lisp              # Service 层（响应标准化）
 ├── schema/                   # Schema 转换
 │   ├── openai.lisp          # OpenAI 格式
-│   └── anthropic.lisp       # Anthropic 格式
+│   ├── anthropic.lisp       # Anthropic 格式
+│   └── response.lisp        # 响应 schema
 ├── providers/                # 提供商实现
 │   ├── base.lisp            # 基类
+│   ├── define-provider.lisp # 通用宏和函数
 │   ├── anthropic.lisp       # Anthropic Claude
 │   ├── openai.lisp          # OpenAI GPT
-│   └── zhipu.lisp           # 智谱 AI GLM
+│   ├── zhipu.lisp           # 智谱 AI GLM
+│   └── bailian.lisp         # 阿里云百炼 DashScope
 └── factory/                  # 工厂模式
     ├── registry.lisp        # 提供商注册表
     ├── config.lisp          # 配置管理
@@ -32,8 +57,59 @@ llm/
 |--------|--------|----------|------|
 | Anthropic | `:anthropic` | claude-3-5-sonnet-20241022 | 工具调用、流式 |
 | OpenAI | `:openai` | gpt-4o | 工具调用、流式、嵌入 |
-| 智谱 AI | `:zhipu` | glm-4-turbo | 工具调用、流式 |
+| 智谱 AI | `:zhipu` | GLM-4.7 | 工具调用、流式、思维链 |
+| 阿里云百炼 | `:dashscope` | qwen-plus | 工具调用、流式 |
 | Ollama | `:ollama` | llama2 | 本地运行 |
+
+## Service 层
+
+Service 层负责将各 Provider 返回的原始响应转换为统一的 `llm-response` 对象。
+
+### 响应标准化
+
+```lisp
+;; Provider 返回原始 plist
+(let ((raw-response (llm-chat provider messages)))
+  ;; Service 层标准化为 llm-response
+  (normalize-response raw-response :zhipu))
+
+;; 或使用高层 API（自动标准化）
+(chat-with-normalization provider messages)
+```
+
+### llm-response 对象
+
+```lisp
+;; 统一的响应结构
+(llm-response-content response)        ; 文本内容
+(llm-response-tool-calls response)     ; 工具调用列表
+(llm-response-usage response)          ; Token 使用信息
+(llm-response-model response)          ; 模型名称
+(llm-response-finish-reason response)  ; 结束原因 (:stop, :tool-call, :length)
+(llm-response-message-id response)     ; 消息 ID
+(llm-response-raw response)            ; 原始响应
+
+;; 便捷谓词
+(llm-response-has-tool-calls-p response)
+(llm-response-has-content-p response)
+
+;; 便捷访问器
+(llm-response-input-tokens response)
+(llm-response-output-tokens response)
+(llm-response-total-tokens response)
+```
+
+### 智谱特有：思维链
+
+```lisp
+;; 提取智谱 AI 的思维链内容
+(response-reasoning-content response)
+;; => "让我思考一下这个问题..."
+
+;; 检查响应是否完整
+(response-complete-p response)
+;; => T 或 NIL
+```
 
 ## 快速开始
 
