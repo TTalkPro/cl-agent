@@ -42,11 +42,12 @@
   (;; 1. Package definition
    (:file "package")
 
-   ;; 2. Schema converters
+   ;; 2. Schema converters and unified response
    (:module "schema"
     :components
     ((:file "openai")
-     (:file "anthropic")))
+     (:file "anthropic")
+     (:file "response")))    ; Unified response schema
 
    ;; 3. Provider base class
    (:module "provider-base"

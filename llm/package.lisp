@@ -149,6 +149,55 @@
    #:convert-message-to-anthropic
    #:convert-messages-to-anthropic
 
+   ;; ==================== Unified Response Schema ====================
+   ;; Response class
+   #:llm-response
+   #:make-llm-response
+   #:llm-response-p
+   #:llm-response-content
+   #:llm-response-tool-calls
+   #:llm-response-usage
+   #:llm-response-model
+   #:llm-response-finish-reason
+   #:llm-response-message-id
+   #:llm-response-raw
+
+   ;; Usage class
+   #:llm-usage
+   #:make-llm-usage
+   #:llm-usage-input-tokens
+   #:llm-usage-output-tokens
+   #:llm-usage-total-tokens
+   #:llm-usage-cache-read-tokens
+   #:llm-usage-cache-creation-tokens
+
+   ;; Tool call class
+   #:llm-tool-call
+   #:make-llm-tool-call
+   #:llm-tool-call-id
+   #:llm-tool-call-name
+   #:llm-tool-call-arguments
+   #:llm-tool-call-raw
+
+   ;; Finish reason type
+   #:finish-reason
+   #:normalize-finish-reason
+
+   ;; Response predicates
+   #:llm-response-has-tool-calls-p
+   #:llm-response-has-content-p
+
+   ;; Conversion functions
+   #:plist-to-llm-response
+   #:llm-response-to-plist
+
+   ;; Convenience accessors
+   #:llm-response-text
+   #:llm-response-input-tokens
+   #:llm-response-output-tokens
+   #:llm-response-total-tokens
+   #:llm-response-first-tool-call
+
    ;; ==================== Provider Registry ====================
    #:register-provider
    #:get-provider-factory

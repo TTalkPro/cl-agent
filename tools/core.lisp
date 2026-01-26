@@ -448,7 +448,8 @@
      ,(mapcar #'(lambda (param)
                   (string-downcase (string (first param))))
               (remove-if-not (lambda (p)
-                              (getf (cdr p) :required))
+                              (or (getf (cdr p) :required)
+                                  (getf (cdr p) :required-p)))
                             (tool-parameters tool))))))
 
 (defun parameter-to-json-schema (param)
@@ -458,7 +459,7 @@
     PARAM - 参数规格 (name . props)
 
   返回：
-    JSON Schema plist"
+    JSON Schema hash-table（可被 JSON 序列化为 object）"
   (let ((type-str (case (getf (cdr param) :type)
                      (:string "string")
                      (:number "number")
@@ -466,7 +467,9 @@
                      (:boolean "boolean")
                      (:array "array")
                      (:object "object")
-                     (otherwise "string"))))
-    `(:type ,type-str
-      :description ,(getf (cdr param) :description ""))))
+                     (otherwise "string")))
+        (ht (make-hash-table :test 'equal)))
+    (setf (gethash "type" ht) type-str)
+    (setf (gethash "description" ht) (or (getf (cdr param) :description) ""))
+    ht))
 

@@ -184,23 +184,68 @@
   (intern (string-upcase str) :keyword))
 
 (defun format-tool-for-openai (tool)
-  "将工具格式化为 OpenAI 格式"
-  `(("type" . "function")
-    ("function" . (("name" . ,(getf tool :name))
-                   ("description" . ,(getf tool :description))
-                   ("parameters" . ,(getf tool :parameters))))))
+  "将工具格式化为 OpenAI 格式
+
+返回 hash-table 用于正确的 JSON 序列化"
+  (let ((wrapper (make-hash-table :test 'equal))
+        (function (make-hash-table :test 'equal))
+        (name (getf tool :name))
+        (description (getf tool :description))
+        (schema (or (getf tool :input-schema)
+                    (getf tool :parameters))))
+    ;; 构建 function 对象
+    (setf (gethash "name" function)
+          (if (stringp name)
+              name
+              (string-downcase (string name))))
+    (setf (gethash "description" function) (or description ""))
+    (setf (gethash "parameters" function)
+          (cond
+            ((hash-table-p schema) schema)
+            ((and (listp schema) (keywordp (first schema)))
+             (cl-agent.kernel:schema-to-hash-table schema))
+            (t (let ((empty (make-hash-table :test 'equal)))
+                 (setf (gethash "type" empty) "object")
+                 (setf (gethash "properties" empty) (make-hash-table :test 'equal))
+                 (setf (gethash "required" empty) #())
+                 empty))))
+    ;; 构建 wrapper
+    (setf (gethash "type" wrapper) "function")
+    (setf (gethash "function" wrapper) function)
+    wrapper))
 
 (defun parse-tool-calls-openai-style (tool-calls)
-  "解析 OpenAI 风格的工具调用（也适用于 OpenAI 兼容 API）"
+  "解析 OpenAI 风格的工具调用（也适用于 OpenAI 兼容 API）
+
+支持 hash-table 和 plist 两种输入格式"
   (loop for call in (if (vectorp tool-calls)
                         (coerce tool-calls 'list)
                         tool-calls)
-        for id = (gethash "id" call)
-        for function = (gethash "function" call)
-        for name = (when function (gethash "name" function))
-        for arguments = (when function (gethash "arguments" function))
+        for id = (if (hash-table-p call)
+                     (gethash "id" call)
+                     (getf call :id))
+        for function = (if (hash-table-p call)
+                           (gethash "function" call)
+                           (getf call :function))
+        for name = (when function
+                     (if (hash-table-p function)
+                         (gethash "name" function)
+                         (getf function :name)))
+        for arguments-raw = (when function
+                              (if (hash-table-p function)
+                                  (gethash "arguments" function)
+                                  (getf function :arguments)))
+        ;; 解析 arguments（可能是 JSON 字符串或已解析的对象）
+        for arguments = (cond
+                          ((null arguments-raw) nil)
+                          ((hash-table-p arguments-raw) arguments-raw)
+                          ((stringp arguments-raw)
+                           (handler-case
+                               (cl-agent.core:json-parse arguments-raw)
+                             (error () arguments-raw)))
+                          (t arguments-raw))
         collect (list :id id
-                      :name (when name (make-keyword (string-downcase name)))
+                      :name (when name (make-keyword (string-upcase name)))
                       :arguments arguments
                       :raw call)))
 

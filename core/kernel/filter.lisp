@@ -366,10 +366,13 @@ Note:
    :fn (lambda (context next-fn)
          (let* ((kernel (getf context :kernel))
                 (tool-name (getf context :tool-name))
-                (tool-sym (when kernel
-                            (kernel-find-tool-symbol kernel tool-name)))
+                (tool (when kernel
+                        (kernel-find-tool kernel tool-name)))
+                ;; Check for :sensitive tag on the tool
                 (needs-approval (if sensitive-only
-                                    (and tool-sym (get tool-sym :sensitive))
+                                    (and tool
+                                         (member :sensitive
+                                                 (%tools-tool-tags tool)))
                                     t)))
            (if (and needs-approval approver-fn)
                (if (funcall approver-fn context)

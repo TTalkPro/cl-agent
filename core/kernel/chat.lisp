@@ -220,9 +220,9 @@
 
 (defmethod invoke-tool ((kernel kernel) fn-name args &key context)
   "通过过滤器管道执行单个工具"
-  (let ((tool-sym (kernel-find-tool-symbol kernel fn-name)))
-    (unless tool-sym
-      (error "Function ~A not found in kernel" fn-name))
+  (let ((tool (kernel-find-tool kernel fn-name)))
+    (unless tool
+      (error "Tool ~A not found in kernel" fn-name))
     (let* ((all-filters (kernel-filters kernel))
            (pre-filters (filter-by-type all-filters :pre-invocation))
            (post-filters (filter-by-type all-filters :post-invocation))
