@@ -2,103 +2,134 @@
 
 [中文](README.md) | English
 
-Basic tool definitions and tool registration system.
+Tool system: Tool Registry + Tag filtering + Preset configuration.
 
 ## Directory Structure
 
 ```
 tools/
-├── package-tools.lisp        # Package definition
-├── registry.lisp             # Tool registry
-├── executor.lisp             # Tool executor
-├── schema.lisp               # Schema generation
-└── builtin/                  # Built-in tool definitions
-    └── ...
+├── package.lisp              # Package definition
+├── protocol.lisp             # Tool class and protocols
+├── registry.lisp             # Tool registry (with Tag filtering)
+├── core.lisp                 # Core tool functions
+├── builtin.lisp              # Built-in tools with tags
+├── presets.lisp              # Tool preset configuration
+├── tool-factories.lisp       # Tool factories
+└── providers/                # Provider implementations
+    ├── builtin.lisp
+    └── custom.lisp
 ```
 
-## Tool Registration
+## Core Concepts
 
-### Registering Tools
+### Tool
+
+Each tool contains the following properties:
+
+- `name` - Tool name (keyword)
+- `description` - Tool description
+- `handler` - Execution function
+- `parameters` - Parameter definitions
+- `category` - Category
+- `tags` - Tag list (for filtering)
+- `metadata` - Metadata
+
+### Creating Tools
 
 ```lisp
-;; Use register-tool
-(register-tool :get-time
-  :description "Get current time"
-  :parameters '()
-  :handler (lambda ()
-             (format nil "~A" (get-universal-time))))
-
-;; Tool with parameters
-(register-tool :greet
-  :description "Greet user"
-  :parameters '((:name :type :string :description "User name" :required t))
-  :handler (lambda (name)
-             (format nil "Hello, ~A!" name)))
+;; Using make-simple-tool
+(defvar *my-tool*
+  (cl-agent.tools:make-simple-tool
+    :greet
+    "Greet user"
+    (lambda (&key name)
+      (format nil "Hello, ~A!" name))
+    :parameters '((:name :type :string :description "User name" :required-p t))
+    :category :utility
+    :tags '(:utility :safe)))
 ```
 
-### Querying Tools
+### Tags
+
+Tags are used for tool classification and filtering:
 
 ```lisp
-;; Get tool information
-(get-tool :get-time)
-;; => (:name :get-time :description "Get current time" ...)
+;; Check tool tags
+(cl-agent.tools:tool-has-tag-p tool :safe)
+(cl-agent.tools:tool-has-any-tag-p tool '(:safe :utility))
+(cl-agent.tools:tool-has-all-tags-p tool '(:file :read))
+
+;; Modify tags
+(cl-agent.tools:tool-add-tag tool :new-tag)
+(cl-agent.tools:tool-remove-tag tool :old-tag)
+(cl-agent.tools:tool-set-tags tool '(:tag1 :tag2))
+```
+
+## Tool Registry
+
+```lisp
+;; Create registry
+(defvar *registry* (cl-agent.tools:make-tool-registry))
+
+;; Register tool
+(cl-agent.tools:register-tool *registry* *my-tool*)
+
+;; Find tool
+(cl-agent.tools:find-tool *registry* :greet)
 
 ;; List all tools
-(list-tools)
-;; => (:get-time :greet ...)
+(cl-agent.tools:list-tools *registry*)
 
-;; Check if tool exists
-(tool-exists-p :get-time)
-;; => T
+;; Tag filtering
+(cl-agent.tools:list-tools-by-tag *registry* :safe)
+(cl-agent.tools:list-tools-by-tags *registry* '(:file :read) :mode :any)
 ```
 
-### Executing Tools
+## Presets
 
-```lisp
-;; Execute tool
-(execute-tool :greet '("John"))
-;; => "Hello, John!"
+| Preset | Description |
+|--------|-------------|
+| `:standard` | File + HTTP + Utility tools |
+| `:safe` | Read-only operations |
+| `:full` | All tools (including Shell) |
+| `:file-only` | File operations only |
+| `:http-only` | HTTP operations only |
+| `:utility-only` | Utility tools only |
 
-;; With keyword arguments
-(execute-tool :greet '(:name "John"))
-;; => "Hello, John!"
-```
+## Built-in Tools
 
-## Schema Generation
-
-```lisp
-;; Generate JSON Schema
-(tool-to-json-schema :greet)
-;; => {"name": "greet",
-;;     "description": "Greet user",
-;;     "parameters": {
-;;       "type": "object",
-;;       "properties": {
-;;         "name": {"type": "string", "description": "User name"}
-;;       },
-;;       "required": ["name"]
-;;     }}
-
-;; Batch generation
-(tools-to-json-schemas '(:get-time :greet))
-```
+| Tool Factory | Tags |
+|--------------|------|
+| `make-read-file-tool` | `:file :io :read :safe` |
+| `make-write-file-tool` | `:file :io :write` |
+| `make-http-get-tool` | `:http :network :read :safe` |
+| `make-http-post-tool` | `:http :network :write` |
+| `make-execute-command-tool` | `:shell :system :dangerous` |
+| `make-get-timestamp-tool` | `:utility :safe` |
 
 ## Integration with Kernel
 
 ```lisp
-;; Tools are automatically used by Kernel's plugin system
-;; See core/kernel/function.lisp and plugin/ module
+;; Using Builder pattern
+(defvar *kernel*
+  (cl-agent.kernel:build-kernel
+    (cl-agent.kernel:with-preset
+      (cl-agent.kernel:add-service
+        (cl-agent.kernel:create-kernel-builder)
+        *provider*)
+      :safe
+      :security-level :standard)))
 ```
 
-## Parameter Types
+## Tag Reference
 
-Supported parameter types:
-
-| Type | Keyword | JSON Schema Type |
-|------|---------|------------------|
-| String | `:string` | `string` |
-| Integer | `:int` / `:integer` | `integer` |
-| Number | `:number` / `:float` | `number` |
-| Boolean | `:bool` / `:boolean` | `boolean` |
-| Array | `:array` / `:list` | `array` |
-| Object | `:object` / `:hash` | `object` |
+| Tag | Description |
+|-----|-------------|
+| `:file` | File operations |
+| `:http` | HTTP requests |
+| `:shell` | Shell commands |
+| `:utility` | General utilities |
+| `:safe` | Safe read-only operations |
+| `:read` | Read operations |
+| `:write` | Write operations |
+| `:dangerous` | Dangerous operations |

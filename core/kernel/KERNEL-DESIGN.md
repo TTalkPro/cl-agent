@@ -1,13 +1,13 @@
-# CL-Agent Kernel Plugin 设计方案
+# CL-Agent Kernel 设计方案
 
 中文 | [English](KERNEL-DESIGN_EN.md)
 
 ## 设计原则
 
-1. **无全局变量** —— 工具实例由 plugin 对象持有，不依赖 `defparameter`
-2. **CLOS 双分派** —— `tool-invoke (plugin-class × eql-tool-name)` 编译期确定调用路径
-3. **协议为骨架** —— 框架只定义 `defgeneric`，用户实现 `defmethod`
-4. **宏为语法糖** —— `defplugin` / `deftool` 简化声明，但非必须
+1. **直接工具注册** —— Kernel 直接持有 Tool Registry，无需中间 Plugin 层
+2. **Tag 标签过滤** —— 工具通过标签分类，支持运行时过滤
+3. **Builder 模式** —— 流式 API 构建 Kernel
+4. **预设配置** —— 内置安全级别和功能预设
 
 ---
 
@@ -16,298 +16,282 @@
 ```
 ┌──────────────────────────────────────────────────┐
 │  用户代码                                         │
-│  ┌──────────────┐   ┌──────────────────────────┐ │
-│  │ defplugin    │   │ deftool                  │ │
-│  │ (语法糖)     │   │ (语法糖)                  │ │
-│  └──────┬───────┘   └───────────┬──────────────┘ │
-│         │                       │                 │
-│         ▼                       ▼                 │
-│  ┌──────────────┐   ┌──────────────────────────┐ │
-│  │ defclass     │   │ defmethod                │ │
-│  │ defmethod    │   │  tool-invoke             │ │
-│  │  plugin-name │   │  tool-description        │ │
-│  │  plugin-desc │   │  tool-schema             │ │
-│  └──────┬───────┘   └───────────┬──────────────┘ │
-├─────────┼───────────────────────┼─────────────────┤
-│  框架协议层                                        │
-│         ▼                       ▼                 │
-│  ┌────────────────────────────────────────────┐   │
-│  │ CLOS 双分派                                 │   │
-│  │ (plugin-class × eql-tool-name) → 方法体    │   │
-│  └────────────────────────────────────────────┘   │
+│  ┌──────────────────────────────────────────────┐ │
+│  │ make-simple-tool                              │ │
+│  │ (创建带标签的工具)                             │ │
+│  └──────────────────┬───────────────────────────┘ │
+│                     │                             │
+│                     ▼                             │
+│  ┌──────────────────────────────────────────────┐ │
+│  │ Tool Registry                                 │ │
+│  │ (管理工具 + Tag 过滤)                          │ │
+│  └──────────────────┬───────────────────────────┘ │
+├─────────────────────┼───────────────────────────────┤
+│  Kernel 层                                         │
+│                     ▼                             │
+│  ┌──────────────────────────────────────────────┐ │
+│  │ Kernel                                        │ │
+│  │ - tool-registry (工具注册表)                   │ │
+│  │ - active-tags (活跃标签过滤)                   │ │
+│  │ - service (LLM 服务)                          │ │
+│  │ - filters (过滤器链)                          │ │
+│  └──────────────────────────────────────────────┘ │
 └──────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 第一层：CLOS 协议（核心，无宏）
+## 核心组件
 
-### 基类
+### Tool（工具）
 
 ```lisp
-(defclass kernel-plugin ()
-  ((tools-cache :initform nil :accessor plugin-tools-cache))
-  (:documentation "所有插件的基类"))
+(defclass tool ()
+  ((name :type keyword)
+   (description :type string)
+   (handler :type function)
+   (parameters :type list)
+   (category :type keyword)
+   (tags :type list)        ; 标签列表
+   (metadata :type list)))
 ```
 
-### 插件级协议
+### Tool Registry（工具注册表）
 
 ```lisp
-(defgeneric plugin-name (plugin)
-  (:documentation "返回插件名称 keyword"))
+;; 创建注册表
+(make-tool-registry)
 
-(defgeneric plugin-description (plugin)
-  (:documentation "返回插件描述字符串"))
+;; 注册工具
+(register-tool registry tool)
 
-(defgeneric plugin-tools (plugin)
-  (:documentation "返回此插件支持的工具名称 keyword 列表"))
+;; Tag 过滤
+(list-tools-by-tag registry :safe)
+(list-tools-by-tags registry '(:file :read) :mode :any)
 ```
 
-### 工具级协议（双分派）
+### Kernel
 
 ```lisp
-(defgeneric tool-invoke (plugin tool-name args)
-  (:documentation "执行工具。
-  PLUGIN    - 插件实例（提供 class 分派）
-  TOOL-NAME - 工具名称 keyword（提供 EQL 分派）
-  ARGS      - 参数 plist"))
-
-(defgeneric tool-description (plugin tool-name)
-  (:documentation "返回工具描述字符串"))
-
-(defgeneric tool-schema (plugin tool-name)
-  (:documentation "返回工具参数的 JSON Schema（hash-table）"))
-```
-
-### 纯协议使用方式（不用任何宏）
-
-```lisp
-(defclass weather-plugin (kernel-plugin)
-  ((api-key :initarg :api-key :reader plugin-api-key)))
-
-(defmethod plugin-name ((p weather-plugin)) :weather-plugin)
-(defmethod plugin-description ((p weather-plugin)) "天气工具集")
-(defmethod plugin-tools ((p weather-plugin)) '(:get-weather :get-forecast))
-
-;; --- :get-weather ---
-(defmethod tool-description ((p weather-plugin) (name (eql :get-weather)))
-  "获取指定城市的当前天气信息")
-
-(defmethod tool-schema ((p weather-plugin) (name (eql :get-weather)))
-  (params->json-schema
-   '((city :string "城市名称" :required t)
-     (unit :string "温度单位" :default "celsius"))))
-
-(defmethod tool-invoke ((p weather-plugin) (name (eql :get-weather)) args)
-  (let ((city (getf args :city))
-        (unit (getf args :unit "celsius")))
-    (format nil "~A：晴，22°~A" city unit)))
-
-;; --- :get-forecast ---
-(defmethod tool-description ((p weather-plugin) (name (eql :get-forecast)))
-  "获取天气预报")
-
-(defmethod tool-schema ((p weather-plugin) (name (eql :get-forecast)))
-  (params->json-schema
-   '((city :string "城市名称" :required t)
-     (days :int "预报天数" :default 3))))
-
-(defmethod tool-invoke ((p weather-plugin) (name (eql :get-forecast)) args)
-  (format nil "~A未来~A天：晴转多云" (getf args :city) (getf args :days 3)))
+(defclass kernel ()
+  ((service)            ; LLM 服务
+   (config)             ; 配置
+   (tool-registry)      ; 工具注册表
+   (active-tags)        ; 活跃标签（过滤用）
+   (tag-filter-mode)    ; 过滤模式 :any 或 :all
+   (filters)            ; 过滤器链
+   (context)))          ; 执行上下文
 ```
 
 ---
 
-## 第二层：宏语法糖
+## 工具创建
 
-### defplugin
-
-```lisp
-(defplugin weather-plugin ()
-  "天气工具集"
-  ((api-key :initarg :api-key :reader plugin-api-key)
-   (base-url :initarg :base-url :initform "https://api.weather.com")))
-```
-
-展开为：
+### 使用 make-simple-tool
 
 ```lisp
-(progn
-  (defclass weather-plugin (kernel-plugin)
-    ((api-key :initarg :api-key :reader plugin-api-key)
-     (base-url :initarg :base-url :initform "https://api.weather.com")))
-
-  (defmethod plugin-name ((p weather-plugin))
-    :weather-plugin)
-
-  (defmethod plugin-description ((p weather-plugin))
-    "天气工具集"))
+(defvar *weather-tool*
+  (cl-agent.tools:make-simple-tool
+    :get_weather
+    "获取指定城市的天气信息"
+    (lambda (&key city unit)
+      (format nil "~A：晴，22°~A" city (or unit "C")))
+    :parameters '((:city :type :string :description "城市名称" :required-p t)
+                  (:unit :type :string :description "温度单位"))
+    :category :utility
+    :tags '(:utility :weather :safe)))
 ```
 
-### deftool
+### 内置工具
 
 ```lisp
-(deftool (weather-plugin :get-weather)
-  "获取指定城市的天气信息"
-  ((city :string "城市名称" :required t)
-   (unit :string "温度单位" :default "celsius"))
-  (format nil "~A：晴，22°~A（via ~A）"
-          city unit (plugin-api-key plugin)))
+;; 文件工具
+(cl-agent.tools:make-read-file-tool)   ; 标签: (:file :io :read :safe)
+(cl-agent.tools:make-write-file-tool)  ; 标签: (:file :io :write)
+
+;; HTTP 工具
+(cl-agent.tools:make-http-get-tool)    ; 标签: (:http :network :read :safe)
+(cl-agent.tools:make-http-post-tool)   ; 标签: (:http :network :write)
+
+;; 实用工具
+(cl-agent.tools:make-get-timestamp-tool)  ; 标签: (:utility :safe)
+(cl-agent.tools:make-generate-uuid-tool)  ; 标签: (:utility :safe)
 ```
-
-展开为：
-
-```lisp
-(progn
-  ;; 注册工具名到类元数据
-  (register-tool-name 'weather-plugin :get-weather)
-
-  ;; 描述
-  (defmethod tool-description ((plugin weather-plugin)
-                               (name (eql :get-weather)))
-    "获取指定城市的天气信息")
-
-  ;; Schema
-  (defmethod tool-schema ((plugin weather-plugin)
-                          (name (eql :get-weather)))
-    (params->json-schema
-     '((city :string "城市名称" :required t)
-       (unit :string "温度单位" :default "celsius"))))
-
-  ;; 执行（body 中 plugin 变量可用）
-  (defmethod tool-invoke ((plugin weather-plugin)
-                          (name (eql :get-weather))
-                          args)
-    (let ((city (getf args :city))
-          (unit (getf args :unit "celsius")))
-      (format nil "~A：晴，22°~A（via ~A）"
-              city unit (plugin-api-key plugin)))))
-```
-
-### 工具名注册（plugin-tools 自动实现）
-
-```lisp
-;; 编译期元数据（仅存 class-name → tool-names 映射）
-(defvar *plugin-tool-registry* (make-hash-table :test #'eq))
-
-(defun register-tool-name (class-name tool-name)
-  (pushnew tool-name (gethash class-name *plugin-tool-registry*)))
-
-;; plugin-tools 默认实现：从 registry 读取
-(defmethod plugin-tools ((p kernel-plugin))
-  (gethash (class-name (class-of p)) *plugin-tool-registry*))
-```
-
-注意：`*plugin-tool-registry*` 是**编译期元数据**（类似 CLOS 自身的 class registry），不是工具实例。用户手动 `defmethod plugin-tools` 可覆盖此行为。
 
 ---
 
-## 第三层：Kernel 集成
+## Kernel Builder
 
-### tool_call 阶段的分派路径
-
-```
-LLM 返回: {name: "get_weather", arguments: {"city": "北京"}}
-        │
-        ▼
-kernel-execute-tool(kernel, :get-weather, (:city "北京"))
-        │
-        ├── find-plugin-for-tool  →  遍历 plugins，检查 plugin-tools
-        │
-        ▼
-(tool-invoke <weather-plugin> :get-weather (:city "北京"))
-        │
-        ▼
-CLOS discriminating function:
-   specializer-1: (typep obj 'weather-plugin)  → class test
-   specializer-2: (eq name :get-weather)       → eq test
-        │
-        ▼
-直接跳转方法体（无 hash-table 查找）
-```
-
-### Kernel 实现
+### 基本用法
 
 ```lisp
-(defun kernel-get-tools (kernel)
-  "收集所有插件的工具 schema 列表（传给 LLM 的 tools 参数）"
-  (loop for plugin in (kernel-plugins kernel)
-        nconc (loop for tool-name in (plugin-tools plugin)
-                    collect
-                    (list :name (string-downcase (symbol-name tool-name))
-                          :description (tool-description plugin tool-name)
-                          :input-schema (tool-schema plugin tool-name)))))
-
-(defun kernel-execute-tool (kernel fn-name args)
-  "查找并执行工具"
-  (let ((plugin (find-plugin-for-tool kernel fn-name)))
-    (unless plugin
-      (error "Tool ~A not found in any plugin" fn-name))
-    (tool-invoke plugin fn-name args)))
-
-(defun find-plugin-for-tool (kernel fn-name)
-  "查找包含指定工具的插件"
-  (loop for plugin in (kernel-plugins kernel)
-        when (member fn-name (plugin-tools plugin))
-          return plugin))
+(defvar *kernel*
+  (cl-agent.kernel:build-kernel
+    (cl-agent.kernel:with-tool
+      (cl-agent.kernel:add-service
+        (cl-agent.kernel:create-kernel-builder)
+        *provider*)
+      *weather-tool*)))
 ```
+
+### 添加多个工具
+
+```lisp
+(defvar *kernel*
+  (cl-agent.kernel:build-kernel
+    (cl-agent.kernel:with-tools
+      (cl-agent.kernel:add-service
+        (cl-agent.kernel:create-kernel-builder)
+        *provider*)
+      (list *tool1* *tool2* *tool3*))))
+```
+
+### 使用预设
+
+```lisp
+(defvar *kernel*
+  (cl-agent.kernel:build-kernel
+    (cl-agent.kernel:with-preset
+      (cl-agent.kernel:add-service
+        (cl-agent.kernel:create-kernel-builder)
+        *provider*)
+      :safe                      ; 预设
+      :security-level :standard))) ; 安全级别
+```
+
+### 设置 Tag 过滤
+
+```lisp
+(defvar *kernel*
+  (cl-agent.kernel:build-kernel
+    (cl-agent.kernel:with-active-tags
+      (cl-agent.kernel:with-preset
+        (cl-agent.kernel:add-service
+          (cl-agent.kernel:create-kernel-builder)
+          *provider*)
+        :full)
+      '(:safe :utility)    ; 只启用这些标签
+      :mode :any)))        ; :any 或 :all
+```
+
+---
+
+## Tag 过滤
+
+### 在 Kernel 级别过滤
+
+```lisp
+;; 设置活跃标签
+(kernel-set-active-tags kernel '(:safe :utility))
+
+;; 清除标签过滤
+(kernel-clear-active-tags kernel)
+
+;; 获取过滤后的工具
+(kernel-list-tools kernel)
+(kernel-get-tools kernel)
+```
+
+### 在查询时过滤
+
+```lisp
+;; 指定标签查询
+(kernel-list-tools kernel :tags '(:file))
+(kernel-get-tools kernel :tags '(:safe :read))
+```
+
+---
+
+## 3 层 Invoke API
+
+### Tier 1: 工具执行
+
+```lisp
+(invoke kernel :tool-name args)
+(invoke-tool kernel context :tool-name args)
+```
+
+### Tier 2: 单次 LLM 调用
+
+```lisp
+(invoke-chat kernel messages)
+(invoke-chat-stream kernel messages :on-token #'handler)
+```
+
+### Tier 3: 完整工具循环
+
+```lisp
+(invoke-kernel kernel messages)
+(invoke-chat-with-tools kernel messages)
+```
+
+---
+
+## 预设配置
+
+### 安全级别
+
+| 级别 | 描述 |
+|------|------|
+| `:permissive` | 宽松模式 |
+| `:standard` | 标准模式（推荐） |
+| `:strict` | 严格模式 |
+
+### 工具预设
+
+| 预设 | 包含工具 |
+|------|---------|
+| `:standard` | 文件 + HTTP + 实用工具 |
+| `:safe` | 只读操作 |
+| `:full` | 全部（含 Shell） |
+| `:file-only` | 仅文件 |
+| `:http-only` | 仅 HTTP |
+| `:utility-only` | 仅实用工具 |
 
 ---
 
 ## 使用示例
 
-### 使用宏（推荐，简洁）
+### 完整示例
 
 ```lisp
-(defplugin weather-plugin ()
-  "天气工具集"
-  ((api-key :initarg :api-key :reader plugin-api-key)))
+;; 1. 创建 Provider
+(defvar *provider*
+  (cl-agent.llm.providers:make-anthropic-provider
+    :api-key (uiop:getenv "ANTHROPIC_API_KEY")
+    :model "claude-3-5-sonnet-20241022"))
 
-(deftool (weather-plugin :get-weather)
-  "获取指定城市的天气信息"
-  ((city :string "城市名称" :required t)
-   (unit :string "温度单位" :default "celsius"))
-  (format nil "~A：晴，22°~A（via ~A）"
-          city unit (plugin-api-key plugin)))
+;; 2. 创建自定义工具
+(defvar *calc-tool*
+  (cl-agent.tools:make-simple-tool
+    :calculate
+    "计算数学表达式"
+    (lambda (&key expression)
+      (format nil "~A" (eval (read-from-string expression))))
+    :parameters '((:expression :type :string
+                   :description "数学表达式"
+                   :required-p t))
+    :tags '(:utility :math :safe)))
 
-(deftool (weather-plugin :get-forecast)
-  "获取天气预报"
-  ((city :string "城市名称" :required t)
-   (days :int "预报天数" :default 3))
-  (format nil "~A未来~A天：晴转多云" city days))
+;; 3. 创建 Kernel
+(defvar *kernel*
+  (cl-agent.kernel:build-kernel
+    (cl-agent.kernel:with-tool
+      (cl-agent.kernel:with-preset
+        (cl-agent.kernel:add-service
+          (cl-agent.kernel:create-kernel-builder)
+          *provider*)
+        :utility-only
+        :security-level :standard)
+      *calc-tool*)))
 
-;; 实例化（无全局变量）
-(let* ((wp (make-instance 'weather-plugin :api-key "my-key"))
-       (kernel (make-kernel
-                 :chat-service provider
-                 :plugins (list wp))))
-  (chat-completion kernel history
-    :settings '(:system-prompt "你是有用的助手")))
-```
+;; 4. 创建 Agent
+(defvar *agent*
+  (cl-agent.simpleagent:make-kernel-agent *kernel*
+    :system-prompt "你是一个有帮助的助手。"))
 
-### 不使用宏（纯 CLOS）
-
-```lisp
-(defclass weather-plugin (kernel-plugin)
-  ((api-key :initarg :api-key :reader plugin-api-key)))
-
-(defmethod plugin-name ((p weather-plugin)) :weather-plugin)
-(defmethod plugin-description ((p weather-plugin)) "天气工具集")
-(defmethod plugin-tools ((p weather-plugin)) '(:get-weather))
-
-(defmethod tool-description ((p weather-plugin) (name (eql :get-weather)))
-  "获取天气")
-
-(defmethod tool-schema ((p weather-plugin) (name (eql :get-weather)))
-  (params->json-schema '((city :string "城市名" :required t))))
-
-(defmethod tool-invoke ((p weather-plugin) (name (eql :get-weather)) args)
-  (format nil "~A：晴" (getf args :city)))
-
-;; 使用方式完全相同
-(let* ((wp (make-instance 'weather-plugin :api-key "my-key"))
-       (kernel (make-kernel :chat-service provider :plugins (list wp))))
-  (chat-completion kernel history :settings ...))
+;; 5. 对话
+(cl-agent.simpleagent:agent-chat *agent* "计算 15 * 7")
 ```
 
 ---
@@ -316,10 +300,8 @@ CLOS discriminating function:
 
 | 特性 | 说明 |
 |------|------|
-| 无全局变量 | 工具生命周期由 plugin 实例管理 |
-| 编译期分派 | CLOS 方法缓存，无运行时 hash-table |
-| 插件可持有状态 | api-key、config 等通过 slots 访问 |
-| 多实例共存 | 同一 plugin 类可创建多个不同配置的实例 |
-| 可测试 | 传入 mock plugin 实例即可，无需 mock 全局状态 |
-| 可扩展 | 任何包可 defmethod 添加新工具到已有 plugin |
-| 两种风格共存 | 宏和纯 CLOS 可混用，宏只是语法糖 |
+| 直接工具注册 | 无需 Plugin 中间层，更简洁 |
+| Tag 过滤 | 灵活的运行时工具过滤 |
+| 预设配置 | 快速配置常用场景 |
+| Builder 模式 | 流式 API，易于组合 |
+| 安全级别 | 内置安全控制 |

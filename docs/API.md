@@ -7,9 +7,14 @@
 - [Core](#core)
   - [Kernel](#kernel)
   - [Context](#context)
-  - [Tool & Plugin](#tool--plugin)
   - [Filter](#filter)
   - [Service](#service)
+- [Tools](#tools)
+  - [Tool Class](#tool-class)
+  - [Tool Registry](#tool-registry)
+  - [Tag Filtering](#tag-filtering)
+  - [Presets](#presets)
+  - [Built-in Tools](#built-in-tools)
 - [LLM](#llm)
   - [Client](#client)
   - [Providers](#providers)
@@ -17,12 +22,7 @@
   - [KernelAgent](#kernelagent)
   - [ProcessAgent](#processagent)
 - [Memory](#memory)
-  - [Store](#store)
-  - [Checkpoint](#checkpoint)
-  - [Agent Memory](#agent-memory)
 - [RAG](#rag)
-  - [Pipeline](#pipeline)
-  - [Vector Store](#vector-store)
 - [MCP](#mcp)
 
 ---
@@ -31,69 +31,142 @@
 
 ### Kernel
 
-The central coordinator that holds Service, Plugins, Filters, and Config.
+The central coordinator that holds Service, Tool Registry, Filters, and Config.
 
 #### `make-kernel`
 
 ```lisp
-(make-kernel &key service plugins filters config) => kernel
+(make-kernel &key service tool-registry active-tags tag-filter-mode filters config context) => kernel
 ```
 
 Create a new Kernel instance.
 
 **Parameters:**
 - `service` - LLM service abstraction
-- `plugins` - List of plugin symbols
+- `tool-registry` - Tool registry
+- `active-tags` - Active tags (for filtering)
+- `tag-filter-mode` - Filter mode (`:any` or `:all`)
 - `filters` - List of filter objects
 - `config` - Configuration plist
+- `context` - Execution context
 
 **Example:**
 ```lisp
 (make-kernel
   :service my-service
-  :plugins '(weather-plugin math-plugin)
+  :tool-registry registry
+  :active-tags '(:safe :utility)
   :filters (list logging-filter))
 ```
 
-#### `kernel-get-tools`
+#### `create-kernel-builder`
 
 ```lisp
-(kernel-get-tools kernel) => list
+(create-kernel-builder) => kernel-builder
 ```
 
-Get all tool schemas from registered plugins.
+Create a Kernel Builder.
 
-#### `kernel-get-schema`
+#### `build-kernel`
 
 ```lisp
-(kernel-get-schema kernel tool-name) => hash-table
+(build-kernel builder) => kernel
 ```
 
-Get schema for a specific tool.
+Build Kernel from Builder.
 
-#### `invoke-tool`
+#### Builder Methods
 
 ```lisp
+;; Add service
+(add-service builder provider) => builder
+
+;; Add single tool
+(with-tool builder tool) => builder
+
+;; Add multiple tools
+(with-tools builder tool-list) => builder
+
+;; Use preset
+(with-preset builder preset &key security-level) => builder
+
+;; Set active tags
+(with-active-tags builder tags &key mode) => builder
+
+;; Add filter
+(add-filter builder filter) => builder
+```
+
+**Example:**
+```lisp
+(build-kernel
+  (with-active-tags
+    (with-preset
+      (add-service
+        (create-kernel-builder)
+        *provider*)
+      :safe
+      :security-level :standard)
+    '(:safe :utility)
+    :mode :any))
+```
+
+#### Kernel Query API
+
+```lisp
+;; Find tool
+(kernel-find-tool kernel tool-name) => tool
+
+;; Execute tool
+(kernel-execute-tool kernel tool-name args) => result
+
+;; Get tool schemas (supports Tag filtering)
+(kernel-get-tools kernel &key tags) => list
+
+;; List tool info (supports Tag filtering)
+(kernel-list-tools kernel &key tags) => list
+
+;; Tool count
+(kernel-tool-count kernel) => integer
+
+;; Has tool
+(kernel-has-tool-p kernel tool-name) => boolean
+```
+
+#### Kernel Tool Management API
+
+```lisp
+;; Register tool
+(kernel-register-tool kernel tool) => kernel
+
+;; Batch register
+(kernel-register-tools kernel tools) => kernel
+
+;; Unregister tool
+(kernel-unregister-tool kernel tool-name) => kernel
+
+;; Set active tags
+(kernel-set-active-tags kernel tags) => kernel
+
+;; Clear active tags
+(kernel-clear-active-tags kernel) => kernel
+```
+
+#### 3-Tier Invoke API
+
+```lisp
+;; Tier 1: Tool execution
+(invoke kernel tool-name args &key context) => result
 (invoke-tool kernel context tool-name args) => result
+
+;; Tier 2: Single LLM call
+(invoke-chat kernel messages &key settings) => response
+(invoke-chat-stream kernel messages &key on-token) => nil
+
+;; Tier 3: Complete tool loop
+(invoke-kernel kernel messages &key settings) => response
+(invoke-chat-with-tools kernel messages &key settings) => response
 ```
-
-Execute a single tool.
-
-#### `invoke-chat`
-
-```lisp
-(invoke-chat kernel context messages settings) => response
-```
-
-Perform a single LLM call.
-
-#### `invoke-kernel`
-
-```lisp
-(invoke-kernel kernel context messages) => response
-```
-
-Execute complete tool-calling loop until no more tool calls.
 
 ---
 
@@ -101,159 +174,208 @@ Execute complete tool-calling loop until no more tool calls.
 
 Execution context tracking variables, messages, history, and trace.
 
-#### `make-context`
-
 ```lisp
 (make-context &key messages metadata) => context
-```
-
-Create a new Context instance.
-
-#### `context-get-variable`
-
-```lisp
-(context-get-variable context key) => value
-```
-
-Get a variable from context.
-
-#### `context-set-variable`
-
-```lisp
-(context-set-variable context key value) => value
-```
-
-Set a variable in context.
-
-#### `context-add-message`
-
-```lisp
+(context-get context key) => value
+(context-set context key value) => value
 (context-add-message context message) => context
+(context-get-messages context) => list
 ```
-
-Add a message to context.
-
----
-
-### Tool & Plugin
-
-#### `deftool`
-
-```lisp
-(deftool name description parameters &body body)
-```
-
-Define a tool function with metadata.
-
-**Parameters:**
-- `name` - Tool function name
-- `description` - Tool description for LLM
-- `parameters` - Parameter specifications `((name type desc &key required-p default) ...)`
-- `body` - Function body
-
-**Example:**
-```lisp
-(deftool calculate "Perform calculation"
-  ((expression :string "Math expression" :required-p t))
-  (eval (read-from-string expression)))
-```
-
-#### `defplugin`
-
-```lisp
-(defplugin name description &rest tools)
-```
-
-Define a plugin grouping multiple tools.
-
-**Example:**
-```lisp
-(defplugin math-plugin "Mathematical operations"
-  calculate
-  convert-units)
-```
-
-#### `declare-tool`
-
-```lisp
-(declare-tool symbol &key description parameters category)
-```
-
-Declare tool metadata on an existing function.
-
-#### `declare-plugin`
-
-```lisp
-(declare-plugin symbol description tools)
-```
-
-Declare plugin metadata.
-
-#### `tool-function-p`
-
-```lisp
-(tool-function-p symbol) => boolean
-```
-
-Check if symbol is a tool function.
-
-#### `tool-schema`
-
-```lisp
-(tool-schema symbol) => hash-table
-```
-
-Get JSON Schema for a tool.
 
 ---
 
 ### Filter
 
-Filters intercept execution at 4 points: pre-invocation, post-invocation, pre-chat, post-chat.
-
-#### `make-filter`
+Filters intercept execution at 4 points.
 
 ```lisp
 (make-filter &key type name fn priority) => filter
 ```
 
-Create a filter.
-
-**Parameters:**
-- `type` - One of `:pre-invocation`, `:post-invocation`, `:pre-chat`, `:post-chat`
-- `name` - Filter name string
-- `fn` - Filter function `(context next-fn) => result`
-- `priority` - Integer priority (higher = earlier)
-
-**Example:**
-```lisp
-(make-filter
-  :type :pre-invocation
-  :name "logging"
-  :fn (lambda (ctx next)
-        (format t "Executing tool...~%")
-        (funcall next ctx))
-  :priority 10)
-```
+**Types:**
+- `:pre-invocation` - Before tool execution
+- `:post-invocation` - After tool execution
+- `:pre-chat` - Before LLM call
+- `:post-chat` - After LLM call
 
 ---
 
 ### Service
 
-LLM abstraction decoupling Kernel from specific implementations.
-
-#### `make-service`
+LLM abstraction.
 
 ```lisp
 (make-service &key chat-fn build-result-msgs-fn provider) => service
+(service-from-provider provider) => service
 ```
 
-Create a Service instance.
+---
+
+## Tools
+
+### Tool Class
+
+```lisp
+(defclass tool ()
+  ((name :type keyword)
+   (description :type string)
+   (handler :type function)
+   (parameters :type list)
+   (category :type keyword)
+   (tags :type list)
+   (permissions :type list)
+   (metadata)))
+```
+
+#### `make-simple-tool`
+
+```lisp
+(make-simple-tool name description handler &key parameters category tags permissions metadata) => tool
+```
+
+Create a tool instance.
 
 **Parameters:**
-- `chat-fn` - Function for LLM chat
-- `build-result-msgs-fn` - Function to build result messages
-- `provider` - LLM provider instance
+- `name` - Tool name (keyword)
+- `description` - Tool description
+- `handler` - Execution function `(lambda (&key ...) ...)`
+- `parameters` - Parameter definition list
+- `category` - Category (default `:custom`)
+- `tags` - Tag list
+- `permissions` - Permission list
+- `metadata` - Metadata
+
+**Example:**
+```lisp
+(make-simple-tool
+  :greet
+  "Greet user"
+  (lambda (&key name)
+    (format nil "Hello, ~A!" name))
+  :parameters '((:name :type :string :description "User name" :required-p t))
+  :tags '(:utility :safe))
+```
+
+#### Tag Helper Functions
+
+```lisp
+(tool-has-tag-p tool tag) => boolean
+(tool-has-any-tag-p tool tags) => boolean
+(tool-has-all-tags-p tool tags) => boolean
+(tool-add-tag tool tag) => tool
+(tool-remove-tag tool tag) => tool
+(tool-set-tags tool tags) => tool
+```
+
+---
+
+### Tool Registry
+
+```lisp
+(make-tool-registry) => registry
+(register-tool registry tool) => tool
+(unregister-tool registry tool-name) => boolean
+(find-tool registry tool-name) => tool
+(list-tools registry &key category) => list
+(registry-tool-count registry) => integer
+```
+
+---
+
+### Tag Filtering
+
+```lisp
+;; By single tag
+(list-tools-by-tag registry tag) => list
+
+;; By multiple tags
+(list-tools-by-tags registry tags &key mode) => list
+;; mode: :any (default) or :all
+
+;; Get filtered schemas
+(get-tools-schema-by-tags registry tags &key mode) => list
+
+;; List all tags
+(list-all-tags registry) => list
+
+;; Statistics
+(count-tools-by-tag registry tag) => integer
+```
+
+---
+
+### Presets
+
+#### Security Levels
+
+| Level | Keyword | Description |
+|-------|---------|-------------|
+| Permissive | `:permissive` | Least restrictions |
+| Standard | `:standard` | Balanced mode |
+| Strict | `:strict` | Maximum restrictions |
+
+#### Tool Presets
+
+| Preset | Keyword | Description |
+|--------|---------|-------------|
+| Standard | `:standard` | File + HTTP + Utility tools |
+| Safe | `:safe` | Read-only operations |
+| Full | `:full` | All tools (including Shell) |
+| File Only | `:file-only` | File operations only |
+| HTTP Only | `:http-only` | HTTP operations only |
+| Utility Only | `:utility-only` | Utility tools only |
+
+```lisp
+;; Quick setup with preset
+(quick-setup-tools &key preset security-level) => list
+
+;; List available presets
+(list-all-presets) => list
+
+;; Describe preset
+(describe-preset preset) => string
+```
+
+---
+
+### Built-in Tools
+
+#### File Tools
+
+```lisp
+(make-read-file-tool) => tool      ; Tags: (:file :io :read :safe)
+(make-write-file-tool) => tool     ; Tags: (:file :io :write)
+(make-delete-file-tool) => tool    ; Tags: (:file :io :write :dangerous)
+(make-list-directory-tool) => tool ; Tags: (:file :io :read :safe)
+(create-file-tools) => list
+```
+
+#### HTTP Tools
+
+```lisp
+(make-http-get-tool) => tool   ; Tags: (:http :network :read :safe)
+(make-http-post-tool) => tool  ; Tags: (:http :network :write)
+(create-http-tools) => list
+```
+
+#### Shell Tools
+
+```lisp
+(make-execute-command-tool) => tool  ; Tags: (:shell :system :dangerous)
+(create-shell-tools) => list
+```
+
+#### Utility Tools
+
+```lisp
+(make-get-timestamp-tool) => tool    ; Tags: (:utility :safe)
+(make-generate-uuid-tool) => tool    ; Tags: (:utility :safe)
+(make-json-parse-tool) => tool       ; Tags: (:utility :safe)
+(make-json-stringify-tool) => tool   ; Tags: (:utility :safe)
+(make-string-replace-tool) => tool   ; Tags: (:utility :safe)
+(make-math-eval-tool) => tool        ; Tags: (:utility :safe)
+(create-utility-tools) => list
+```
 
 ---
 
@@ -261,74 +383,13 @@ Create a Service instance.
 
 ### Client
 
-#### `make-client`
-
 ```lisp
 (make-client &key provider model api-key base-url max-tokens temperature) => client
-```
-
-Create an LLM client.
-
-**Parameters:**
-- `provider` - Provider keyword (`:anthropic`, `:openai`, `:zhipu`, `:ollama`)
-- `model` - Model name string
-- `api-key` - API key string
-- `base-url` - Optional custom API base URL
-- `max-tokens` - Maximum response tokens
-- `temperature` - Sampling temperature
-
-**Example:**
-```lisp
-(make-client
-  :provider :anthropic
-  :model "claude-3-5-sonnet-20241022"
-  :api-key "sk-...")
-```
-
-#### `chat`
-
-```lisp
 (chat client messages &key tools temperature max-tokens) => response
-```
-
-Send chat request to LLM.
-
-**Parameters:**
-- `client` - LLM client
-- `messages` - String or list of message plists
-- `tools` - Optional tool schemas
-- `temperature` - Optional temperature override
-- `max-tokens` - Optional max tokens override
-
-**Example:**
-```lisp
-;; Simple string
-(chat client "Hello!")
-
-;; Multi-turn conversation
-(chat client
-  '((:role :user :content "Hi")
-    (:role :assistant :content "Hello!")
-    (:role :user :content "How are you?")))
-```
-
-#### `chat-stream`
-
-```lisp
 (chat-stream client messages &key on-token on-complete) => nil
 ```
 
-Stream chat response.
-
-**Parameters:**
-- `on-token` - Callback `(token) => nil` for each token
-- `on-complete` - Callback `(full-response) => nil` when done
-
----
-
 ### Providers
-
-Supported providers:
 
 | Provider | Keyword | Default Model |
 |----------|---------|---------------|
@@ -343,74 +404,20 @@ Supported providers:
 
 ### KernelAgent
 
-Simple chat agent wrapping Kernel.
-
-#### `make-kernel-agent`
-
 ```lisp
 (make-kernel-agent kernel &key name system-prompt settings callbacks) => agent
-```
-
-Create a KernelAgent.
-
-**Parameters:**
-- `kernel` - Kernel instance
-- `name` - Agent name
-- `system-prompt` - System prompt string
-- `settings` - Settings plist (`:max-iterations`, etc.)
-- `callbacks` - Callback functions
-
-#### `agent-chat`
-
-```lisp
 (agent-chat agent message &key verbose) => response
 ```
 
-Chat with agent.
-
----
-
 ### ProcessAgent
-
-Agent with pause/resume capabilities.
-
-#### `make-process-agent`
 
 ```lisp
 (make-process-agent kernel) => agent
-```
-
-#### `agent-start`
-
-```lisp
 (agent-start agent message) => nil
-```
-
-Start agent with initial message.
-
-#### `agent-pause`
-
-```lisp
 (agent-pause agent) => nil
-```
-
-Pause agent execution.
-
-#### `agent-resume`
-
-```lisp
 (agent-resume agent) => nil
-```
-
-Resume paused agent.
-
-#### `agent-stop`
-
-```lisp
 (agent-stop agent) => nil
 ```
-
-Stop agent.
 
 ---
 
@@ -418,123 +425,31 @@ Stop agent.
 
 ### Store
 
-Long-term persistent storage protocol.
-
-#### `make-memory-store-backend`
-
 ```lisp
 (make-memory-store-backend) => store
-```
-
-Create in-memory store backend.
-
-#### `make-sqlite-store-backend`
-
-```lisp
 (make-sqlite-store-backend &key db-path) => store
-```
-
-Create SQLite store backend.
-
-#### `store-put`
-
-```lisp
 (store-put store namespace key value) => value
-```
-
-Store a value.
-
-#### `store-get`
-
-```lisp
 (store-get store namespace key) => value
-```
-
-Retrieve a value.
-
-#### `store-delete`
-
-```lisp
 (store-delete store namespace key) => boolean
-```
-
-Delete a value.
-
-#### `store-list-keys`
-
-```lisp
 (store-list-keys store namespace) => list
 ```
 
-List all keys in namespace.
-
----
-
 ### Checkpoint
-
-Short-term state snapshots.
-
-#### `save-checkpoint`
 
 ```lisp
 (save-checkpoint checkpointer thread-id state) => checkpoint
-```
-
-Save a checkpoint.
-
-#### `load-checkpoint`
-
-```lisp
 (load-checkpoint checkpointer thread-id) => checkpoint
 ```
 
-Load latest checkpoint for thread.
-
----
-
 ### Agent Memory
-
-Unified memory interface.
-
-#### `make-agent-memory`
 
 ```lisp
 (make-agent-memory &key context-store persistent-store default-thread-id) => memory
-```
-
-Create Agent Memory.
-
-#### `am-add-message`
-
-```lisp
 (am-add-message memory thread-id role content) => message
-```
-
-Add message to thread.
-
-#### `am-get-messages`
-
-```lisp
 (am-get-messages memory thread-id) => list
-```
-
-Get all messages in thread.
-
-#### `am-save-checkpoint`
-
-```lisp
 (am-save-checkpoint memory thread-id state) => checkpoint
-```
-
-Save checkpoint.
-
-#### `am-load-checkpoint`
-
-```lisp
 (am-load-checkpoint memory checkpoint-id) => checkpoint
 ```
-
-Load checkpoint.
 
 ---
 
@@ -542,57 +457,19 @@ Load checkpoint.
 
 ### Pipeline
 
-#### `make-rag-pipeline`
-
 ```lisp
 (make-rag-pipeline &key embeddings-model vector-store splitter) => pipeline
-```
-
-Create RAG pipeline.
-
-#### `rag-retrieve`
-
-```lisp
 (rag-retrieve pipeline query &key top-k) => list
-```
-
-Retrieve relevant documents.
-
-#### `rag-query`
-
-```lisp
 (rag-query pipeline question &key top-k) => response
 ```
 
-Query with RAG context.
-
----
-
 ### Vector Store
-
-#### `make-vector-store`
 
 ```lisp
 (make-vector-store) => store
-```
-
-Create vector store.
-
-#### `vector-store-add-document`
-
-```lisp
 (vector-store-add-document store content embedding &key metadata) => document
-```
-
-Add document to store.
-
-#### `vector-store-search`
-
-```lisp
 (vector-store-search store query-embedding &key top-k) => list
 ```
-
-Search for similar documents.
 
 ---
 
@@ -600,52 +477,16 @@ Search for similar documents.
 
 ### Client
 
-#### `make-mcp-client`
-
 ```lisp
 (make-mcp-client &key transport) => client
-```
-
-Create MCP client.
-
-#### `mcp-client-connect`
-
-```lisp
 (mcp-client-connect client) => nil
-```
-
-Connect to MCP server.
-
-#### `mcp-client-call-tool`
-
-```lisp
 (mcp-client-call-tool client tool-name args) => result
 ```
 
-Call tool via MCP.
-
 ### Server
-
-#### `make-mcp-server`
 
 ```lisp
 (make-mcp-server &key transport) => server
-```
-
-Create MCP server.
-
-#### `mcp-server-start`
-
-```lisp
 (mcp-server-start server) => nil
-```
-
-Start MCP server.
-
-#### `mcp-register-tool`
-
-```lisp
 (mcp-register-tool server tool-name fn) => nil
 ```
-
-Register tool with server.

@@ -7,9 +7,14 @@
 - [Core](#core)
   - [Kernel](#kernel)
   - [Context](#context)
-  - [Tool & Plugin](#tool--plugin)
   - [Filter](#filter)
   - [Service](#service)
+- [Tools](#tools)
+  - [Tool 类](#tool-类)
+  - [Tool Registry](#tool-registry)
+  - [Tag 过滤](#tag-过滤)
+  - [预设配置](#预设配置)
+  - [内置工具](#内置工具)
 - [LLM](#llm)
   - [Client](#client)
   - [Providers](#providers)
@@ -17,12 +22,7 @@
   - [KernelAgent](#kernelagent)
   - [ProcessAgent](#processagent)
 - [Memory](#memory)
-  - [Store](#store)
-  - [Checkpoint](#checkpoint)
-  - [Agent Memory](#agent-memory)
 - [RAG](#rag)
-  - [Pipeline](#pipeline)
-  - [Vector Store](#vector-store)
 - [MCP](#mcp)
 
 ---
@@ -31,69 +31,142 @@
 
 ### Kernel
 
-Kernel 是中央协调器，持有 Service、Plugins、Filters 和 Config。
+Kernel 是中央协调器，持有 Service、Tool Registry、Filters 和 Config。
 
 #### `make-kernel`
 
 ```lisp
-(make-kernel &key service plugins filters config) => kernel
+(make-kernel &key service tool-registry active-tags tag-filter-mode filters config context) => kernel
 ```
 
 创建新的 Kernel 实例。
 
 **参数：**
 - `service` - LLM 服务抽象
-- `plugins` - 插件符号列表
+- `tool-registry` - 工具注册表
+- `active-tags` - 活跃标签（用于过滤）
+- `tag-filter-mode` - 过滤模式（`:any` 或 `:all`）
 - `filters` - 过滤器对象列表
 - `config` - 配置属性列表
+- `context` - 执行上下文
 
 **示例：**
 ```lisp
 (make-kernel
   :service my-service
-  :plugins '(weather-plugin math-plugin)
+  :tool-registry registry
+  :active-tags '(:safe :utility)
   :filters (list logging-filter))
 ```
 
-#### `kernel-get-tools`
+#### `create-kernel-builder`
 
 ```lisp
-(kernel-get-tools kernel) => list
+(create-kernel-builder) => kernel-builder
 ```
 
-获取所有已注册插件的工具 schema。
+创建 Kernel Builder。
 
-#### `kernel-get-schema`
+#### `build-kernel`
 
 ```lisp
-(kernel-get-schema kernel tool-name) => hash-table
+(build-kernel builder) => kernel
 ```
 
-获取特定工具的 schema。
+从 Builder 构建 Kernel。
 
-#### `invoke-tool`
+#### Builder 方法
 
 ```lisp
+;; 添加服务
+(add-service builder provider) => builder
+
+;; 添加单个工具
+(with-tool builder tool) => builder
+
+;; 添加多个工具
+(with-tools builder tool-list) => builder
+
+;; 使用预设
+(with-preset builder preset &key security-level) => builder
+
+;; 设置活跃标签
+(with-active-tags builder tags &key mode) => builder
+
+;; 添加过滤器
+(add-filter builder filter) => builder
+```
+
+**示例：**
+```lisp
+(build-kernel
+  (with-active-tags
+    (with-preset
+      (add-service
+        (create-kernel-builder)
+        *provider*)
+      :safe
+      :security-level :standard)
+    '(:safe :utility)
+    :mode :any))
+```
+
+#### Kernel 查询 API
+
+```lisp
+;; 查找工具
+(kernel-find-tool kernel tool-name) => tool
+
+;; 执行工具
+(kernel-execute-tool kernel tool-name args) => result
+
+;; 获取工具 Schema（支持 Tag 过滤）
+(kernel-get-tools kernel &key tags) => list
+
+;; 列出工具信息（支持 Tag 过滤）
+(kernel-list-tools kernel &key tags) => list
+
+;; 工具数量
+(kernel-tool-count kernel) => integer
+
+;; 是否有工具
+(kernel-has-tool-p kernel tool-name) => boolean
+```
+
+#### Kernel 工具管理 API
+
+```lisp
+;; 注册工具
+(kernel-register-tool kernel tool) => kernel
+
+;; 批量注册
+(kernel-register-tools kernel tools) => kernel
+
+;; 注销工具
+(kernel-unregister-tool kernel tool-name) => kernel
+
+;; 设置活跃标签
+(kernel-set-active-tags kernel tags) => kernel
+
+;; 清除活跃标签
+(kernel-clear-active-tags kernel) => kernel
+```
+
+#### 3 层 Invoke API
+
+```lisp
+;; Tier 1: 工具执行
+(invoke kernel tool-name args &key context) => result
 (invoke-tool kernel context tool-name args) => result
+
+;; Tier 2: 单次 LLM 调用
+(invoke-chat kernel messages &key settings) => response
+(invoke-chat-stream kernel messages &key on-token) => nil
+
+;; Tier 3: 完整工具循环
+(invoke-kernel kernel messages &key settings) => response
+(invoke-chat-with-tools kernel messages &key settings) => response
 ```
-
-执行单个工具。
-
-#### `invoke-chat`
-
-```lisp
-(invoke-chat kernel context messages settings) => response
-```
-
-执行单次 LLM 调用。
-
-#### `invoke-kernel`
-
-```lisp
-(invoke-kernel kernel context messages) => response
-```
-
-执行完整的工具调用循环，直到没有更多工具调用。
 
 ---
 
@@ -101,159 +174,208 @@ Kernel 是中央协调器，持有 Service、Plugins、Filters 和 Config。
 
 执行上下文，追踪变量、消息、历史和执行轨迹。
 
-#### `make-context`
-
 ```lisp
 (make-context &key messages metadata) => context
-```
-
-创建新的 Context 实例。
-
-#### `context-get-variable`
-
-```lisp
-(context-get-variable context key) => value
-```
-
-从上下文获取变量。
-
-#### `context-set-variable`
-
-```lisp
-(context-set-variable context key value) => value
-```
-
-在上下文中设置变量。
-
-#### `context-add-message`
-
-```lisp
+(context-get context key) => value
+(context-set context key value) => value
 (context-add-message context message) => context
+(context-get-messages context) => list
 ```
-
-向上下文添加消息。
-
----
-
-### Tool & Plugin
-
-#### `deftool`
-
-```lisp
-(deftool name description parameters &body body)
-```
-
-定义带元数据的工具函数。
-
-**参数：**
-- `name` - 工具函数名称
-- `description` - 供 LLM 使用的工具描述
-- `parameters` - 参数规格 `((name type desc &key required-p default) ...)`
-- `body` - 函数体
-
-**示例：**
-```lisp
-(deftool calculate "执行计算"
-  ((expression :string "数学表达式" :required-p t))
-  (eval (read-from-string expression)))
-```
-
-#### `defplugin`
-
-```lisp
-(defplugin name description &rest tools)
-```
-
-定义包含多个工具的插件。
-
-**示例：**
-```lisp
-(defplugin math-plugin "数学运算"
-  calculate
-  convert-units)
-```
-
-#### `declare-tool`
-
-```lisp
-(declare-tool symbol &key description parameters category)
-```
-
-在现有函数上声明工具元数据。
-
-#### `declare-plugin`
-
-```lisp
-(declare-plugin symbol description tools)
-```
-
-声明插件元数据。
-
-#### `tool-function-p`
-
-```lisp
-(tool-function-p symbol) => boolean
-```
-
-检查符号是否为工具函数。
-
-#### `tool-schema`
-
-```lisp
-(tool-schema symbol) => hash-table
-```
-
-获取工具的 JSON Schema。
 
 ---
 
 ### Filter
 
-过滤器在 4 个点拦截执行：pre-invocation、post-invocation、pre-chat、post-chat。
-
-#### `make-filter`
+过滤器在 4 个点拦截执行。
 
 ```lisp
 (make-filter &key type name fn priority) => filter
 ```
 
-创建过滤器。
-
-**参数：**
-- `type` - `:pre-invocation`、`:post-invocation`、`:pre-chat`、`:post-chat` 之一
-- `name` - 过滤器名称字符串
-- `fn` - 过滤器函数 `(context next-fn) => result`
-- `priority` - 整数优先级（越高越早执行）
-
-**示例：**
-```lisp
-(make-filter
-  :type :pre-invocation
-  :name "logging"
-  :fn (lambda (ctx next)
-        (format t "执行工具...~%")
-        (funcall next ctx))
-  :priority 10)
-```
+**类型：**
+- `:pre-invocation` - 工具执行前
+- `:post-invocation` - 工具执行后
+- `:pre-chat` - LLM 调用前
+- `:post-chat` - LLM 调用后
 
 ---
 
 ### Service
 
-LLM 抽象，将 Kernel 与具体实现解耦。
-
-#### `make-service`
+LLM 抽象。
 
 ```lisp
 (make-service &key chat-fn build-result-msgs-fn provider) => service
+(service-from-provider provider) => service
 ```
 
-创建 Service 实例。
+---
+
+## Tools
+
+### Tool 类
+
+```lisp
+(defclass tool ()
+  ((name :type keyword)
+   (description :type string)
+   (handler :type function)
+   (parameters :type list)
+   (category :type keyword)
+   (tags :type list)
+   (permissions :type list)
+   (metadata)))
+```
+
+#### `make-simple-tool`
+
+```lisp
+(make-simple-tool name description handler &key parameters category tags permissions metadata) => tool
+```
+
+创建工具实例。
 
 **参数：**
-- `chat-fn` - LLM 聊天函数
-- `build-result-msgs-fn` - 构建结果消息的函数
-- `provider` - LLM 提供商实例
+- `name` - 工具名称（关键字）
+- `description` - 工具描述
+- `handler` - 执行函数 `(lambda (&key ...) ...)`
+- `parameters` - 参数定义列表
+- `category` - 分类（默认 `:custom`）
+- `tags` - 标签列表
+- `permissions` - 权限列表
+- `metadata` - 元数据
+
+**示例：**
+```lisp
+(make-simple-tool
+  :greet
+  "问候用户"
+  (lambda (&key name)
+    (format nil "你好，~A！" name))
+  :parameters '((:name :type :string :description "用户名" :required-p t))
+  :tags '(:utility :safe))
+```
+
+#### Tag 辅助函数
+
+```lisp
+(tool-has-tag-p tool tag) => boolean
+(tool-has-any-tag-p tool tags) => boolean
+(tool-has-all-tags-p tool tags) => boolean
+(tool-add-tag tool tag) => tool
+(tool-remove-tag tool tag) => tool
+(tool-set-tags tool tags) => tool
+```
+
+---
+
+### Tool Registry
+
+```lisp
+(make-tool-registry) => registry
+(register-tool registry tool) => tool
+(unregister-tool registry tool-name) => boolean
+(find-tool registry tool-name) => tool
+(list-tools registry &key category) => list
+(registry-tool-count registry) => integer
+```
+
+---
+
+### Tag 过滤
+
+```lisp
+;; 按单个标签
+(list-tools-by-tag registry tag) => list
+
+;; 按多个标签
+(list-tools-by-tags registry tags &key mode) => list
+;; mode: :any (默认) 或 :all
+
+;; 获取过滤后的 Schema
+(get-tools-schema-by-tags registry tags &key mode) => list
+
+;; 列出所有标签
+(list-all-tags registry) => list
+
+;; 统计
+(count-tools-by-tag registry tag) => integer
+```
+
+---
+
+### 预设配置
+
+#### 安全级别
+
+| 级别 | 关键字 | 描述 |
+|------|--------|------|
+| 宽松 | `:permissive` | 最少限制 |
+| 标准 | `:standard` | 平衡模式 |
+| 严格 | `:strict` | 最大限制 |
+
+#### 工具预设
+
+| 预设 | 关键字 | 描述 |
+|------|--------|------|
+| 标准 | `:standard` | 文件 + HTTP + 实用工具 |
+| 安全 | `:safe` | 只读操作 |
+| 完整 | `:full` | 全部工具（含 Shell） |
+| 仅文件 | `:file-only` | 仅文件操作 |
+| 仅 HTTP | `:http-only` | 仅 HTTP 操作 |
+| 仅实用工具 | `:utility-only` | 仅实用工具 |
+
+```lisp
+;; 快速获取预设工具
+(quick-setup-tools &key preset security-level) => list
+
+;; 列出可用预设
+(list-all-presets) => list
+
+;; 查看预设描述
+(describe-preset preset) => string
+```
+
+---
+
+### 内置工具
+
+#### 文件工具
+
+```lisp
+(make-read-file-tool) => tool      ; 标签: (:file :io :read :safe)
+(make-write-file-tool) => tool     ; 标签: (:file :io :write)
+(make-delete-file-tool) => tool    ; 标签: (:file :io :write :dangerous)
+(make-list-directory-tool) => tool ; 标签: (:file :io :read :safe)
+(create-file-tools) => list
+```
+
+#### HTTP 工具
+
+```lisp
+(make-http-get-tool) => tool   ; 标签: (:http :network :read :safe)
+(make-http-post-tool) => tool  ; 标签: (:http :network :write)
+(create-http-tools) => list
+```
+
+#### Shell 工具
+
+```lisp
+(make-execute-command-tool) => tool  ; 标签: (:shell :system :dangerous)
+(create-shell-tools) => list
+```
+
+#### 实用工具
+
+```lisp
+(make-get-timestamp-tool) => tool    ; 标签: (:utility :safe)
+(make-generate-uuid-tool) => tool    ; 标签: (:utility :safe)
+(make-json-parse-tool) => tool       ; 标签: (:utility :safe)
+(make-json-stringify-tool) => tool   ; 标签: (:utility :safe)
+(make-string-replace-tool) => tool   ; 标签: (:utility :safe)
+(make-math-eval-tool) => tool        ; 标签: (:utility :safe)
+(create-utility-tools) => list
+```
 
 ---
 
@@ -261,74 +383,13 @@ LLM 抽象，将 Kernel 与具体实现解耦。
 
 ### Client
 
-#### `make-client`
-
 ```lisp
 (make-client &key provider model api-key base-url max-tokens temperature) => client
-```
-
-创建 LLM 客户端。
-
-**参数：**
-- `provider` - 提供商关键字（`:anthropic`、`:openai`、`:zhipu`、`:ollama`）
-- `model` - 模型名称字符串
-- `api-key` - API 密钥字符串
-- `base-url` - 可选的自定义 API 基础 URL
-- `max-tokens` - 最大响应 token 数
-- `temperature` - 采样温度
-
-**示例：**
-```lisp
-(make-client
-  :provider :anthropic
-  :model "claude-3-5-sonnet-20241022"
-  :api-key "sk-...")
-```
-
-#### `chat`
-
-```lisp
 (chat client messages &key tools temperature max-tokens) => response
-```
-
-向 LLM 发送聊天请求。
-
-**参数：**
-- `client` - LLM 客户端
-- `messages` - 字符串或消息属性列表的列表
-- `tools` - 可选的工具 schema
-- `temperature` - 可选的温度覆盖
-- `max-tokens` - 可选的最大 token 覆盖
-
-**示例：**
-```lisp
-;; 简单字符串
-(chat client "你好！")
-
-;; 多轮对话
-(chat client
-  '((:role :user :content "嗨")
-    (:role :assistant :content "你好！")
-    (:role :user :content "你好吗？")))
-```
-
-#### `chat-stream`
-
-```lisp
 (chat-stream client messages &key on-token on-complete) => nil
 ```
 
-流式输出聊天响应。
-
-**参数：**
-- `on-token` - 每个 token 的回调 `(token) => nil`
-- `on-complete` - 完成时的回调 `(full-response) => nil`
-
----
-
 ### Providers
-
-支持的提供商：
 
 | 提供商 | 关键字 | 默认模型 |
 |--------|--------|----------|
@@ -343,74 +404,20 @@ LLM 抽象，将 Kernel 与具体实现解耦。
 
 ### KernelAgent
 
-包装 Kernel 的简单聊天 Agent。
-
-#### `make-kernel-agent`
-
 ```lisp
 (make-kernel-agent kernel &key name system-prompt settings callbacks) => agent
-```
-
-创建 KernelAgent。
-
-**参数：**
-- `kernel` - Kernel 实例
-- `name` - Agent 名称
-- `system-prompt` - 系统提示字符串
-- `settings` - 设置属性列表（`:max-iterations` 等）
-- `callbacks` - 回调函数
-
-#### `agent-chat`
-
-```lisp
 (agent-chat agent message &key verbose) => response
 ```
 
-与 Agent 对话。
-
----
-
 ### ProcessAgent
-
-支持暂停/恢复的 Agent。
-
-#### `make-process-agent`
 
 ```lisp
 (make-process-agent kernel) => agent
-```
-
-#### `agent-start`
-
-```lisp
 (agent-start agent message) => nil
-```
-
-使用初始消息启动 Agent。
-
-#### `agent-pause`
-
-```lisp
 (agent-pause agent) => nil
-```
-
-暂停 Agent 执行。
-
-#### `agent-resume`
-
-```lisp
 (agent-resume agent) => nil
-```
-
-恢复暂停的 Agent。
-
-#### `agent-stop`
-
-```lisp
 (agent-stop agent) => nil
 ```
-
-停止 Agent。
 
 ---
 
@@ -418,123 +425,31 @@ LLM 抽象，将 Kernel 与具体实现解耦。
 
 ### Store
 
-长期持久化存储协议。
-
-#### `make-memory-store-backend`
-
 ```lisp
 (make-memory-store-backend) => store
-```
-
-创建内存存储后端。
-
-#### `make-sqlite-store-backend`
-
-```lisp
 (make-sqlite-store-backend &key db-path) => store
-```
-
-创建 SQLite 存储后端。
-
-#### `store-put`
-
-```lisp
 (store-put store namespace key value) => value
-```
-
-存储值。
-
-#### `store-get`
-
-```lisp
 (store-get store namespace key) => value
-```
-
-获取值。
-
-#### `store-delete`
-
-```lisp
 (store-delete store namespace key) => boolean
-```
-
-删除值。
-
-#### `store-list-keys`
-
-```lisp
 (store-list-keys store namespace) => list
 ```
 
-列出命名空间中的所有键。
-
----
-
 ### Checkpoint
-
-短期状态快照。
-
-#### `save-checkpoint`
 
 ```lisp
 (save-checkpoint checkpointer thread-id state) => checkpoint
-```
-
-保存检查点。
-
-#### `load-checkpoint`
-
-```lisp
 (load-checkpoint checkpointer thread-id) => checkpoint
 ```
 
-加载线程的最新检查点。
-
----
-
 ### Agent Memory
-
-统一的记忆接口。
-
-#### `make-agent-memory`
 
 ```lisp
 (make-agent-memory &key context-store persistent-store default-thread-id) => memory
-```
-
-创建 Agent Memory。
-
-#### `am-add-message`
-
-```lisp
 (am-add-message memory thread-id role content) => message
-```
-
-向线程添加消息。
-
-#### `am-get-messages`
-
-```lisp
 (am-get-messages memory thread-id) => list
-```
-
-获取线程中的所有消息。
-
-#### `am-save-checkpoint`
-
-```lisp
 (am-save-checkpoint memory thread-id state) => checkpoint
-```
-
-保存检查点。
-
-#### `am-load-checkpoint`
-
-```lisp
 (am-load-checkpoint memory checkpoint-id) => checkpoint
 ```
-
-加载检查点。
 
 ---
 
@@ -542,57 +457,19 @@ LLM 抽象，将 Kernel 与具体实现解耦。
 
 ### Pipeline
 
-#### `make-rag-pipeline`
-
 ```lisp
 (make-rag-pipeline &key embeddings-model vector-store splitter) => pipeline
-```
-
-创建 RAG 管道。
-
-#### `rag-retrieve`
-
-```lisp
 (rag-retrieve pipeline query &key top-k) => list
-```
-
-检索相关文档。
-
-#### `rag-query`
-
-```lisp
 (rag-query pipeline question &key top-k) => response
 ```
 
-使用 RAG 上下文查询。
-
----
-
 ### Vector Store
-
-#### `make-vector-store`
 
 ```lisp
 (make-vector-store) => store
-```
-
-创建向量存储。
-
-#### `vector-store-add-document`
-
-```lisp
 (vector-store-add-document store content embedding &key metadata) => document
-```
-
-向存储添加文档。
-
-#### `vector-store-search`
-
-```lisp
 (vector-store-search store query-embedding &key top-k) => list
 ```
-
-搜索相似文档。
 
 ---
 
@@ -600,52 +477,16 @@ LLM 抽象，将 Kernel 与具体实现解耦。
 
 ### Client
 
-#### `make-mcp-client`
-
 ```lisp
 (make-mcp-client &key transport) => client
-```
-
-创建 MCP 客户端。
-
-#### `mcp-client-connect`
-
-```lisp
 (mcp-client-connect client) => nil
-```
-
-连接到 MCP 服务器。
-
-#### `mcp-client-call-tool`
-
-```lisp
 (mcp-client-call-tool client tool-name args) => result
 ```
 
-通过 MCP 调用工具。
-
 ### Server
-
-#### `make-mcp-server`
 
 ```lisp
 (make-mcp-server &key transport) => server
-```
-
-创建 MCP 服务器。
-
-#### `mcp-server-start`
-
-```lisp
 (mcp-server-start server) => nil
-```
-
-启动 MCP 服务器。
-
-#### `mcp-register-tool`
-
-```lisp
 (mcp-register-tool server tool-name fn) => nil
 ```
-
-向服务器注册工具。

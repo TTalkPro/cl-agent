@@ -7,7 +7,8 @@ A unified AI Agent framework for Common Lisp, featuring a Semantic Kernel archit
 ## Features
 
 - **Multi-Provider LLM Support**: Anthropic Claude, OpenAI GPT, ZhipuAI GLM, Ollama
-- **Flexible Tool System**: Symbol plist-based metadata with declarative macros
+- **Flexible Tool System**: Direct tool registration + Tag-based filtering
+- **Tool Presets**: Built-in security levels and feature presets for quick configuration
 - **Comprehensive Memory**: Short-term checkpoints + Long-term persistent storage
 - **RAG Pipeline**: Text splitting, embeddings, vector storage, retrieval
 - **Protocol Support**: MCP (Model Context Protocol) + A2A (Agent-to-Agent)
@@ -32,8 +33,8 @@ A unified AI Agent framework for Common Lisp, featuring a Semantic Kernel archit
     │                    │                    │
     ▼                    ▼                    ▼
 ┌────────┐        ┌────────────┐        ┌──────────┐
-│ Memory │        │   Plugin   │        │   RAG    │
-│(Store) │        │  (Tools)   │        │(Retrieve)│
+│ Memory │        │   Tools    │        │   RAG    │
+│(Store) │        │(Tags+Reg.) │        │(Retrieve)│
 └────────┘        └────────────┘        └──────────┘
                          │
                          ▼
@@ -49,9 +50,9 @@ A unified AI Agent framework for Common Lisp, featuring a Semantic Kernel archit
 |--------|-------------|
 | **core** | Core infrastructure: Kernel, Context, Filter, Service abstractions |
 | **llm** | LLM provider implementations (Anthropic, OpenAI, ZhipuAI, Ollama) |
+| **tools** | Tool system: Tool Registry + Tag filtering + Presets |
 | **simpleagent** | Simple agent implementations (KernelAgent, ProcessAgent) |
 | **memory** | Unified memory management (checkpoints, stores, long-term memory) |
-| **plugin** | Enhanced tool system with built-in tools (file, http, shell) |
 | **rag** | Retrieval-Augmented Generation pipeline |
 | **mcp** | Model Context Protocol implementation |
 | **protocols** | Protocol support (MCP, A2A) |
@@ -92,26 +93,29 @@ cd cl-agent
 (cl-agent.llm:chat *client* "Hello, how are you?")
 ```
 
-### Agent with Tools
+### Agent with Tools (New API)
 
 ```lisp
-;; Define a tool
-(cl-agent.kernel:deftool get-weather
+;; Create a tool
+(defvar *weather-tool*
+  (cl-agent.tools:make-simple-tool
+    :get_weather
     "Get current weather for a city"
-  ((city :string "City name" :required-p t))
-  (format nil "Weather in ~A: 22°C, sunny" city))
+    (lambda (&key city)
+      (format nil "Weather in ~A: 22°C, sunny" city))
+    :parameters '((:city :type :string :description "City name" :required-p t))
+    :tags '(:utility :weather :safe)))
 
-;; Create plugin
-(cl-agent.kernel:defplugin weather-plugin
-    "Weather tools"
-  get-weather)
-
-;; Create kernel and agent
+;; Create kernel using Builder pattern
 (defvar *kernel*
-  (cl-agent.kernel:make-kernel
-    :service *service*
-    :plugins '(weather-plugin)))
+  (cl-agent.kernel:build-kernel
+    (cl-agent.kernel:with-tool
+      (cl-agent.kernel:add-service
+        (cl-agent.kernel:create-kernel-builder)
+        *provider*)
+      *weather-tool*)))
 
+;; Create agent
 (defvar *agent*
   (cl-agent.simpleagent:make-kernel-agent *kernel*
     :system-prompt "You are a helpful assistant."))
@@ -119,6 +123,51 @@ cd cl-agent
 ;; Chat with agent
 (cl-agent.simpleagent:agent-chat *agent* "What's the weather in Tokyo?")
 ```
+
+### Quick Setup with Presets
+
+```lisp
+;; Create kernel with preset tools
+(defvar *kernel*
+  (cl-agent.kernel:build-kernel
+    (cl-agent.kernel:with-preset
+      (cl-agent.kernel:add-service
+        (cl-agent.kernel:create-kernel-builder)
+        *provider*)
+      :safe                     ; Presets: :standard :safe :full :file-only :http-only :utility-only
+      :security-level :standard))) ; Security: :permissive :standard :strict
+```
+
+### Tag Filtering
+
+```lisp
+;; Create kernel with tag filtering (only enable :safe and :utility tagged tools)
+(defvar *kernel*
+  (cl-agent.kernel:build-kernel
+    (cl-agent.kernel:with-active-tags
+      (cl-agent.kernel:with-preset
+        (cl-agent.kernel:add-service
+          (cl-agent.kernel:create-kernel-builder)
+          *provider*)
+        :full)
+      '(:safe :utility)     ; Only enable tools with these tags
+      :mode :any)))         ; :any = match any tag, :all = match all tags
+```
+
+## Tool Tags
+
+Built-in tools use these tags:
+
+| Tag | Description |
+|-----|-------------|
+| `:file` | File operation tools |
+| `:http` | HTTP request tools |
+| `:shell` | Shell command tools |
+| `:utility` | General utility tools |
+| `:safe` | Safe read-only operations |
+| `:read` | Read operations |
+| `:write` | Write operations |
+| `:dangerous` | Dangerous operations (use with caution) |
 
 ## Documentation
 
