@@ -29,7 +29,7 @@
                       :api-url "https://open.bigmodel.cn/api/anthropic"
                       :api-key *api-key*
                       :model "glm-4.7"))
-           (kernel (cl-agent.kernel:make-kernel :chat-service provider))
+           (kernel (cl-agent.kernel:make-kernel :service provider))
            (agent (cl-agent.simpleagent:make-kernel-agent kernel
                     :system-prompt "You are a helpful assistant. Keep responses brief.")))
 
@@ -69,7 +69,7 @@
                       :api-url "https://open.bigmodel.cn/api/coding/paas/v4"
                       :api-key *api-key*
                       :model "glm-4.7"))
-           (kernel (cl-agent.kernel:make-kernel :chat-service provider))
+           (kernel (cl-agent.kernel:make-kernel :service provider))
            (agent (cl-agent.simpleagent:make-kernel-agent kernel
                     :system-prompt "You are a helpful assistant. Keep responses brief.")))
 

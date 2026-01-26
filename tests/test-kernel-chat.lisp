@@ -61,7 +61,7 @@
   "创建测试用 kernel"
   (setup-chat-test-tools)
   (cl-agent.kernel:make-kernel
-   :chat-service mock-llm
+   :service mock-llm
    :plugins '(test-chat-tools-plugin)
    :filters filters))
 
@@ -76,7 +76,7 @@
          (kernel (make-chat-test-kernel mock))
          (history (cl-agent.kernel:make-chat-history)))
     (cl-agent.kernel:history-add history :user "Hello")
-    (let ((result (cl-agent.kernel:chat-completion kernel history)))
+    (let ((result (cl-agent.kernel:invoke-kernel kernel history)))
       (is (string= "Hello, how can I help?" (getf result :text)))
       (is (null (getf result :tool-calls-made))))))
 
@@ -93,7 +93,7 @@
          (kernel (make-chat-test-kernel mock))
          (history (cl-agent.kernel:make-chat-history)))
     (cl-agent.kernel:history-add history :user "What's the weather in Beijing?")
-    (let ((result (cl-agent.kernel:chat-completion kernel history)))
+    (let ((result (cl-agent.kernel:invoke-kernel kernel history)))
       (is (string= "The weather in Beijing is sunny." (getf result :text)))
       (is (= 1 (length (getf result :tool-calls-made)))))))
 
@@ -113,7 +113,7 @@
          (kernel (make-chat-test-kernel mock))
          (history (cl-agent.kernel:make-chat-history)))
     (cl-agent.kernel:history-add history :user "Weather in Beijing and Tokyo?")
-    (let ((result (cl-agent.kernel:chat-completion kernel history)))
+    (let ((result (cl-agent.kernel:invoke-kernel kernel history)))
       (is (string= "Beijing is sunny, Tokyo is rainy." (getf result :text)))
       (is (= 2 (length (getf result :tool-calls-made)))))))
 
@@ -135,7 +135,7 @@
          (kernel (make-chat-test-kernel mock))
          (history (cl-agent.kernel:make-chat-history)))
     (cl-agent.kernel:history-add history :user "Do stuff")
-    (let ((result (cl-agent.kernel:chat-completion kernel history)))
+    (let ((result (cl-agent.kernel:invoke-kernel kernel history)))
       (is (string= "Done with all tools." (getf result :text)))
       (is (= 2 (length (getf result :tool-calls-made)))))))
 
@@ -146,7 +146,7 @@
          (kernel (make-chat-test-kernel mock))
          (history (cl-agent.kernel:make-chat-history)))
     (cl-agent.kernel:history-add history :user "Use a tool")
-    (let ((result (cl-agent.kernel:chat-completion kernel history
+    (let ((result (cl-agent.kernel:invoke-kernel kernel history
                     :settings '(:function-choice :none))))
       (is (string= "I cannot use tools." (getf result :text)))
       (is (null (getf result :tool-calls-made))))))
@@ -171,7 +171,7 @@
          (history (cl-agent.kernel:make-chat-history)))
     (cl-agent.kernel:history-add history :user "Loop forever")
     (signals error
-      (cl-agent.kernel:chat-completion kernel history
+      (cl-agent.kernel:invoke-kernel kernel history
         :settings '(:max-attempts 2)))))
 
 (test test-chat-with-filters
@@ -189,7 +189,7 @@
          (kernel (make-chat-test-kernel mock :filters (list filter)))
          (history (cl-agent.kernel:make-chat-history)))
     (cl-agent.kernel:history-add history :user "Test")
-    (cl-agent.kernel:chat-completion kernel history)
+    (cl-agent.kernel:invoke-kernel kernel history)
     (is (eq t filter-called))))
 
 (test test-chat-history-updated
@@ -203,7 +203,7 @@
          (kernel (make-chat-test-kernel mock))
          (history (cl-agent.kernel:make-chat-history)))
     (cl-agent.kernel:history-add history :user "Weather?")
-    (cl-agent.kernel:chat-completion kernel history)
+    (cl-agent.kernel:invoke-kernel kernel history)
     ;; 历史应包含: user, assistant(tool-call), tool(result), assistant(text)
     (let ((msgs (cl-agent.kernel:chat-history-messages history)))
       (is (>= (length msgs) 3)))))
@@ -221,7 +221,7 @@
          (kernel (make-chat-test-kernel mock))
          (history (cl-agent.kernel:make-chat-history)))
     (cl-agent.kernel:history-add history :user "Test")
-    (cl-agent.kernel:chat-completion kernel history
+    (cl-agent.kernel:invoke-kernel kernel history
       :settings (list :on-tool-call (lambda (name args)
                                       (push (list name args) call-log))
                       :on-tool-result (lambda (name result)
@@ -280,11 +280,11 @@
       (is (eq :system (getf (first received-messages) :role))))))
 
 ;;; ============================================================
-;;; Invoke-Chat-With-Tools 测试
+;;; Invoke-Kernel 测试
 ;;; ============================================================
 
-(test test-invoke-chat-with-tools-basic
-  "测试 invoke-chat-with-tools 基本工具调用循环"
+(test test-invoke-kernel-basic
+  "测试 invoke-kernel 基本工具调用循环"
   (let* ((mock (make-sequenced-mock
                 ;; 第一次：返回工具调用
                 (list :content ""
@@ -295,16 +295,19 @@
                 (list :content "The weather in Beijing is sunny.")))
          (kernel (make-chat-test-kernel mock))
          (messages (list (list :role :user :content "What's the weather in Beijing?"))))
-    (let ((result (cl-agent.kernel:invoke-chat-with-tools kernel messages)))
+    (let ((result (cl-agent.kernel:invoke-kernel kernel messages)))
       (is (string= "The weather in Beijing is sunny." (getf result :text)))
       (is (= 1 (length (getf result :tool-calls-made)))))))
 
-(test test-invoke-chat-with-tools-uses-invoke
-  "测试 invoke-chat-with-tools 的工具执行经过 filter chain（通过 invoke）"
+(test test-invoke-kernel-uses-filter-chain
+  "测试 invoke-kernel 的工具执行经过 filter chain"
   (let* ((filter-log nil)
-         (filter (lambda (context next-fn)
-                   (push (getf context :tool-name) filter-log)
-                   (funcall next-fn context)))
+         (filter (cl-agent.kernel:make-filter
+                  :type :pre-invocation
+                  :name "test-filter"
+                  :fn (lambda (context next-fn)
+                        (push (getf context :tool-name) filter-log)
+                        (funcall next-fn context))))
          (mock (make-sequenced-mock
                 ;; 两个工具调用
                 (list :content ""
@@ -318,7 +321,7 @@
                 (list :content "Done.")))
          (kernel (make-chat-test-kernel mock :filters (list filter)))
          (messages (list (list :role :user :content "Test"))))
-    (cl-agent.kernel:invoke-chat-with-tools kernel messages)
+    (cl-agent.kernel:invoke-kernel kernel messages)
     ;; 验证 filter 被调用了两次（每个工具一次）
     (is (= 2 (length filter-log)))
     (is (eq :test-chat-get-weather (first filter-log)))

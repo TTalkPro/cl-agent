@@ -92,13 +92,13 @@
              (if type-error
                  (push type-error errors)
                  (progn
-                   (push provided-value validated-args)
-                   (push param-key validated-args)))))
+                   (push param-key validated-args)
+                   (push provided-value validated-args)))))
 
           ;; 参数未提供但有默认值
           (default-value
-           (push default-value validated-args)
-           (push param-key validated-args))
+           (push param-key validated-args)
+           (push default-value validated-args))
 
           ;; 必需参数未提供
           (required-p
@@ -108,8 +108,8 @@
     (loop for (key value) on args-plist by #'cddr
           unless (find-parameter-spec key param-specs)
           do (progn
-               (push value validated-args)
-               (push key validated-args)))
+               (push key validated-args)
+               (push value validated-args)))
 
     (values (nreverse validated-args) (nreverse errors))))
 
@@ -149,8 +149,8 @@
                   (let ((key (if (keywordp k)
                                  k
                                  (intern (string-upcase (string k)) :keyword))))
-                    (push v result)
-                    (push key result)))
+                    (push key result)
+                    (push v result)))
                 arguments)
        (nreverse result)))
 

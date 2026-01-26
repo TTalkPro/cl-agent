@@ -163,33 +163,18 @@ Note:
     (when message (setf (getf res :message) message))
     res))
 
-;;; ============================================================
-;;; 遗留过滤器支持
-;;; ============================================================
-
-(defun legacy-filter-p (filter)
-  "检查是否为遗留函数格式的过滤器"
-  (functionp filter))
-
-(defun wrap-legacy-filter (fn)
-  "将遗留过滤器函数包装为 Filter 实例"
-  (make-filter :type :pre-invocation
-               :name "legacy-filter"
-               :fn fn))
-
 (defun normalize-filter (filter)
   "规范化过滤器为 Filter 实例或 plist
 
 参数：
-  FILTER - Filter 实例、plist 或函数
+  FILTER - Filter 实例或 plist
 
 返回：
   规范化的过滤器"
   (cond
     ((filter-p filter) filter)
-    ((legacy-filter-p filter) (wrap-legacy-filter filter))
     ((and (listp filter) (getf filter :fn)) filter)  ; 已经是 plist
-    (t filter)))
+    (t (error "Invalid filter: ~A. Use make-filter to create filters." filter))))
 
 ;;; ============================================================
 ;;; Filter 链构建

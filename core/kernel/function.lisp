@@ -150,7 +150,7 @@
   "将 params->json-schema 返回的 plist 结构转换为嵌套 hash-table
 
 参数:
-  SCHEMA - params->json-schema 返回的 plist
+  SCHEMA - params->json-schema 返回的 plist（:properties 可以是 list 或 hash-table）
 
 返回:
   嵌套 hash-table，可被 jzon 正确序列化为 JSON object"
@@ -168,17 +168,27 @@
     ;; type
     (setf (gethash "type" ht) (or type-val "object"))
     ;; properties → hash-table of hash-tables
-    (let ((props-ht (make-hash-table :test 'equal)))
-      (dolist (prop properties)
-        (destructuring-bind (name value-plist) prop
-          (let ((prop-ht (make-hash-table :test 'equal)))
-            (loop for (k v) on value-plist by #'cddr
-                  do (setf (gethash (string-downcase (symbol-name k)) prop-ht) v))
-            (setf (gethash name props-ht) prop-ht))))
+    (let ((props-ht
+            (cond
+              ;; 已经是 hash-table（来自 tool-to-json-schema）
+              ((hash-table-p properties) properties)
+              ;; list 格式（来自 params->json-schema）
+              ((listp properties)
+               (let ((props (make-hash-table :test 'equal)))
+                 (dolist (prop properties)
+                   (destructuring-bind (name value-plist) prop
+                     (let ((prop-ht (make-hash-table :test 'equal)))
+                       (loop for (k v) on value-plist by #'cddr
+                             do (setf (gethash (string-downcase (symbol-name k)) prop-ht) v))
+                       (setf (gethash name props) prop-ht))))
+                 props))
+              ;; 空
+              (t (make-hash-table :test 'equal)))))
       (setf (gethash "properties" ht) props-ht))
     ;; required → vector (JSON array)
     (setf (gethash "required" ht)
-          (if required
-              (coerce required 'vector)
-              #()))
+          (cond
+            ((vectorp required) required)
+            ((listp required) (coerce required 'vector))
+            (t #())))
     ht))

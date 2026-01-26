@@ -108,7 +108,6 @@
    #:kernel
    #:make-kernel
    #:kernel-service
-   #:kernel-chat-service
    #:kernel-config
    #:kernel-tool-registry
    #:kernel-active-tags
@@ -168,8 +167,6 @@
 
    ;; Tier 3: Full Loop
    #:invoke-kernel
-   #:invoke-chat-with-tools  ; backward compat
-   #:chat-completion         ; backward compat
 
    ;; Convenience
    #:quick-chat
@@ -212,7 +209,7 @@
    #:make-post-chat-logging-filter
    #:make-message-transform-filter
 
-   ;; ==================== Chat History (backward compat) ====================
+   ;; ==================== Chat History ====================
    #:chat-history
    #:make-chat-history
    #:chat-history-messages

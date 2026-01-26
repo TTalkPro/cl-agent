@@ -55,7 +55,7 @@
     (let* ((provider (cl-agent.llm.providers:make-dashscope-provider
                       :api-key *api-key*
                       :model "qwen-plus"))
-           (kernel (cl-agent.kernel:make-kernel :chat-service provider))
+           (kernel (cl-agent.kernel:make-kernel :service provider))
            (agent (cl-agent.simpleagent:make-kernel-agent kernel
                     :system-prompt "Reply briefly in one sentence.")))
       (let ((response (cl-agent.simpleagent:agent-chat agent
@@ -78,7 +78,7 @@
     (let* ((provider (cl-agent.llm.providers:make-dashscope-provider
                       :api-key *api-key*
                       :model "qwen-plus"))
-           (kernel (cl-agent.kernel:make-kernel :chat-service provider))
+           (kernel (cl-agent.kernel:make-kernel :service provider))
            (agent (cl-agent.simpleagent:make-kernel-agent kernel
                     :system-prompt "Remember context. Reply briefly.")))
       (cl-agent.simpleagent:agent-chat agent "My name is Alice.")
@@ -102,7 +102,7 @@
     (let* ((provider (cl-agent.llm.providers:make-dashscope-provider
                       :api-key *api-key*
                       :model "qwen-turbo"))
-           (kernel (cl-agent.kernel:make-kernel :chat-service provider))
+           (kernel (cl-agent.kernel:make-kernel :service provider))
            (agent (cl-agent.simpleagent:make-kernel-agent kernel
                     :system-prompt "Reply with just the answer.")))
       (let ((response (cl-agent.simpleagent:agent-chat agent

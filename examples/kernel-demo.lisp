@@ -6,7 +6,7 @@
 ;;;;   - deftool 定义工具函数
 ;;;;   - defplugin 组织插件
 ;;;;   - make-kernel 创建 Kernel
-;;;;   - chat-completion 自动工具调用循环
+;;;;   - invoke-kernel 自动工具调用循环
 ;;;;   - filter chain 过滤器链
 ;;;;
 ;;;; 使用：
@@ -70,7 +70,7 @@
   ;; 创建 kernel
   (let* ((mock-llm (cl-agent.mock:make-mock-llm))
          (kernel (cl-agent.kernel:make-kernel
-                  :chat-service mock-llm
+                  :service mock-llm
                   :plugins '(weather-plugin math-plugin))))
 
     ;; 查看已注册的工具
@@ -99,7 +99,7 @@
 
   (let* ((mock-llm (cl-agent.mock:make-mock-llm))
          (kernel (cl-agent.kernel:make-kernel
-                  :chat-service mock-llm
+                  :service mock-llm
                   :plugins '(weather-plugin math-plugin)
                   :filters (list
                             ;; 日志 filter
@@ -131,15 +131,16 @@
   ;; 使用 mock LLM（简单文本响应）
   (let* ((mock-llm (cl-agent.mock:make-mock-llm))
          (kernel (cl-agent.kernel:make-kernel
-                  :chat-service mock-llm
+                  :service mock-llm
                   :plugins '(weather-plugin)))
          (history (cl-agent.kernel:make-chat-history)))
 
     ;; 添加用户消息
     (cl-agent.kernel:history-add history :user "你好，今天天气怎么样？")
 
-    ;; 执行 chat-completion（mock 不会触发工具调用，直接返回文本）
-    (let ((result (cl-agent.kernel:chat-completion kernel history
+    ;; 执行 invoke-kernel（mock 不会触发工具调用，直接返回文本）
+    (let ((result (cl-agent.kernel:invoke-kernel kernel
+                    (cl-agent.kernel:chat-history-messages history)
                     :settings '(:system-prompt "You are a helpful weather assistant."))))
       (format t "~%Response: ~A~%" (getf result :text))
       (format t "Tool calls made: ~A~%" (length (getf result :tool-calls-made))))))

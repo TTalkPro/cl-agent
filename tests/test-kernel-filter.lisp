@@ -136,7 +136,7 @@
     '(test-filter-dangerous-op))
 
   (let* ((kernel (cl-agent.kernel:make-kernel
-                  :chat-service (cl-agent.mock:make-mock-llm)
+                  :service (cl-agent.mock:make-mock-llm)
                   :plugins '(test-filter-plugin)))
          (filter (cl-agent.kernel:make-approval-filter
                   :sensitive-only t

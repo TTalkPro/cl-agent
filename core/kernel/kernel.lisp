@@ -131,13 +131,6 @@
     :initform nil
     :documentation "Service plist (:chat-fn :build-result-msgs :provider :config)")
 
-   ;; Keep chat-service for backward compatibility
-   (chat-service
-    :initarg :chat-service
-    :accessor kernel-chat-service
-    :initform nil
-    :documentation "LLM chat service provider (deprecated, use service)")
-
    (config
     :initarg :config
     :accessor kernel-config
@@ -195,13 +188,12 @@ Supports tag-based tool filtering."))
 ;;; Constructor
 ;;; ============================================================
 
-(defun make-kernel (&key service chat-service config tool-registry active-tags
+(defun make-kernel (&key service config tool-registry active-tags
                          tag-filter-mode filters context)
   "Create a Kernel instance.
 
 Parameters:
-  SERVICE         - Service plist (preferred)
-  CHAT-SERVICE    - LLM provider (backward compatibility)
+  SERVICE         - Service plist or LLM provider
   CONFIG          - Configuration plist
   TOOL-REGISTRY   - Tool registry for direct tool management
   ACTIVE-TAGS     - Active tags for filtering (nil = no filter)
@@ -211,19 +203,18 @@ Parameters:
 
 Returns:
   Kernel instance"
-  (let ((kernel (make-instance 'kernel
-                               :service service
-                               :chat-service chat-service
+  (let* ((effective-service (if (service-p service)
+                                service
+                                (when service
+                                  (service-from-provider service :config config))))
+         (kernel (make-instance 'kernel
+                               :service effective-service
                                :config config
                                :tool-registry tool-registry
                                :active-tags active-tags
                                :tag-filter-mode (or tag-filter-mode :any)
                                :filters filters
                                :context context)))
-    ;; If service not provided but chat-service is, create service from provider
-    (when (and (null service) chat-service)
-      (setf (kernel-service kernel)
-            (service-from-provider chat-service :config config)))
     ;; Create default tool-registry if not provided and tools package is available
     (unless (kernel-tool-registry kernel)
       (setf (kernel-tool-registry kernel)
@@ -238,9 +229,6 @@ Returns:
   ((service
     :initform nil
     :accessor builder-service)
-   (chat-service
-    :initform nil
-    :accessor builder-chat-service)
    (config
     :initform nil
     :accessor builder-config)
@@ -380,11 +368,9 @@ Returns:
   The builder (for chaining)"))
 
 (defmethod add-service ((builder kernel-builder) service)
-  "Set the service for the builder."
-  (if (service-p service)
-      (setf (builder-service builder) service)
-      ;; Assume it's a provider, create service from it
-      (setf (builder-chat-service builder) service))
+  "Set the service for the builder.
+   Accepts either a service plist or an LLM provider."
+  (setf (builder-service builder) service)
   builder)
 
 (defgeneric add-filter (builder filter)
@@ -452,7 +438,6 @@ Returns:
                        (make-default-tool-registry)))
          (kernel (make-kernel
                   :service (builder-service builder)
-                  :chat-service (builder-chat-service builder)
                   :config (builder-config builder)
                   :tool-registry registry
                   :active-tags (builder-active-tags builder)
@@ -731,12 +716,8 @@ Parameters:
   KERNEL - Kernel instance
 
 Returns:
-  Service plist, or creates one from chat-service if needed"
-  (or (kernel-service kernel)
-      (when (kernel-chat-service kernel)
-        (setf (kernel-service kernel)
-              (service-from-provider (kernel-chat-service kernel)
-                                     :config (kernel-config kernel))))))
+  Service plist"
+  (kernel-service kernel))
 
 (defun kernel-set-service (kernel service)
   "Set the service for kernel.

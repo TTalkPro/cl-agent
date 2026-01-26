@@ -109,7 +109,7 @@
 
 (format t "~%--- TEST 3: Tool Calling ---~%")
 (let* ((kernel (cl-agent.kernel:make-kernel
-                :chat-service *provider*
+                :service *provider*
                 :plugins '(tools-plugin)))
        (history (cl-agent.kernel:make-chat-history)))
 
@@ -123,7 +123,8 @@
   (cl-agent.kernel:history-add history :user "北京今天天气怎么样？")
   (format t "  User: 北京今天天气怎么样？~%")
 
-  (let ((result (cl-agent.kernel:chat-completion kernel history
+  (let ((result (cl-agent.kernel:invoke-kernel kernel
+                  (cl-agent.kernel:chat-history-messages history)
                   :settings (list
                              :system-prompt "你是天气助手。查询天气时必须使用 get-current-weather 工具。"
                              :max-attempts 5

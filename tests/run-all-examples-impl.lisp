@@ -121,7 +121,7 @@
 (format t "================================================================~%")
 
 (with-test ("Kernel Creation")
-  (let ((kernel (cl-agent.kernel:make-kernel :chat-service *anthropic-provider*)))
+  (let ((kernel (cl-agent.kernel:make-kernel :service *anthropic-provider*)))
     (assert kernel () "Kernel not created")))
 
 (with-test ("Kernel Context")
@@ -138,14 +138,14 @@
 (format t "================================================================~%")
 
 (with-test ("Kernel Agent Creation (Anthropic)")
-  (let* ((kernel (cl-agent.kernel:make-kernel :chat-service *anthropic-provider*))
+  (let* ((kernel (cl-agent.kernel:make-kernel :service *anthropic-provider*))
          (agent (cl-agent.simpleagent:make-kernel-agent kernel
                   :name "test-agent"
                   :system-prompt "You are helpful.")))
     (assert agent () "Agent not created")))
 
 (with-test ("Single Turn Chat (Anthropic)")
-  (let* ((kernel (cl-agent.kernel:make-kernel :chat-service *anthropic-provider*))
+  (let* ((kernel (cl-agent.kernel:make-kernel :service *anthropic-provider*))
          (agent (cl-agent.simpleagent:make-kernel-agent kernel
                   :system-prompt "Reply briefly.")))
     (let ((response (cl-agent.simpleagent:agent-chat agent "Say hello")))
@@ -153,7 +153,7 @@
       (assert (> (length response) 0)))))
 
 (with-test ("Multi Turn Chat (Anthropic)")
-  (let* ((kernel (cl-agent.kernel:make-kernel :chat-service *anthropic-provider*))
+  (let* ((kernel (cl-agent.kernel:make-kernel :service *anthropic-provider*))
          (agent (cl-agent.simpleagent:make-kernel-agent kernel
                   :system-prompt "Remember context.")))
     (cl-agent.simpleagent:agent-chat agent "My favorite color is blue.")
@@ -162,14 +162,14 @@
       (assert (search "blue" (string-downcase response))))))
 
 (with-test ("Agent History (Anthropic)")
-  (let* ((kernel (cl-agent.kernel:make-kernel :chat-service *anthropic-provider*))
+  (let* ((kernel (cl-agent.kernel:make-kernel :service *anthropic-provider*))
          (agent (cl-agent.simpleagent:make-kernel-agent kernel)))
     (cl-agent.simpleagent:agent-chat agent "Test message")
     (let ((history (cl-agent.simpleagent:agent-get-history agent)))
       (assert (>= (length history) 2)))))
 
 (with-test ("Agent Reset (Anthropic)")
-  (let* ((kernel (cl-agent.kernel:make-kernel :chat-service *anthropic-provider*))
+  (let* ((kernel (cl-agent.kernel:make-kernel :service *anthropic-provider*))
          (agent (cl-agent.simpleagent:make-kernel-agent kernel
                   :system-prompt "System prompt")))
     (cl-agent.simpleagent:agent-chat agent "Message 1")
@@ -186,7 +186,7 @@
 (format t "================================================================~%")
 
 (with-test ("Single Turn Chat (OpenAI)")
-  (let* ((kernel (cl-agent.kernel:make-kernel :chat-service *openai-provider*))
+  (let* ((kernel (cl-agent.kernel:make-kernel :service *openai-provider*))
          (agent (cl-agent.simpleagent:make-kernel-agent kernel
                   :system-prompt "Reply briefly.")))
     (let ((response (cl-agent.simpleagent:agent-chat agent "What is 5+5?")))
@@ -194,7 +194,7 @@
       (assert (search "10" response)))))
 
 (with-test ("Multi Turn Chat (OpenAI)")
-  (let* ((kernel (cl-agent.kernel:make-kernel :chat-service *openai-provider*))
+  (let* ((kernel (cl-agent.kernel:make-kernel :service *openai-provider*))
          (agent (cl-agent.simpleagent:make-kernel-agent kernel
                   :system-prompt "Remember context.")))
     (cl-agent.simpleagent:agent-chat agent "I am learning Lisp.")
@@ -211,7 +211,7 @@
 (format t "================================================================~%")
 
 (with-test ("Process Agent Creation")
-  (let* ((kernel (cl-agent.kernel:make-kernel :chat-service *anthropic-provider*))
+  (let* ((kernel (cl-agent.kernel:make-kernel :service *anthropic-provider*))
          (agent (cl-agent.simpleagent:make-process-agent kernel
                   :name "process-test")))
     (assert agent () "Process agent not created")))
@@ -219,13 +219,13 @@
 (with-test ("Event Bus Integration")
   (let ((bus (cl-agent.simpleagent:agent-event-bus
                (cl-agent.simpleagent:make-process-agent
-                 (cl-agent.kernel:make-kernel :chat-service *anthropic-provider*)))))
+                 (cl-agent.kernel:make-kernel :service *anthropic-provider*)))))
     (assert bus () "Event bus not created")))
 
 (with-test ("Event Queue Integration")
   (let ((queue (cl-agent.simpleagent:agent-event-queue
                  (cl-agent.simpleagent:make-process-agent
-                   (cl-agent.kernel:make-kernel :chat-service *anthropic-provider*)))))
+                   (cl-agent.kernel:make-kernel :service *anthropic-provider*)))))
     (assert queue () "Event queue not created")))
 
 ;;; ============================================================

@@ -1,8 +1,8 @@
 ;;;; security.lisp
-;;;; CL-Agent Plugin - Security Policies
+;;;; CL-Agent Tools - Security Policies
 ;;;;
 ;;;; Overview:
-;;;;   Security policies for plugin execution including:
+;;;;   Security policies for tool execution including:
 ;;;;   - Rate limiting
 ;;;;   - Input validation
 ;;;;   - Domain filtering
@@ -10,9 +10,9 @@
 ;;;;
 ;;;; Reference:
 ;;;;   - OWASP security guidelines
-;;;;   - Enterprise plugin security patterns
+;;;;   - Enterprise security patterns
 
-(in-package #:cl-agent.plugin)
+(in-package #:cl-agent.tools)
 
 ;;; ============================================================
 ;;; Security Policy Class
@@ -340,47 +340,47 @@ Returns:
     (error () nil)))
 
 ;;; ============================================================
-;;; Secure Plugin Wrapper
+;;; Secure Tool Wrapper
 ;;; ============================================================
 
-(defclass secure-plugin ()
-  ((plugin
-    :initarg :plugin
-    :reader secure-plugin-inner
-    :documentation "The wrapped plugin")
+(defclass secure-tool ()
+  ((tool
+    :initarg :tool
+    :reader secure-tool-inner
+    :documentation "The wrapped tool")
 
    (policy
     :initarg :policy
-    :reader secure-plugin-policy
+    :reader secure-tool-policy
     :documentation "Security policy")
 
    (rate-limiter
     :initarg :rate-limiter
-    :reader secure-plugin-rate-limiter
+    :reader secure-tool-rate-limiter
     :initform nil
     :documentation "Rate limiter instance")
 
    (validator
     :initarg :validator
-    :reader secure-plugin-validator
+    :reader secure-tool-validator
     :initform nil
     :documentation "Input validator")
 
    (domain-filter
     :initarg :domain-filter
-    :reader secure-plugin-domain-filter
+    :reader secure-tool-domain-filter
     :initform nil
     :documentation "Domain filter"))
 
-  (:documentation "Security wrapper for plugins."))
+  (:documentation "Security wrapper for tools."))
 
-(defun make-secure-plugin (plugin &key policy rate-limit timeout
+(defun make-secure-tool (tool &key policy rate-limit timeout
                                      max-input-size allowed-domains
                                      blocked-patterns sandbox-mode)
-  "Create a secure plugin wrapper.
+  "Create a secure tool wrapper.
 
 Parameters:
-  PLUGIN           - Plugin to wrap
+  TOOL             - Tool to wrap
   POLICY           - Security policy (overrides other params)
   RATE-LIMIT       - Rate limit (requests/minute)
   TIMEOUT          - Execution timeout (seconds)
@@ -390,7 +390,7 @@ Parameters:
   SANDBOX-MODE     - Sandbox mode
 
 Returns:
-  secure-plugin instance"
+  secure-tool instance"
   (let* ((effective-policy (or policy
                                (make-security-policy
                                 :rate-limit rate-limit
@@ -408,8 +408,8 @@ Returns:
                   (make-domain-filter
                    :allowed-domains (policy-allowed-domains effective-policy)))))
 
-    (make-instance 'secure-plugin
-                   :plugin plugin
+    (make-instance 'secure-tool
+                   :tool tool
                    :policy effective-policy
                    :rate-limiter limiter
                    :validator validator
@@ -418,24 +418,24 @@ Returns:
 (defgeneric execute-secure (secure-plugin fn &rest args)
   (:documentation "Execute a function with security checks."))
 
-(defmethod execute-secure ((wrapper secure-plugin) fn &rest args)
+(defmethod execute-secure ((wrapper secure-tool) fn &rest args)
   "Execute a function with security checks."
   ;; Check rate limit
-  (when (secure-plugin-rate-limiter wrapper)
-    (unless (rate-limiter-check (secure-plugin-rate-limiter wrapper))
+  (when (secure-tool-rate-limiter wrapper)
+    (unless (rate-limiter-check (secure-tool-rate-limiter wrapper))
       (error "Rate limit exceeded")))
 
   ;; Validate inputs
-  (when (secure-plugin-validator wrapper)
+  (when (secure-tool-validator wrapper)
     (dolist (arg args)
       (when (stringp arg)
         (multiple-value-bind (valid errors)
-            (validate-input (secure-plugin-validator wrapper) arg)
+            (validate-input (secure-tool-validator wrapper) arg)
           (unless valid
             (error "Input validation failed: ~{~A~^, ~}" errors))))))
 
   ;; Execute with timeout
-  (let ((timeout (policy-timeout (secure-plugin-policy wrapper))))
+  (let ((timeout (policy-timeout (secure-tool-policy wrapper))))
     (if (and timeout (> timeout 0))
         ;; Note: This is a simplified timeout - real implementation
         ;; would use bt:with-timeout or similar

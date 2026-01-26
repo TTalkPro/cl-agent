@@ -461,44 +461,77 @@
   "从内容块中提取文本
 
 参数：
-  CONTENT-BLOCKS - Anthropic 内容块列表（vector 或 list）
+  CONTENT-BLOCKS - Anthropic 内容块列表（vector、list、hash-table 或 string）
 
 返回：
   文本字符串"
-  (let ((texts '())
-        (blocks (if (vectorp content-blocks)
-                    (coerce content-blocks 'list)
-                    content-blocks)))
-    (dolist (block blocks)
-      (let ((type (if (hash-table-p block)
-                      (gethash "type" block)
-                      (getf block :type)))
-            (text (if (hash-table-p block)
-                      (gethash "text" block)
-                      (getf block :text))))
-        (when (string= type "text")
-          (push text texts))))
-    (if (= (length texts) 1)
-        (first texts)
-        (format nil "~{~A~^~%~}" (nreverse texts)))))
+  ;; 处理各种可能的格式
+  (cond
+    ;; nil
+    ((null content-blocks) "")
+
+    ;; 直接是字符串
+    ((stringp content-blocks) content-blocks)
+
+    ;; 单个 hash-table（单个内容块）
+    ((hash-table-p content-blocks)
+     (let ((type (gethash "type" content-blocks))
+           (text (gethash "text" content-blocks)))
+       (if (string= type "text")
+           (or text "")
+           "")))
+
+    ;; vector 或 list
+    (t
+     (let ((texts '())
+           (blocks (if (vectorp content-blocks)
+                       (coerce content-blocks 'list)
+                       content-blocks)))
+       (dolist (block blocks)
+         (let ((type (if (hash-table-p block)
+                         (gethash "type" block)
+                         (getf block :type)))
+               (text (if (hash-table-p block)
+                         (gethash "text" block)
+                         (getf block :text))))
+           (when (and type (string= type "text"))
+             (push text texts))))
+       (if (= (length texts) 1)
+           (first texts)
+           (format nil "~{~A~^~%~}" (nreverse texts)))))))
 
 (defun extract-tool-use (content-blocks)
   "从内容块中提取工具使用
 
 参数：
-  CONTENT-BLOCKS - Anthropic 内容块列表（vector 或 list）
+  CONTENT-BLOCKS - Anthropic 内容块列表（vector、list、hash-table 或 string）
 
 返回：
   工具使用块列表"
-  (let ((blocks (if (vectorp content-blocks)
-                    (coerce content-blocks 'list)
-                    content-blocks)))
-    (loop for block in blocks
-          for type = (if (hash-table-p block)
-                         (gethash "type" block)
-                         (getf block :type))
-          when (string= type "tool_use")
-          collect block)))
+  ;; 处理各种可能的格式
+  (cond
+    ;; nil 或字符串 - 无工具使用
+    ((or (null content-blocks) (stringp content-blocks))
+     nil)
+
+    ;; 单个 hash-table（单个内容块）
+    ((hash-table-p content-blocks)
+     (let ((type (gethash "type" content-blocks)))
+       (if (and type (string= type "tool_use"))
+           (list content-blocks)
+           nil)))
+
+    ;; vector 或 list
+    (t
+     (let ((blocks (if (vectorp content-blocks)
+                       (coerce content-blocks 'list)
+                       content-blocks)))
+       (loop for block in blocks
+             for type = (if (hash-table-p block)
+                            (gethash "type" block)
+                            (getf block :type))
+             when (and type (string= type "tool_use"))
+             collect block)))))
 
 (defun parse-anthropic-tool-use (tool-blocks)
   "解析 Anthropic 工具使用

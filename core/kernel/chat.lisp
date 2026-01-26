@@ -362,24 +362,6 @@
                               :context ctx)))))))))
 
 ;;; ============================================================
-;;; 向后兼容别名
-;;; ============================================================
-
-(defgeneric invoke-chat-with-tools (kernel messages &key settings)
-  (:documentation "invoke-kernel 的向后兼容别名"))
-
-(defmethod invoke-chat-with-tools ((kernel kernel) messages &key settings)
-  "向后兼容：使用 invoke-kernel"
-  (invoke-kernel kernel messages :settings settings))
-
-(defgeneric chat-completion (kernel history &key settings)
-  (:documentation "invoke-kernel 的向后兼容别名"))
-
-(defmethod chat-completion ((kernel kernel) history &key settings)
-  "向后兼容：使用 invoke-kernel"
-  (invoke-kernel kernel history :settings settings))
-
-;;; ============================================================
 ;;; 流式支持
 ;;; ============================================================
 

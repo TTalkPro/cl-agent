@@ -8,7 +8,9 @@
   :version "1.0.0"
 
   :depends-on (#:cl-agent-core      ; 包含 cl-agent.http, dexador, quri
-               #:quri)              ; 保留用于域名检查
+               #:quri               ; 保留用于域名检查
+               #:bordeaux-threads   ; 用于 rate limiter 和 circuit breaker
+               #:cl-ppcre)          ; 用于输入验证
 
   :serial t
   :components (;; 包定义
@@ -34,6 +36,10 @@
                (:file "builtin")
                ;; Tool Presets (NEW)
                (:file "presets")
+
+               ;; Security and Resilience
+               (:file "security")
+               (:file "resilience")
 
                ;; Provider 实现
                (:file "providers/builtin")      ; Phase 2 ✅ 已实现

@@ -13,7 +13,7 @@
 ;;;;   Layer 2 - LLM:         cl-agent-llm (Provider implementations, implements llm-chat protocol)
 ;;;;   Layer 3 - SimpleAgent: cl-agent-simpleagent (KernelAgent, ProcessAgent)
 ;;;;   Layer 4 - Memory:      cl-agent-memory (Store + Snapshot + Long-term Memory)
-;;;;   Layer 5 - Plugin:      cl-agent-plugin (Builtin tools, security, resilience)
+;;;;   Layer 5 - Tools:       cl-agent-tools (Builtin tools, security, resilience)
 ;;;;   Layer 6 - RAG:         cl-agent-rag (Retrieval-Augmented Generation)
 ;;;;   Layer 7 - MCP:         cl-agent-mcp (Model Context Protocol)
 ;;;;
@@ -25,14 +25,14 @@
 ;;;;   (asdf:load-system :cl-agent-llm)         ; LLM Provider implementations
 ;;;;   (asdf:load-system :cl-agent-simpleagent) ; Simple agent implementations
 ;;;;   (asdf:load-system :cl-agent-memory)      ; Unified memory management
-;;;;   (asdf:load-system :cl-agent-plugin)      ; Plugin system with builtins
+;;;;   (asdf:load-system :cl-agent-tools)       ; Tools system with builtins
 ;;;;   (asdf:load-system :cl-agent-rag)         ; RAG pipeline
 ;;;;   (asdf:load-system :cl-agent-mcp)         ; MCP client/server
 ;;;;
 ;;;; Major Changes (v5.0.0):
 ;;;;   - Restructured to match clj-agent architecture (7 modules)
 ;;;;   - Added cl-agent-simpleagent for KernelAgent/ProcessAgent
-;;;;   - Renamed cl-agent-tools -> cl-agent-plugin
+;;;;   - cl-agent-tools with tags-based filtering system
 ;;;;   - Added cl-agent-mcp for Model Context Protocol
 ;;;;   - Enhanced memory module with long-term memory types
 ;;;;   - Enhanced RAG module with multiple splitters and Kernel integration
@@ -64,8 +64,8 @@
                ;; Layer 4: Memory (Unified memory management)
                #:cl-agent-memory
 
-               ;; Layer 5: Plugin (Builtin tools)
-               #:cl-agent-plugin
+               ;; Layer 5: Tools (Builtin tools, security, resilience)
+               #:cl-agent-tools
 
                ;; Layer 6: RAG (Retrieval-Augmented Generation)
                #:cl-agent-rag
@@ -109,8 +109,8 @@
                ;; Memory tests
                (:file "tests/test-memory")
 
-               ;; Plugin tests
-               (:file "tests/test-plugin")
+               ;; Tools security and resilience tests
+               (:file "tests/test-tools-security")
 
                ;; RAG tests
                (:file "tests/test-rag")

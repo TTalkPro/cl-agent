@@ -5,9 +5,8 @@
 ;;;;   1. invoke — 直接函数执行（通过 filter chain）
 ;;;;   2. invoke-chat 单轮 — 单次 LLM 调用（无工具循环）
 ;;;;   3. invoke-chat 多轮 — 多次 LLM 调用
-;;;;   4. invoke-chat-with-tools 单轮 — 工具调用循环
-;;;;   5. invoke-chat-with-tools 多轮 — 多轮工具调用
-;;;;   6. chat-completion 向后兼容
+;;;;   4. invoke-kernel 单轮 — 工具调用循环
+;;;;   5. invoke-kernel 多轮 — 多轮工具调用
 ;;;;
 ;;;; 使用：
 ;;;;   sbcl --load examples/test-glm47-live.lisp
@@ -21,7 +20,7 @@
 
 ;; Set up paths to load from current project directory first
 (let ((root (make-pathname :directory (butlast (pathname-directory *load-truename*)))))
-  (dolist (d '("" "core/" "llm/" "tools/" "simpleagent/" "plugin/"))
+  (dolist (d '("" "core/" "llm/" "tools/" "simpleagent/"))
     (pushnew (merge-pathnames d root) asdf:*central-registry* :test #'equal)))
 
 (format t "~%========================================~%")
@@ -94,12 +93,15 @@
         (cl-agent.kernel:create-kernel-builder)
         *glm-provider*)
        (list *weather-tool* *calculate-tool*))
-      (lambda (context next-fn)
-        (push (getf context :tool-name) log)
-        (format t "    [Filter] Executing: ~A~%" (getf context :tool-name))
-        (let ((result (funcall next-fn context)))
-          (format t "    [Filter] Result: ~A~%" result)
-          result))))))
+      (cl-agent.kernel:make-filter
+       :type :pre-invocation
+       :name "logging-filter"
+       :fn (lambda (context next-fn)
+             (push (getf context :tool-name) log)
+             (format t "    [Filter] Executing: ~A~%" (getf context :tool-name))
+             (let ((result (funcall next-fn context)))
+               (format t "    [Filter] Result: ~A~%" result)
+               result)))))))
 
 ;;; ============================================================
 ;;; 测试 1: invoke — 直接函数执行（通过 filter chain）
@@ -195,18 +197,18 @@
       response2)))
 
 ;;; ============================================================
-;;; 测试 4: invoke-chat-with-tools 单轮工具调用
+;;; 测试 4: invoke-kernel 单轮工具调用
 ;;; ============================================================
 
-(defun test-invoke-chat-with-tools-single ()
-  "测试 invoke-chat-with-tools 单轮工具调用"
+(defun test-invoke-kernel-single ()
+  "测试 invoke-kernel 单轮工具调用"
   (format t "~%========================================~%")
-  (format t "TEST 4: invoke-chat-with-tools (Single-turn + Tools)~%")
+  (format t "TEST 4: invoke-kernel (Single-turn + Tools)~%")
   (format t "========================================~%")
 
   (let* ((messages (list (list :role :user
                                :content "北京今天天气怎么样？")))
-         (result (cl-agent.kernel:invoke-chat-with-tools *kernel-with-filter* messages
+         (result (cl-agent.kernel:invoke-kernel *kernel-with-filter* messages
                    :settings (list :system-prompt "你是天气助手。查询天气时必须使用 get_current_weather 工具。"
                                    :max-attempts 5
                                    :on-tool-call (lambda (name args)
@@ -221,24 +223,24 @@
         (format t "    - ~A(~S) -> ~A~%"
                 (getf tc :name) (getf tc :args) (getf tc :result))))
     (assert (> (length (getf result :text)) 0)
-            () "invoke-chat-with-tools returned empty text")
+            () "invoke-kernel returned empty text")
     (format t "~%[TEST 4 PASSED]~%")
     result))
 
 ;;; ============================================================
-;;; 测试 5: invoke-chat-with-tools 多轮工具调用
+;;; 测试 5: invoke-kernel 多轮工具调用
 ;;; ============================================================
 
-(defun test-invoke-chat-with-tools-multi ()
-  "测试 invoke-chat-with-tools 多轮对话（含工具调用）"
+(defun test-invoke-kernel-multi ()
+  "测试 invoke-kernel 多轮对话（含工具调用）"
   (format t "~%========================================~%")
-  (format t "TEST 5: invoke-chat-with-tools (Multi-turn + Tools)~%")
+  (format t "TEST 5: invoke-kernel (Multi-turn + Tools)~%")
   (format t "========================================~%")
 
   ;; 第一轮：查天气
   (let* ((messages1 (list (list :role :user
                                 :content "北京今天天气怎么样？")))
-         (result1 (cl-agent.kernel:invoke-chat-with-tools *kernel* messages1
+         (result1 (cl-agent.kernel:invoke-kernel *kernel* messages1
                     :settings (list :system-prompt "你是助手。查询天气用 get_current_weather，计算用 calculate。"
                                     :max-attempts 5
                                     :on-tool-call (lambda (name args)
@@ -253,7 +255,7 @@
            (messages2 (append history
                               (list (list :role :assistant :content (getf result1 :text))
                                     (list :role :user :content "帮我计算 (+ 10 20 30)"))))
-           (result2 (cl-agent.kernel:invoke-chat-with-tools *kernel* messages2
+           (result2 (cl-agent.kernel:invoke-kernel *kernel* messages2
                       :settings (list :system-prompt "你是助手。查询天气用 get_current_weather，计算用 calculate。"
                                       :max-attempts 5
                                       :on-tool-call (lambda (name args)
@@ -263,39 +265,9 @@
       (format t "    Assistant: ~A~%" (getf result2 :text))
       (format t "    Tool calls: ~A~%" (length (getf result2 :tool-calls-made)))
       (assert (> (length (getf result2 :text)) 0)
-              () "Multi-turn invoke-chat-with-tools returned empty text")
+              () "Multi-turn invoke-kernel returned empty text")
       (format t "~%[TEST 5 PASSED]~%")
       result2)))
-
-;;; ============================================================
-;;; 测试 6: chat-completion 向后兼容
-;;; ============================================================
-
-(defun test-chat-completion-compat ()
-  "测试 chat-completion 向后兼容"
-  (format t "~%========================================~%")
-  (format t "TEST 6: chat-completion (Backward Compatibility)~%")
-  (format t "========================================~%")
-
-  (let* ((history (cl-agent.kernel:make-chat-history)))
-    (cl-agent.kernel:history-add history :user "北京今天天气怎么样？")
-
-    (format t "~%  User: 北京今天天气怎么样？~%")
-    (format t "  Calling chat-completion (legacy API)...~%")
-
-    (let ((result (cl-agent.kernel:chat-completion *kernel* history
-                    :settings (list :system-prompt "你是天气助手。查询天气时使用 get_current_weather 工具。"
-                                    :max-attempts 5
-                                    :on-tool-call (lambda (name args)
-                                                    (format t "    [Tool Call] ~A ~S~%" name args))
-                                    :on-tool-result (lambda (name result)
-                                                      (format t "    [Tool Result] ~A -> ~A~%" name result))))))
-      (format t "~%  Final text: ~A~%" (getf result :text))
-      (format t "  Tool calls made: ~A~%" (length (getf result :tool-calls-made)))
-      (assert (> (length (getf result :text)) 0)
-              () "chat-completion backward compat failed")
-      (format t "~%[TEST 6 PASSED]~%")
-      result)))
 
 ;;; ============================================================
 ;;; 运行所有测试
@@ -316,18 +288,16 @@
   (let ((test-names '(:invoke
                       :invoke-chat-single
                       :invoke-chat-multi
-                      :invoke-chat-with-tools-single
-                      :invoke-chat-with-tools-multi
-                      :chat-completion-compat))
+                      :invoke-kernel-single
+                      :invoke-kernel-multi))
         (test-fns (list #'test-invoke
                         #'test-invoke-chat-single
                         #'test-invoke-chat-multi
-                        #'test-invoke-chat-with-tools-single
-                        #'test-invoke-chat-with-tools-multi
-                        #'test-chat-completion-compat))
+                        #'test-invoke-kernel-single
+                        #'test-invoke-kernel-multi))
         (results nil)
         (errors nil)
-        (total 6))
+        (total 5))
 
     (loop for name in test-names
           for fn in test-fns

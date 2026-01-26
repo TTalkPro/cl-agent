@@ -1,8 +1,8 @@
 ;;;; resilience.lisp
-;;;; CL-Agent Plugin - Resilience Patterns
+;;;; CL-Agent Tools - Resilience Patterns
 ;;;;
 ;;;; Overview:
-;;;;   Resilience patterns for robust plugin execution:
+;;;;   Resilience patterns for robust tool execution:
 ;;;;   - Retry with backoff strategies
 ;;;;   - Timeout handling
 ;;;;   - Circuit breaker pattern
@@ -11,7 +11,7 @@
 ;;;;   - Michael Nygard, "Release It!" patterns
 ;;;;   - Netflix Hystrix patterns
 
-(in-package #:cl-agent.plugin)
+(in-package #:cl-agent.tools)
 
 ;;; ============================================================
 ;;; Retry Policy

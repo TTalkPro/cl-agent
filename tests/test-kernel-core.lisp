@@ -42,11 +42,11 @@
 ;;; ============================================================
 
 (test test-make-kernel-minimal
-  "测试最小化创建 kernel（仅 chat-service）"
+  "测试最小化创建 kernel（仅 service）"
   (let ((kernel (cl-agent.kernel:make-kernel
-                 :chat-service (cl-agent.mock:make-mock-llm))))
+                 :service (cl-agent.mock:make-mock-llm))))
     (is (typep kernel 'cl-agent.kernel:kernel))
-    (is (not (null (cl-agent.kernel:kernel-chat-service kernel))))
+    (is (not (null (cl-agent.kernel:kernel-service kernel))))
     (is (null (cl-agent.kernel:kernel-plugins kernel)))
     (is (null (cl-agent.kernel:kernel-filters kernel)))))
 
@@ -55,7 +55,7 @@
   (setup-test-weather-tools)
   (setup-test-math-tools)
   (let ((kernel (cl-agent.kernel:make-kernel
-                 :chat-service (cl-agent.mock:make-mock-llm)
+                 :service (cl-agent.mock:make-mock-llm)
                  :plugins '(test-core-weather-plugin test-core-math-plugin))))
     (is (= 2 (length (cl-agent.kernel:kernel-plugins kernel))))))
 
@@ -64,7 +64,7 @@
   (setup-test-weather-tools)
   (setup-test-math-tools)
   (let ((kernel (cl-agent.kernel:make-kernel
-                 :chat-service (cl-agent.mock:make-mock-llm)
+                 :service (cl-agent.mock:make-mock-llm)
                  :plugins '(test-core-weather-plugin test-core-math-plugin))))
     ;; 查找 weather plugin 中的函数
     (let ((sym (cl-agent.kernel:kernel-find-tool-symbol kernel :test-core-get-weather)))
@@ -79,7 +79,7 @@
   "测试查找不存在的函数返回 nil"
   (setup-test-weather-tools)
   (let ((kernel (cl-agent.kernel:make-kernel
-                 :chat-service (cl-agent.mock:make-mock-llm)
+                 :service (cl-agent.mock:make-mock-llm)
                  :plugins '(test-core-weather-plugin))))
     (is (null (cl-agent.kernel:kernel-find-tool-symbol kernel :nonexistent)))))
 
@@ -88,7 +88,7 @@
   (setup-test-weather-tools)
   (setup-test-math-tools)
   (let ((kernel (cl-agent.kernel:make-kernel
-                 :chat-service (cl-agent.mock:make-mock-llm)
+                 :service (cl-agent.mock:make-mock-llm)
                  :plugins '(test-core-weather-plugin test-core-math-plugin))))
     (is (string= "Sunny in Tokyo"
                  (cl-agent.kernel:kernel-execute-tool kernel :test-core-get-weather '(:city "Tokyo"))))
@@ -99,7 +99,7 @@
   "测试执行不存在的工具报错"
   (setup-test-weather-tools)
   (let ((kernel (cl-agent.kernel:make-kernel
-                 :chat-service (cl-agent.mock:make-mock-llm)
+                 :service (cl-agent.mock:make-mock-llm)
                  :plugins '(test-core-weather-plugin))))
     (signals error
       (cl-agent.kernel:kernel-execute-tool kernel :nonexistent '()))))
@@ -109,7 +109,7 @@
   (setup-test-weather-tools)
   (setup-test-math-tools)
   (let ((kernel (cl-agent.kernel:make-kernel
-                 :chat-service (cl-agent.mock:make-mock-llm)
+                 :service (cl-agent.mock:make-mock-llm)
                  :plugins '(test-core-weather-plugin test-core-math-plugin))))
     (let ((tools (cl-agent.kernel:kernel-get-tools kernel)))
       (is (= 2 (length tools)))
@@ -120,7 +120,7 @@
   "测试工具 schema 缓存"
   (setup-test-weather-tools)
   (let ((kernel (cl-agent.kernel:make-kernel
-                 :chat-service (cl-agent.mock:make-mock-llm)
+                 :service (cl-agent.mock:make-mock-llm)
                  :plugins '(test-core-weather-plugin))))
     ;; 第一次调用
     (let ((tools1 (cl-agent.kernel:kernel-get-tools kernel)))
@@ -137,7 +137,7 @@
   (setup-test-weather-tools)
   (setup-test-math-tools)
   (let ((kernel (cl-agent.kernel:make-kernel
-                 :chat-service (cl-agent.mock:make-mock-llm)
+                 :service (cl-agent.mock:make-mock-llm)
                  :plugins '(test-core-weather-plugin test-core-math-plugin))))
     (is (string= "Sunny in Tokyo"
                  (cl-agent.kernel:invoke kernel :test-core-get-weather '(:city "Tokyo"))))
@@ -152,7 +152,7 @@
                    (setf filter-called t)
                    (funcall next-fn context)))
          (kernel (cl-agent.kernel:make-kernel
-                  :chat-service (cl-agent.mock:make-mock-llm)
+                  :service (cl-agent.mock:make-mock-llm)
                   :plugins '(test-core-weather-plugin)
                   :filters (list filter))))
     (cl-agent.kernel:invoke kernel :test-core-get-weather '(:city "Test"))
@@ -162,7 +162,7 @@
   "测试 invoke 函数不存在时报错"
   (setup-test-weather-tools)
   (let ((kernel (cl-agent.kernel:make-kernel
-                 :chat-service (cl-agent.mock:make-mock-llm)
+                 :service (cl-agent.mock:make-mock-llm)
                  :plugins '(test-core-weather-plugin))))
     (signals error
       (cl-agent.kernel:invoke kernel :nonexistent '()))))

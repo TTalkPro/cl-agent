@@ -46,10 +46,10 @@
 (test test-integration-mock-simple-chat
   "集成测试：Mock LLM 简单对话"
   (let* ((mock (cl-agent.mock:make-mock-llm))
-         (kernel (cl-agent.kernel:make-kernel :chat-service mock))
+         (kernel (cl-agent.kernel:make-kernel :service mock))
          (history (cl-agent.kernel:make-chat-history)))
     (cl-agent.kernel:history-add history :user "你好")
-    (let ((result (cl-agent.kernel:chat-completion kernel history)))
+    (let ((result (cl-agent.kernel:invoke-kernel kernel history)))
       (is (stringp (getf result :text)))
       (is (> (length (getf result :text)) 0)))))
 
@@ -67,11 +67,11 @@
                              ;; 返回最终答案
                              (list :content "The answer is 8."))))
          (kernel (cl-agent.kernel:make-kernel
-                  :chat-service mock
+                  :service mock
                   :plugins '(test-integ-math-plugin)))
          (history (cl-agent.kernel:make-chat-history)))
     (cl-agent.kernel:history-add history :user "What is 3+5?")
-    (let ((result (cl-agent.kernel:chat-completion kernel history)))
+    (let ((result (cl-agent.kernel:invoke-kernel kernel history)))
       (is (string= "The answer is 8." (getf result :text)))
       ;; 验证工具确实被调用了
       (let ((tool-calls (getf result :tool-calls-made)))
@@ -92,13 +92,13 @@
                                                            :arguments '(:name "World"))))
                              (list :content "Greeting sent!"))))
          (kernel (cl-agent.kernel:make-kernel
-                  :chat-service mock
+                  :service mock
                   :plugins '(test-integ-utils-plugin)
                   :filters (list (cl-agent.kernel:make-logging-filter
                                   :stream log-output))))
          (history (cl-agent.kernel:make-chat-history)))
     (cl-agent.kernel:history-add history :user "Say hello to World")
-    (let ((result (cl-agent.kernel:chat-completion kernel history)))
+    (let ((result (cl-agent.kernel:invoke-kernel kernel history)))
       (is (string= "Greeting sent!" (getf result :text)))
       ;; 验证 logging filter 记录了日志
       (let ((logs (get-output-stream-string log-output)))
@@ -113,10 +113,10 @@
 ;;; (test test-integration-zhipu-chat
 ;;;   "集成测试：ZhipuAI 简单对话"
 ;;;   (let* ((provider (cl-agent.llm:make-zhipu-provider :model "glm-4-flash"))
-;;;          (kernel (cl-agent.kernel:make-kernel :chat-service provider))
+;;;          (kernel (cl-agent.kernel:make-kernel :service provider))
 ;;;          (history (cl-agent.kernel:make-chat-history)))
 ;;;     (cl-agent.kernel:history-add history :user "1+1=?")
-;;;     (let ((result (cl-agent.kernel:chat-completion kernel history
+;;;     (let ((result (cl-agent.kernel:invoke-kernel kernel history
 ;;;                     :settings '(:function-choice :none))))
 ;;;       (is (stringp (getf result :text)))
 ;;;       (is (search "2" (getf result :text))))))

@@ -6,7 +6,7 @@
 ;;;;   采用分层架构，每层负责特定功能。
 ;;;;
 ;;;; 架构：
-;;;;   Kernel 层：kernel, kernel-function, kernel-plugin, filter, chat-completion
+;;;;   Kernel 层：kernel, kernel-function, kernel-plugin, filter, invoke-kernel
 ;;;;   LLM 层：provider 基类和具体实现
 ;;;;   Core 层：条件系统、工具函数、HTTP 客户端
 ;;;;   Memory 层：Store + Checkpointer
