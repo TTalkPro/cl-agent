@@ -11,6 +11,8 @@
 - [Agent 示例](#agent-示例)
   - [简单聊天 Agent](#简单聊天-agent)
   - [带工具的 Agent](#带工具的-agent)
+  - [使用预设](#使用预设)
+  - [标签过滤](#标签过滤)
   - [ReAct Agent](#react-agent)
   - [带记忆持久化的 Agent](#带记忆持久化的-agent)
   - [RAG 增强 Agent](#rag-增强-agent)
@@ -48,6 +50,7 @@ ln -s /path/to/cl-agent ~/quicklisp/local-projects/cl-agent
 ;; 或加载特定模块
 (ql:quickload :cl-agent-core)
 (ql:quickload :cl-agent-llm)
+(ql:quickload :cl-agent-tools)
 (ql:quickload :cl-agent-simpleagent)
 (ql:quickload :cl-agent-memory)
 ```
@@ -127,7 +130,9 @@ export ZHIPU_API_KEY="your-api-key"
 (defpackage :example-simple
   (:use :cl)
   (:import-from :cl-agent.llm :make-client)
-  (:import-from :cl-agent.kernel :make-kernel :make-service)
+  (:import-from :cl-agent.kernel
+                :make-kernel :make-service
+                :create-kernel-builder :build-kernel :add-service)
   (:import-from :cl-agent.simpleagent :make-kernel-agent :agent-chat))
 
 (in-package :example-simple)
@@ -139,21 +144,20 @@ export ZHIPU_API_KEY="your-api-key"
     :model "claude-3-5-sonnet-20241022"
     :api-key (uiop:getenv "ANTHROPIC_API_KEY")))
 
-;; 2. 从客户端创建服务
-(defvar *service*
-  (make-service :provider *client*))
-
-;; 3. 创建 Kernel（无插件）
+;; 2. 使用 Builder 模式创建 Kernel
 (defvar *kernel*
-  (make-kernel :service *service*))
+  (build-kernel
+    (add-service
+      (create-kernel-builder)
+      *client*)))
 
-;; 4. 创建 Agent
+;; 3. 创建 Agent
 (defvar *agent*
   (make-kernel-agent *kernel*
     :name "simple-bot"
     :system-prompt "你是一个友好的助手。简洁且有帮助。"))
 
-;; 5. 开始聊天！
+;; 4. 开始聊天！
 (agent-chat *agent* "你好！你能做什么？")
 ;; => "你好！我可以回答问题、提供信息..."
 
@@ -163,52 +167,66 @@ export ZHIPU_API_KEY="your-api-key"
 
 ### 带工具的 Agent
 
-可以使用工具的 Agent：
+可以使用工具的 Agent（新的 tools + tags API）：
 
 ```lisp
 (defpackage :example-tools
   (:use :cl)
+  (:import-from :cl-agent.tools
+                :make-simple-tool)
   (:import-from :cl-agent.kernel
-                :deftool :defplugin
-                :make-kernel :make-service)
+                :create-kernel-builder :build-kernel
+                :add-service :with-tools)
   (:import-from :cl-agent.simpleagent
                 :make-kernel-agent :agent-chat))
 
 (in-package :example-tools)
 
-;; 定义工具
-(deftool get-weather "获取指定位置的当前天气"
-  ((location :string "城市或位置名称" :required-p t)
-   (unit :string "温度单位（celsius/fahrenheit）" :default "celsius"))
-  ;; 实际应用中，这里调用天气 API
-  (format nil "~A 的天气：22°~A，多云，湿度 65%"
-          location (if (string= unit "celsius") "C" "F")))
+;; 使用 make-simple-tool 定义工具
+(defvar *weather-tool*
+  (make-simple-tool
+    :get_weather
+    "获取指定位置的当前天气"
+    (lambda (&key location unit)
+      ;; 实际应用中，这里调用天气 API
+      (format nil "~A 的天气：22°~A，多云，湿度 65%"
+              location (if (string= (or unit "celsius") "celsius") "C" "F")))
+    :parameters '((:location :type :string :description "城市或位置名称" :required-p t)
+                  (:unit :type :string :description "温度单位（celsius/fahrenheit）"))
+    :tags '(:utility :weather :safe)))
 
-(deftool get-time "获取指定时区的当前时间"
-  ((timezone :string "时区名称" :default "UTC"))
-  (format nil "~A 的当前时间：~A"
-          timezone
-          (multiple-value-bind (sec min hour)
-              (get-decoded-time)
-            (format nil "~2,'0D:~2,'0D:~2,'0D" hour min sec))))
+(defvar *time-tool*
+  (make-simple-tool
+    :get_time
+    "获取指定时区的当前时间"
+    (lambda (&key timezone)
+      (format nil "~A 的当前时间：~A"
+              (or timezone "UTC")
+              (multiple-value-bind (sec min hour)
+                  (get-decoded-time)
+                (format nil "~2,'0D:~2,'0D:~2,'0D" hour min sec))))
+    :parameters '((:timezone :type :string :description "时区名称"))
+    :tags '(:utility :time :safe)))
 
-(deftool calculate "执行数学计算"
-  ((expression :string "数学表达式" :required-p t))
-  (handler-case
-      (format nil "结果：~A" (eval (read-from-string expression)))
-    (error (e) (format nil "错误：~A" e))))
+(defvar *calc-tool*
+  (make-simple-tool
+    :calculate
+    "执行数学计算"
+    (lambda (&key expression)
+      (handler-case
+          (format nil "结果：~A" (eval (read-from-string expression)))
+        (error (e) (format nil "错误：~A" e))))
+    :parameters '((:expression :type :string :description "数学表达式" :required-p t))
+    :tags '(:utility :math :safe)))
 
-;; 创建工具分组插件
-(defplugin utility-plugin "天气、时间和数学工具"
-  get-weather
-  get-time
-  calculate)
-
-;; 创建带插件的 Kernel
+;; 创建带工具的 Kernel
 (defvar *kernel*
-  (make-kernel
-    :service *service*
-    :plugins '(utility-plugin)))
+  (build-kernel
+    (with-tools
+      (add-service
+        (create-kernel-builder)
+        *client*)
+      (list *weather-tool* *time-tool* *calc-tool*))))
 
 ;; 创建 Agent
 (defvar *agent*
@@ -218,13 +236,85 @@ export ZHIPU_API_KEY="your-api-key"
 
 ;; 使用 Agent
 (agent-chat *agent* "东京的天气怎么样？")
-;; Agent 会调用 get-weather 工具并回复
+;; Agent 会调用 get_weather 工具并回复
 
 (agent-chat *agent* "15 * 23 + 7 等于多少？")
 ;; Agent 会调用 calculate 工具并回复
 
 (agent-chat *agent* "纽约现在几点？")
-;; Agent 会调用 get-time 工具并回复
+;; Agent 会调用 get_time 工具并回复
+```
+
+### 使用预设
+
+使用内置工具预设快速配置：
+
+```lisp
+(defpackage :example-presets
+  (:use :cl)
+  (:import-from :cl-agent.kernel
+                :create-kernel-builder :build-kernel
+                :add-service :with-preset)
+  (:import-from :cl-agent.simpleagent
+                :make-kernel-agent :agent-chat))
+
+(in-package :example-presets)
+
+;; 创建带预设工具的 Kernel
+(defvar *kernel*
+  (build-kernel
+    (with-preset
+      (add-service
+        (create-kernel-builder)
+        *client*)
+      :safe                      ; 预设: :standard :safe :full :file-only :http-only :utility-only
+      :security-level :standard))) ; 安全级别: :permissive :standard :strict
+
+;; 创建带预设工具的 Agent
+(defvar *agent*
+  (make-kernel-agent *kernel*
+    :name "safe-bot"
+    :system-prompt "你是一个有帮助的助手，配备安全的只读工具。"))
+
+;; Agent 可以使用安全工具如 read-file、http-get、get-timestamp
+(agent-chat *agent* "读取 /etc/hostname 的内容")
+```
+
+### 标签过滤
+
+使用标签在运行时过滤工具：
+
+```lisp
+(defpackage :example-tags
+  (:use :cl)
+  (:import-from :cl-agent.kernel
+                :create-kernel-builder :build-kernel
+                :add-service :with-preset :with-active-tags
+                :kernel-set-active-tags :kernel-clear-active-tags
+                :kernel-list-tools)
+  (:import-from :cl-agent.simpleagent
+                :make-kernel-agent :agent-chat))
+
+(in-package :example-tags)
+
+;; 创建完整预设的 Kernel，但过滤为仅安全工具
+(defvar *kernel*
+  (build-kernel
+    (with-active-tags
+      (with-preset
+        (add-service
+          (create-kernel-builder)
+          *client*)
+        :full)                   ; 加载所有工具
+      '(:safe :utility)          ; 但只启用安全实用工具
+      :mode :any)))              ; 匹配任一标签 (:any 或 :all)
+
+;; 列出活跃工具
+(kernel-list-tools *kernel*)
+
+;; 运行时更改活跃标签
+(kernel-set-active-tags *kernel* '(:file :read))  ; 切换到文件读取工具
+(kernel-clear-active-tags *kernel*)               ; 启用所有工具
 ```
 
 ### ReAct Agent
@@ -234,27 +324,45 @@ export ZHIPU_API_KEY="your-api-key"
 ```lisp
 (defpackage :example-react
   (:use :cl)
+  (:import-from :cl-agent.tools
+                :make-simple-tool)
   (:import-from :cl-agent.kernel
-                :deftool :defplugin :make-kernel)
+                :create-kernel-builder :build-kernel
+                :add-service :with-tools)
   (:import-from :cl-agent.simpleagent
                 :make-kernel-agent :agent-chat))
 
 (in-package :example-react)
 
 ;; 定义研究工具
-(deftool web-search "在网上搜索信息"
-  ((query :string "搜索查询" :required-p t))
-  ;; 模拟搜索结果
-  (format nil "'~A' 的搜索结果：~%1. 维基百科文章...~%2. 新闻文章..."
-          query))
+(defvar *search-tool*
+  (make-simple-tool
+    :web_search
+    "在网上搜索信息"
+    (lambda (&key query)
+      ;; 模拟搜索结果
+      (format nil "'~A' 的搜索结果：~%1. 维基百科文章...~%2. 新闻文章..."
+              query))
+    :parameters '((:query :type :string :description "搜索查询" :required-p t))
+    :tags '(:research :safe)))
 
-(deftool read-url "读取 URL 内容"
-  ((url :string "要读取的 URL" :required-p t))
-  (format nil "来自 ~A 的内容：[文章内容...]" url))
+(defvar *read-url-tool*
+  (make-simple-tool
+    :read_url
+    "读取 URL 内容"
+    (lambda (&key url)
+      (format nil "来自 ~A 的内容：[文章内容...]" url))
+    :parameters '((:url :type :string :description "要读取的 URL" :required-p t))
+    :tags '(:research :network :safe)))
 
-(defplugin research-plugin "网络研究工具"
-  web-search
-  read-url)
+;; 创建带研究工具的 Kernel
+(defvar *kernel*
+  (build-kernel
+    (with-tools
+      (add-service
+        (create-kernel-builder)
+        *client*)
+      (list *search-tool* *read-url-tool*))))
 
 ;; ReAct 系统提示
 (defvar *react-prompt*
@@ -301,7 +409,8 @@ export ZHIPU_API_KEY="your-api-key"
                 :am-get-messages
                 :am-save-checkpoint
                 :am-load-checkpoint)
-  (:import-from :cl-agent.kernel :make-kernel)
+  (:import-from :cl-agent.kernel
+                :create-kernel-builder :build-kernel :add-service)
   (:import-from :cl-agent.simpleagent
                 :make-kernel-agent :agent-chat))
 
@@ -315,6 +424,13 @@ export ZHIPU_API_KEY="your-api-key"
   (make-agent-memory
     :context-store (make-memory-store-backend)
     :default-thread-id "session-1"))
+
+;; 创建 Kernel
+(defvar *kernel*
+  (build-kernel
+    (add-service
+      (create-kernel-builder)
+      *client*)))
 
 ;; 创建带记忆的 Agent
 (defvar *agent*
@@ -423,7 +539,8 @@ export ZHIPU_API_KEY="your-api-key"
                 :vector-store-add-document
                 :rag-query)
   (:import-from :cl-agent.kernel
-                :make-kernel :make-filter)
+                :create-kernel-builder :build-kernel
+                :add-service :add-filter :make-filter)
   (:import-from :cl-agent.simpleagent
                 :make-kernel-agent :agent-chat))
 
@@ -474,9 +591,12 @@ export ZHIPU_API_KEY="your-api-key"
 
 ;; 5. 创建带 RAG 过滤器的 Kernel
 (defvar *kernel*
-  (make-kernel
-    :service *service*
-    :filters (list *rag-filter*)))
+  (build-kernel
+    (add-filter
+      (add-service
+        (create-kernel-builder)
+        *client*)
+      *rag-filter*)))
 
 ;; 6. 创建 RAG 增强的 Agent
 (defvar *rag-agent*
@@ -504,11 +624,19 @@ export ZHIPU_API_KEY="your-api-key"
                 :make-memory-store-backend
                 :am-add-message
                 :am-get-last-n-messages)
-  (:import-from :cl-agent.kernel :make-kernel)
+  (:import-from :cl-agent.kernel
+                :create-kernel-builder :build-kernel :add-service)
   (:import-from :cl-agent.simpleagent
                 :make-kernel-agent :agent-chat))
 
 (in-package :example-multiturn)
+
+;; 创建 Kernel
+(defvar *kernel*
+  (build-kernel
+    (add-service
+      (create-kernel-builder)
+      *client*)))
 
 ;; 创建带摘要缓冲区的记忆（用于长对话）
 (defvar *memory*

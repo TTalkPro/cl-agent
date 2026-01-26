@@ -11,6 +11,8 @@ This guide will help you get started with CL-Agent quickly.
 - [Agent Examples](#agent-examples)
   - [Simple Chat Agent](#simple-chat-agent)
   - [Agent with Tools](#agent-with-tools)
+  - [Using Presets](#using-presets)
+  - [Tag Filtering](#tag-filtering)
   - [ReAct Agent](#react-agent)
   - [Agent with Memory Persistence](#agent-with-memory-persistence)
   - [RAG-Enhanced Agent](#rag-enhanced-agent)
@@ -48,6 +50,7 @@ Load in REPL:
 ;; Or load specific modules
 (ql:quickload :cl-agent-core)
 (ql:quickload :cl-agent-llm)
+(ql:quickload :cl-agent-tools)
 (ql:quickload :cl-agent-simpleagent)
 (ql:quickload :cl-agent-memory)
 ```
@@ -127,7 +130,9 @@ Basic agent without tools:
 (defpackage :example-simple
   (:use :cl)
   (:import-from :cl-agent.llm :make-client)
-  (:import-from :cl-agent.kernel :make-kernel :make-service)
+  (:import-from :cl-agent.kernel
+                :make-kernel :make-service
+                :create-kernel-builder :build-kernel :add-service)
   (:import-from :cl-agent.simpleagent :make-kernel-agent :agent-chat))
 
 (in-package :example-simple)
@@ -139,21 +144,20 @@ Basic agent without tools:
     :model "claude-3-5-sonnet-20241022"
     :api-key (uiop:getenv "ANTHROPIC_API_KEY")))
 
-;; 2. Create service from client
-(defvar *service*
-  (make-service :provider *client*))
-
-;; 3. Create kernel (no plugins)
+;; 2. Create kernel using Builder pattern
 (defvar *kernel*
-  (make-kernel :service *service*))
+  (build-kernel
+    (add-service
+      (create-kernel-builder)
+      *client*)))
 
-;; 4. Create agent
+;; 3. Create agent
 (defvar *agent*
   (make-kernel-agent *kernel*
     :name "simple-bot"
     :system-prompt "You are a friendly assistant. Be concise and helpful."))
 
-;; 5. Chat!
+;; 4. Chat!
 (agent-chat *agent* "Hello! What can you do?")
 ;; => "Hello! I can answer questions, help with information..."
 
@@ -163,52 +167,66 @@ Basic agent without tools:
 
 ### Agent with Tools
 
-Agent that can use tools:
+Agent that can use tools (new tools + tags API):
 
 ```lisp
 (defpackage :example-tools
   (:use :cl)
+  (:import-from :cl-agent.tools
+                :make-simple-tool)
   (:import-from :cl-agent.kernel
-                :deftool :defplugin
-                :make-kernel :make-service)
+                :create-kernel-builder :build-kernel
+                :add-service :with-tools)
   (:import-from :cl-agent.simpleagent
                 :make-kernel-agent :agent-chat))
 
 (in-package :example-tools)
 
-;; Define tools
-(deftool get-weather "Get current weather for a location"
-  ((location :string "City or location name" :required-p t)
-   (unit :string "Temperature unit (celsius/fahrenheit)" :default "celsius"))
-  ;; In real app, call weather API here
-  (format nil "Weather in ~A: 22°~A, partly cloudy, humidity 65%"
-          location (if (string= unit "celsius") "C" "F")))
+;; Define tools using make-simple-tool
+(defvar *weather-tool*
+  (make-simple-tool
+    :get_weather
+    "Get current weather for a location"
+    (lambda (&key location unit)
+      ;; In real app, call weather API here
+      (format nil "Weather in ~A: 22°~A, partly cloudy, humidity 65%"
+              location (if (string= (or unit "celsius") "celsius") "C" "F")))
+    :parameters '((:location :type :string :description "City or location name" :required-p t)
+                  (:unit :type :string :description "Temperature unit (celsius/fahrenheit)"))
+    :tags '(:utility :weather :safe)))
 
-(deftool get-time "Get current time for a timezone"
-  ((timezone :string "Timezone name" :default "UTC"))
-  (format nil "Current time in ~A: ~A"
-          timezone
-          (multiple-value-bind (sec min hour)
-              (get-decoded-time)
-            (format nil "~2,'0D:~2,'0D:~2,'0D" hour min sec))))
+(defvar *time-tool*
+  (make-simple-tool
+    :get_time
+    "Get current time for a timezone"
+    (lambda (&key timezone)
+      (format nil "Current time in ~A: ~A"
+              (or timezone "UTC")
+              (multiple-value-bind (sec min hour)
+                  (get-decoded-time)
+                (format nil "~2,'0D:~2,'0D:~2,'0D" hour min sec))))
+    :parameters '((:timezone :type :string :description "Timezone name"))
+    :tags '(:utility :time :safe)))
 
-(deftool calculate "Perform mathematical calculations"
-  ((expression :string "Mathematical expression" :required-p t))
-  (handler-case
-      (format nil "Result: ~A" (eval (read-from-string expression)))
-    (error (e) (format nil "Error: ~A" e))))
+(defvar *calc-tool*
+  (make-simple-tool
+    :calculate
+    "Perform mathematical calculations"
+    (lambda (&key expression)
+      (handler-case
+          (format nil "Result: ~A" (eval (read-from-string expression)))
+        (error (e) (format nil "Error: ~A" e))))
+    :parameters '((:expression :type :string :description "Mathematical expression" :required-p t))
+    :tags '(:utility :math :safe)))
 
-;; Create plugin grouping tools
-(defplugin utility-plugin "Utility tools for weather, time, and math"
-  get-weather
-  get-time
-  calculate)
-
-;; Create kernel with plugin
+;; Create kernel with tools
 (defvar *kernel*
-  (make-kernel
-    :service *service*
-    :plugins '(utility-plugin)))
+  (build-kernel
+    (with-tools
+      (add-service
+        (create-kernel-builder)
+        *client*)
+      (list *weather-tool* *time-tool* *calc-tool*))))
 
 ;; Create agent
 (defvar *agent*
@@ -218,13 +236,85 @@ Agent that can use tools:
 
 ;; Use the agent
 (agent-chat *agent* "What's the weather in Tokyo?")
-;; Agent will call get-weather tool and respond
+;; Agent will call get_weather tool and respond
 
 (agent-chat *agent* "What's 15 * 23 + 7?")
 ;; Agent will call calculate tool and respond
 
 (agent-chat *agent* "What time is it in New York?")
-;; Agent will call get-time tool and respond
+;; Agent will call get_time tool and respond
+```
+
+### Using Presets
+
+Quick setup with built-in tool presets:
+
+```lisp
+(defpackage :example-presets
+  (:use :cl)
+  (:import-from :cl-agent.kernel
+                :create-kernel-builder :build-kernel
+                :add-service :with-preset)
+  (:import-from :cl-agent.simpleagent
+                :make-kernel-agent :agent-chat))
+
+(in-package :example-presets)
+
+;; Create kernel with preset tools
+(defvar *kernel*
+  (build-kernel
+    (with-preset
+      (add-service
+        (create-kernel-builder)
+        *client*)
+      :safe                      ; Preset: :standard :safe :full :file-only :http-only :utility-only
+      :security-level :standard))) ; Security: :permissive :standard :strict
+
+;; Create agent with preset tools
+(defvar *agent*
+  (make-kernel-agent *kernel*
+    :name "safe-bot"
+    :system-prompt "You are a helpful assistant with safe read-only tools."))
+
+;; Agent can use safe tools like read-file, http-get, get-timestamp
+(agent-chat *agent* "Read the content of /etc/hostname")
+```
+
+### Tag Filtering
+
+Filter tools at runtime using tags:
+
+```lisp
+(defpackage :example-tags
+  (:use :cl)
+  (:import-from :cl-agent.kernel
+                :create-kernel-builder :build-kernel
+                :add-service :with-preset :with-active-tags
+                :kernel-set-active-tags :kernel-clear-active-tags
+                :kernel-list-tools)
+  (:import-from :cl-agent.simpleagent
+                :make-kernel-agent :agent-chat))
+
+(in-package :example-tags)
+
+;; Create kernel with full preset but filter to only safe utilities
+(defvar *kernel*
+  (build-kernel
+    (with-active-tags
+      (with-preset
+        (add-service
+          (create-kernel-builder)
+          *client*)
+        :full)                   ; Load all tools
+      '(:safe :utility)          ; But only enable safe utility tools
+      :mode :any)))              ; Match any tag (:any or :all)
+
+;; List active tools
+(kernel-list-tools *kernel*)
+
+;; Change active tags at runtime
+(kernel-set-active-tags *kernel* '(:file :read))  ; Switch to file reading tools
+(kernel-clear-active-tags *kernel*)               ; Enable all tools
 ```
 
 ### ReAct Agent
@@ -234,27 +324,45 @@ Agent that thinks step-by-step:
 ```lisp
 (defpackage :example-react
   (:use :cl)
+  (:import-from :cl-agent.tools
+                :make-simple-tool)
   (:import-from :cl-agent.kernel
-                :deftool :defplugin :make-kernel)
+                :create-kernel-builder :build-kernel
+                :add-service :with-tools)
   (:import-from :cl-agent.simpleagent
                 :make-kernel-agent :agent-chat))
 
 (in-package :example-react)
 
 ;; Define research tools
-(deftool web-search "Search the web for information"
-  ((query :string "Search query" :required-p t))
-  ;; Simulated search results
-  (format nil "Search results for '~A':~%1. Wikipedia article...~%2. News article..."
-          query))
+(defvar *search-tool*
+  (make-simple-tool
+    :web_search
+    "Search the web for information"
+    (lambda (&key query)
+      ;; Simulated search results
+      (format nil "Search results for '~A':~%1. Wikipedia article...~%2. News article..."
+              query))
+    :parameters '((:query :type :string :description "Search query" :required-p t))
+    :tags '(:research :safe)))
 
-(deftool read-url "Read content from a URL"
-  ((url :string "URL to read" :required-p t))
-  (format nil "Content from ~A: [Article content here...]" url))
+(defvar *read-url-tool*
+  (make-simple-tool
+    :read_url
+    "Read content from a URL"
+    (lambda (&key url)
+      (format nil "Content from ~A: [Article content here...]" url))
+    :parameters '((:url :type :string :description "URL to read" :required-p t))
+    :tags '(:research :network :safe)))
 
-(defplugin research-plugin "Web research tools"
-  web-search
-  read-url)
+;; Create kernel with research tools
+(defvar *kernel*
+  (build-kernel
+    (with-tools
+      (add-service
+        (create-kernel-builder)
+        *client*)
+      (list *search-tool* *read-url-tool*))))
 
 ;; ReAct system prompt
 (defvar *react-prompt*
@@ -301,7 +409,8 @@ Agent that remembers conversations:
                 :am-get-messages
                 :am-save-checkpoint
                 :am-load-checkpoint)
-  (:import-from :cl-agent.kernel :make-kernel)
+  (:import-from :cl-agent.kernel
+                :create-kernel-builder :build-kernel :add-service)
   (:import-from :cl-agent.simpleagent
                 :make-kernel-agent :agent-chat))
 
@@ -315,6 +424,13 @@ Agent that remembers conversations:
   (make-agent-memory
     :context-store (make-memory-store-backend)
     :default-thread-id "session-1"))
+
+;; Create kernel
+(defvar *kernel*
+  (build-kernel
+    (add-service
+      (create-kernel-builder)
+      *client*)))
 
 ;; Create agent with memory
 (defvar *agent*
@@ -423,7 +539,8 @@ Agent with document retrieval:
                 :vector-store-add-document
                 :rag-query)
   (:import-from :cl-agent.kernel
-                :make-kernel :make-filter)
+                :create-kernel-builder :build-kernel
+                :add-service :add-filter :make-filter)
   (:import-from :cl-agent.simpleagent
                 :make-kernel-agent :agent-chat))
 
@@ -474,9 +591,12 @@ Agent with document retrieval:
 
 ;; 5. Create kernel with RAG filter
 (defvar *kernel*
-  (make-kernel
-    :service *service*
-    :filters (list *rag-filter*)))
+  (build-kernel
+    (add-filter
+      (add-service
+        (create-kernel-builder)
+        *client*)
+      *rag-filter*)))
 
 ;; 6. Create RAG-enhanced agent
 (defvar *rag-agent*
@@ -504,11 +624,19 @@ Agent for complex multi-turn dialogues:
                 :make-memory-store-backend
                 :am-add-message
                 :am-get-last-n-messages)
-  (:import-from :cl-agent.kernel :make-kernel)
+  (:import-from :cl-agent.kernel
+                :create-kernel-builder :build-kernel :add-service)
   (:import-from :cl-agent.simpleagent
                 :make-kernel-agent :agent-chat))
 
 (in-package :example-multiturn)
+
+;; Create kernel
+(defvar *kernel*
+  (build-kernel
+    (add-service
+      (create-kernel-builder)
+      *client*)))
 
 ;; Create memory with summary buffer for long conversations
 (defvar *memory*
