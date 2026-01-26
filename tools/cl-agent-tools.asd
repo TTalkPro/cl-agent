@@ -30,6 +30,11 @@
                (:file "file")
                (:file "http")
 
+               ;; Builtin Tools with Tags (NEW)
+               (:file "builtin")
+               ;; Tool Presets (NEW)
+               (:file "presets")
+
                ;; Provider 实现
                (:file "providers/builtin")      ; Phase 2 ✅ 已实现
                ;; (:file "providers/mcp")      ; Phase 3 - 跳过（应在独立项目中）

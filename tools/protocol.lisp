@@ -55,6 +55,13 @@
     :type list
     :documentation "所需权限列表")
 
+   (tags
+    :initarg :tags
+    :accessor tool-tags
+    :initform nil
+    :type list
+    :documentation "工具标签列表（关键字列表，用于过滤和分组）")
+
    (metadata
     :initarg :metadata
     :accessor tool-metadata
@@ -308,7 +315,7 @@
 ;;; 辅助函数
 ;;; ============================================================
 
-(defun make-simple-tool (name description handler &key parameters category permissions metadata)
+(defun make-simple-tool (name description handler &key parameters category permissions tags metadata)
   "创建简单工具的辅助函数
 
 参数:
@@ -318,6 +325,7 @@
   PARAMETERS  - 参数定义（可选）
   CATEGORY    - 分类（可选，默认 :custom）
   PERMISSIONS - 权限列表（可选）
+  TAGS        - 标签列表（可选，用于过滤和分组）
   METADATA    - 元数据（可选）
 
 返回:
@@ -329,7 +337,8 @@
                     (lambda (&key expression)
                       (eval (read-from-string expression)))
                     :parameters '((:expression :type string :required t))
-                    :category :custom)"
+                    :category :custom
+                    :tags '(:math :utility))"
   (make-instance 'tool
     :name name
     :description description
@@ -337,6 +346,7 @@
     :parameters parameters
     :category (or category :custom)
     :permissions permissions
+    :tags tags
     :metadata metadata))
 
 (defun provider-tool-count (provider)
@@ -363,3 +373,76 @@
                (push name names))
              (provider-tools provider))
     (nreverse names)))
+
+;;; ============================================================
+;;; Tag 相关函数
+;;; ============================================================
+
+(defun tool-has-tag-p (tool tag)
+  "检查工具是否具有指定标签
+
+参数:
+  TOOL - 工具实例
+  TAG  - 标签（关键字）
+
+返回:
+  T 如果工具具有该标签，NIL 否则"
+  (member tag (tool-tags tool) :test #'eq))
+
+(defun tool-has-any-tag-p (tool tags)
+  "检查工具是否具有任一指定标签
+
+参数:
+  TOOL - 工具实例
+  TAGS - 标签列表
+
+返回:
+  T 如果工具具有任一标签，NIL 否则"
+  (some (lambda (tag) (tool-has-tag-p tool tag)) tags))
+
+(defun tool-has-all-tags-p (tool tags)
+  "检查工具是否具有所有指定标签
+
+参数:
+  TOOL - 工具实例
+  TAGS - 标签列表
+
+返回:
+  T 如果工具具有所有标签，NIL 否则"
+  (every (lambda (tag) (tool-has-tag-p tool tag)) tags))
+
+(defun tool-add-tag (tool tag)
+  "为工具添加标签
+
+参数:
+  TOOL - 工具实例
+  TAG  - 标签（关键字）
+
+返回:
+  工具实例"
+  (pushnew tag (tool-tags tool) :test #'eq)
+  tool)
+
+(defun tool-remove-tag (tool tag)
+  "从工具移除标签
+
+参数:
+  TOOL - 工具实例
+  TAG  - 标签（关键字）
+
+返回:
+  工具实例"
+  (setf (tool-tags tool) (remove tag (tool-tags tool) :test #'eq))
+  tool)
+
+(defun tool-set-tags (tool tags)
+  "设置工具的标签列表
+
+参数:
+  TOOL - 工具实例
+  TAGS - 标签列表
+
+返回:
+  工具实例"
+  (setf (tool-tags tool) (copy-list tags))
+  tool)

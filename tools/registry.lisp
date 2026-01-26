@@ -476,3 +476,89 @@
             (provider-enabled-p provider)))
 
   registry)
+
+;;; ============================================================
+;;; Tag 过滤功能
+;;; ============================================================
+
+(defun list-tools-by-tag (registry tag)
+  "按单个标签过滤工具
+
+参数:
+  REGISTRY - 注册表实例
+  TAG      - 标签（关键字）
+
+返回:
+  匹配的工具列表"
+  (list-tools-by-tags registry (list tag) :mode :any))
+
+(defun list-tools-by-tags (registry tags &key (mode :any))
+  "按标签列表过滤工具
+
+参数:
+  REGISTRY - 注册表实例
+  TAGS     - 标签列表
+  MODE     - 匹配模式
+           - :any  - 工具具有任一标签即匹配（默认）
+           - :all  - 工具必须具有所有标签才匹配
+
+返回:
+  匹配的工具列表"
+  (when (null tags)
+    (return-from list-tools-by-tags (list-tools registry)))
+
+  (let ((all-tools (list-tools registry))
+        (matcher (case mode
+                   (:all #'tool-has-all-tags-p)
+                   (otherwise #'tool-has-any-tag-p))))
+    (remove-if-not (lambda (tool)
+                    (funcall matcher tool tags))
+                  all-tools)))
+
+(defun get-tools-schema-by-tags (registry tags &key (mode :any))
+  "获取按标签过滤后的工具 Schema 列表
+
+参数:
+  REGISTRY - 注册表实例
+  TAGS     - 标签列表（nil 表示不过滤）
+  MODE     - 匹配模式 (:any 或 :all)
+
+返回:
+  Schema 列表，每个元素为:
+  (:name \"tool-name\" :description \"...\" :input-schema hash-table)"
+  (let ((tools (if tags
+                   (list-tools-by-tags registry tags :mode mode)
+                   (list-tools registry))))
+    (mapcar #'tool-to-json-schema tools)))
+
+(defun list-all-tags (registry)
+  "列出注册表中所有工具的标签
+
+参数:
+  REGISTRY - 注册表实例
+
+返回:
+  标签列表（去重）"
+  (let ((tags nil))
+    (dolist (tool (list-tools registry))
+      (dolist (tag (tool-tags tool))
+        (pushnew tag tags :test #'eq)))
+    (nreverse tags)))
+
+(defun count-tools-by-tag (registry)
+  "统计每个标签下的工具数量
+
+参数:
+  REGISTRY - 注册表实例
+
+返回:
+  alist ((tag . count) ...)"
+  (let ((tag-counts (make-hash-table :test #'eq)))
+    (dolist (tool (list-tools registry))
+      (dolist (tag (tool-tags tool))
+        (incf (gethash tag tag-counts 0))))
+    (let ((result nil))
+      (maphash (lambda (tag count)
+                 (push (cons tag count) result))
+               tag-counts)
+      (sort result #'> :key #'cdr))))

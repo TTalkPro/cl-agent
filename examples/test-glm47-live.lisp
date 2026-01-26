@@ -18,12 +18,18 @@
 ;;; ============================================================
 
 (require :asdf)
-(asdf:initialize-source-registry)
+
+;; Set up paths to load from current project directory first
+(let ((root (make-pathname :directory (butlast (pathname-directory *load-truename*)))))
+  (dolist (d '("" "core/" "llm/" "tools/" "simpleagent/" "plugin/"))
+    (pushnew (merge-pathnames d root) asdf:*central-registry* :test #'equal)))
 
 (format t "~%========================================~%")
-(format t "Loading cl-agent-llm...~%")
-(ql:quickload :cl-agent-llm :silent t)
-(format t "cl-agent-llm loaded successfully!~%")
+(format t "Loading cl-agent-tools...~%")
+(ql:quickload :cl-agent-tools :silent t)
+(format t "Loading cl-agent-simpleagent...~%")
+(ql:quickload :cl-agent-simpleagent :silent t)
+(format t "All systems loaded successfully!~%")
 (format t "========================================~%")
 
 ;;; ============================================================
@@ -41,46 +47,59 @@
         (cl-agent.llm:base-provider-default-model *glm-provider*))
 
 ;;; ============================================================
-;;; 工具定义
+;;; 工具定义（使用新的 tools API）
 ;;; ============================================================
 
-(cl-agent.kernel:deftool get-current-weather "获取指定城市的当前天气信息"
-  ((city :string "城市名称" :required-p t)
-   (unit :string "温度单位，celsius 或 fahrenheit" :default "celsius"))
-  (format nil "~A 当前天气：晴，气温 22°~A，湿度 45%"
-          city (if (string-equal unit "fahrenheit") "F" "C")))
+(defparameter *weather-tool*
+  (cl-agent.tools:make-simple-tool
+   :get_current_weather
+   "获取指定城市的当前天气信息"
+   (lambda (&key city unit)
+     (format nil "~A 当前天气：晴，气温 22°~A，湿度 45%"
+             city (if (string-equal (or unit "celsius") "fahrenheit") "F" "C")))
+   :parameters '((:city :type :string :description "城市名称" :required-p t)
+                 (:unit :type :string :description "温度单位，celsius 或 fahrenheit"))
+   :tags '(:utility :weather)))
 
-(cl-agent.kernel:deftool calculate "计算数学表达式的结果"
-  ((expression :string "数学表达式" :required-p t))
-  (format nil "计算结果: ~A = ~A"
-          expression
-          (handler-case (eval (read-from-string expression))
-            (error () "计算错误"))))
-
-(cl-agent.kernel:defplugin tools-plugin "测试工具集合"
-  get-current-weather
-  calculate)
+(defparameter *calculate-tool*
+  (cl-agent.tools:make-simple-tool
+   :calculate
+   "计算数学表达式的结果"
+   (lambda (&key expression)
+     (format nil "计算结果: ~A = ~A"
+             expression
+             (handler-case (eval (read-from-string expression))
+               (error () "计算错误"))))
+   :parameters '((:expression :type :string :description "数学表达式" :required-p t))
+   :tags '(:utility :math)))
 
 ;;; ============================================================
-;;; Kernel 实例
+;;; Kernel 实例（使用新的 tools API）
 ;;; ============================================================
 
 (defparameter *kernel*
-  (cl-agent.kernel:make-kernel
-   :chat-service *glm-provider*
-   :plugins '(tools-plugin)))
+  (cl-agent.kernel:build-kernel
+   (cl-agent.kernel:with-tools
+    (cl-agent.kernel:add-service
+     (cl-agent.kernel:create-kernel-builder)
+     *glm-provider*)
+    (list *weather-tool* *calculate-tool*))))
 
 (defparameter *kernel-with-filter*
   (let ((log nil))
-    (cl-agent.kernel:make-kernel
-     :chat-service *glm-provider*
-     :plugins '(tools-plugin)
-     :filters (list (lambda (context next-fn)
-                      (push (getf context :tool-name) log)
-                      (format t "    [Filter] Executing: ~A~%" (getf context :tool-name))
-                      (let ((result (funcall next-fn context)))
-                        (format t "    [Filter] Result: ~A~%" result)
-                        result))))))
+    (cl-agent.kernel:build-kernel
+     (cl-agent.kernel:add-filter
+      (cl-agent.kernel:with-tools
+       (cl-agent.kernel:add-service
+        (cl-agent.kernel:create-kernel-builder)
+        *glm-provider*)
+       (list *weather-tool* *calculate-tool*))
+      (lambda (context next-fn)
+        (push (getf context :tool-name) log)
+        (format t "    [Filter] Executing: ~A~%" (getf context :tool-name))
+        (let ((result (funcall next-fn context)))
+          (format t "    [Filter] Result: ~A~%" result)
+          result))))))
 
 ;;; ============================================================
 ;;; 测试 1: invoke — 直接函数执行（通过 filter chain）
@@ -94,9 +113,9 @@
 
   ;; 1.1 基本调用
   (format t "~%  1.1 Basic invoke:~%")
-  (let ((result (cl-agent.kernel:invoke *kernel* :get-current-weather
+  (let ((result (cl-agent.kernel:invoke *kernel* :get_current_weather
                                          '(:city "Beijing"))))
-    (format t "    invoke(:get-current-weather, city=Beijing)~%")
+    (format t "    invoke(:get_current_weather, city=Beijing)~%")
     (format t "    Result: ~A~%" result)
     (assert (search "Beijing" result) () "invoke basic failed"))
 
@@ -188,7 +207,7 @@
   (let* ((messages (list (list :role :user
                                :content "北京今天天气怎么样？")))
          (result (cl-agent.kernel:invoke-chat-with-tools *kernel-with-filter* messages
-                   :settings (list :system-prompt "你是天气助手。查询天气时必须使用 get-current-weather 工具。"
+                   :settings (list :system-prompt "你是天气助手。查询天气时必须使用 get_current_weather 工具。"
                                    :max-attempts 5
                                    :on-tool-call (lambda (name args)
                                                    (format t "    [Tool Call] ~A ~S~%" name args))
@@ -220,7 +239,7 @@
   (let* ((messages1 (list (list :role :user
                                 :content "北京今天天气怎么样？")))
          (result1 (cl-agent.kernel:invoke-chat-with-tools *kernel* messages1
-                    :settings (list :system-prompt "你是助手。查询天气用 get-current-weather，计算用 calculate。"
+                    :settings (list :system-prompt "你是助手。查询天气用 get_current_weather，计算用 calculate。"
                                     :max-attempts 5
                                     :on-tool-call (lambda (name args)
                                                     (format t "    [R1 Tool Call] ~A ~S~%" name args))))))
@@ -235,7 +254,7 @@
                               (list (list :role :assistant :content (getf result1 :text))
                                     (list :role :user :content "帮我计算 (+ 10 20 30)"))))
            (result2 (cl-agent.kernel:invoke-chat-with-tools *kernel* messages2
-                      :settings (list :system-prompt "你是助手。查询天气用 get-current-weather，计算用 calculate。"
+                      :settings (list :system-prompt "你是助手。查询天气用 get_current_weather，计算用 calculate。"
                                       :max-attempts 5
                                       :on-tool-call (lambda (name args)
                                                       (format t "    [R2 Tool Call] ~A ~S~%" name args))))))
@@ -265,7 +284,7 @@
     (format t "  Calling chat-completion (legacy API)...~%")
 
     (let ((result (cl-agent.kernel:chat-completion *kernel* history
-                    :settings (list :system-prompt "你是天气助手。查询天气时使用 get-current-weather 工具。"
+                    :settings (list :system-prompt "你是天气助手。查询天气时使用 get_current_weather 工具。"
                                     :max-attempts 5
                                     :on-tool-call (lambda (name args)
                                                     (format t "    [Tool Call] ~A ~S~%" name args))

@@ -343,6 +343,7 @@
   `(:name ,(tool-name tool)
     :description ,(tool-description tool)
     :category ,(tool-category tool)
+    :tags ,(tool-tags tool)
     :parameters ,(tool-parameters tool)
     :permissions ,(tool-permissions tool)))
 
@@ -357,6 +358,7 @@
     (format stream "Name: ~A~%" (getf info :name))
     (format stream "Description: ~A~%" (getf info :description))
     (format stream "Category: ~A~%" (getf info :category))
+    (format stream "Tags: ~A~%" (getf info :tags))
     (format stream "Parameters: ~A~%" (getf info :parameters))
     (format stream "Permissions: ~A~%" (getf info :permissions))
     (format stream "================~%")
@@ -397,6 +399,7 @@
     :description ,(tool-description tool)
     :parameters ,(tool-parameters tool)
     :category ,(tool-category tool)
+    :tags ,(tool-tags tool)
     :permissions ,(tool-permissions tool)))
 
 (defun tool-from-plist (plist)
@@ -415,6 +418,7 @@
    :description (getf plist :description)
    :parameters (getf plist :parameters)
    :category (getf plist :category)
+   :tags (getf plist :tags)
    :permissions (getf plist :permissions)))
 
 (defun tool-to-json-schema (tool)

@@ -42,7 +42,16 @@
    #:tool-parameters
    #:tool-category
    #:tool-permissions
+   #:tool-tags
    #:tool-metadata
+
+   ;; ==================== Tag 相关 ====================
+   #:tool-has-tag-p
+   #:tool-has-any-tag-p
+   #:tool-has-all-tags-p
+   #:tool-add-tag
+   #:tool-remove-tag
+   #:tool-set-tags
 
    ;; ==================== 工具注册 ====================
    ;; 注意：不再导出全局变量
@@ -143,6 +152,13 @@
    #:registry-provider-count
    #:print-registry-info
 
+   ;; Registry Tag 过滤
+   #:list-tools-by-tag
+   #:list-tools-by-tags
+   #:get-tools-schema-by-tags
+   #:list-all-tags
+   #:count-tools-by-tag
+
    ;; 辅助函数
    #:make-simple-tool
 
@@ -159,7 +175,70 @@
    #:register-search-tools-batch
    #:make-shell-tool-specs
    #:register-shell-tools-batch
-   #:register-all-builtin-tools))
+   #:register-all-builtin-tools
+
+   ;; ==================== Builtin Tools with Tags (NEW) ====================
+   ;; File tools
+   #:make-read-file-tool
+   #:make-write-file-tool
+   #:make-delete-file-tool
+   #:make-list-directory-tool
+   #:create-file-tools
+
+   ;; HTTP tools
+   #:make-http-get-tool
+   #:make-http-post-tool
+   #:create-http-tools
+
+   ;; Shell tools
+   #:make-execute-command-tool
+   #:create-shell-tools
+
+   ;; Utility tools
+   #:make-get-timestamp-tool
+   #:make-generate-uuid-tool
+   #:make-json-parse-tool
+   #:make-json-stringify-tool
+   #:make-string-replace-tool
+   #:make-math-eval-tool
+   #:create-utility-tools
+
+   ;; Tool collections
+   #:create-all-builtin-tools
+   #:create-safe-tools
+   #:register-builtin-tools
+
+   ;; ==================== Tool Presets (NEW) ====================
+   ;; Tag presets
+   #:*preset-safe-tags*
+   #:*preset-file-tags*
+   #:*preset-http-tags*
+   #:*preset-utility-tags*
+   #:*preset-dangerous-tags*
+
+   ;; Security configuration
+   #:tool-security-config
+   #:make-tool-security-config
+   #:make-permissive-security-config
+   #:make-standard-security-config
+   #:make-strict-security-config
+
+   ;; Preset tool creation
+   #:create-preset-tools
+   #:create-standard-tools
+   #:create-safe-preset-tools
+   #:create-full-tools
+   #:create-file-only-tools
+   #:create-http-only-tools
+   #:create-utility-only-tools
+
+   ;; Quick setup
+   #:quick-setup-tools
+   #:quick-setup-kernel-with-tools
+
+   ;; Documentation
+   #:describe-preset
+   #:list-all-presets))
 
 ;;; ============================================================
 ;;; 搜索工具包

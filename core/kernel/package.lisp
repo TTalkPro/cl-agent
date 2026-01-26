@@ -3,7 +3,7 @@
 ;;;;
 ;;;; Overview:
 ;;;;   Defines the complete Kernel framework:
-;;;;   - Tool/Plugin system (Symbol Plist pattern)
+;;;;   - Tool system with tag-based filtering
 ;;;;   - Context (state management)
 ;;;;   - Service (LLM abstraction)
 ;;;;   - Provider protocol (LLM interface)
@@ -34,12 +34,6 @@
    #:tool-schema
    #:tool-name
    #:validate-tool-args
-
-   ;; ==================== Plugin Query API ====================
-   #:plugin-p
-   #:plugin-tool-symbols
-   #:plugin-description
-   #:plugin-get-schemas
 
    ;; ==================== Schema Tools ====================
    #:params->json-schema
@@ -114,27 +108,34 @@
    #:kernel
    #:make-kernel
    #:kernel-service
-   #:kernel-chat-service  ; backward compat
+   #:kernel-chat-service
    #:kernel-config
-   #:kernel-plugins
+   #:kernel-tool-registry
+   #:kernel-active-tags
+   #:kernel-tag-filter-mode
    #:kernel-filters
    #:kernel-tools-cache
    #:kernel-context
 
    ;; Kernel Query API
-   #:kernel-find-tool-symbol
+   #:kernel-find-tool
    #:kernel-find-tool-by-name
    #:kernel-execute-tool
    #:kernel-get-tools
    #:kernel-invalidate-tools-cache
-   #:kernel-list-plugins
    #:kernel-list-tools
+   #:kernel-list-tags
    #:kernel-tool-count
    #:kernel-has-tool-p
 
-   ;; Kernel Modification API
-   #:kernel-add-plugin
-   #:kernel-remove-plugin
+   ;; Kernel Tool Management API
+   #:kernel-register-tool
+   #:kernel-register-tools
+   #:kernel-unregister-tool
+   #:kernel-set-active-tags
+   #:kernel-clear-active-tags
+
+   ;; Kernel Filter API
    #:kernel-add-filter
    #:kernel-clear-filters
    #:kernel-get-service
@@ -143,7 +144,13 @@
    ;; ==================== Kernel Builder ====================
    #:kernel-builder
    #:create-kernel-builder
-   #:add-plugin
+   ;; Tool management
+   #:with-tool
+   #:with-tools
+   #:with-tool-registry
+   #:with-active-tags
+   #:with-preset
+   ;; Service and filter
    #:add-service
    #:add-filter
    #:with-config
