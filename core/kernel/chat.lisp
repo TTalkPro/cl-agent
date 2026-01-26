@@ -331,27 +331,33 @@
       (let ((response (service-chat service msgs tools
                                     (list :max-tokens (getf settings :max-tokens)
                                           :temperature (getf settings :temperature)))))
-        (let ((response-tool-calls (getf response :tool-calls)))
+        ;; response 现在是 llm-response 对象
+        (let ((response-tool-calls (cl-agent.core:llm-response-tool-calls response)))
           (if (and response-tool-calls (not (eq tool-choice :none)))
-              ;; 有工具调用
-              (progn
+              ;; 有工具调用 - 转换为 plist 格式用于消息
+              (let ((tool-calls-plist
+                      (mapcar (lambda (tc)
+                                (list :id (cl-agent.core:llm-tool-call-id tc)
+                                      :name (cl-agent.core:llm-tool-call-name tc)
+                                      :arguments (cl-agent.core:llm-tool-call-arguments tc)))
+                              response-tool-calls)))
                 (incf attempts)
                 ;; 添加 assistant 响应
                 (let ((assistant-msg (list :role :assistant
-                                           :content (or (getf response :content) "")
-                                           :tool-calls response-tool-calls)))
+                                           :content (or (cl-agent.core:llm-response-content response) "")
+                                           :tool-calls tool-calls-plist)))
                   (setf msgs (append msgs (list assistant-msg)))
                   (context-add-message ctx assistant-msg))
                 ;; 执行工具调用
                 (multiple-value-bind (results messages)
-                    (execute-tool-calls kernel response-tool-calls ctx
+                    (execute-tool-calls kernel tool-calls-plist ctx
                                         on-tool-call on-tool-result)
                   (setf tool-calls-made (append tool-calls-made results))
                   (setf msgs (append msgs messages))
                   (dolist (msg messages)
                     (context-add-message ctx msg))))
               ;; 无工具调用 - 返回最终响应
-              (let ((text (or (getf response :content) "")))
+              (let ((text (or (cl-agent.core:llm-response-content response) "")))
                 ;; 更新 chat-history（如果使用）
                 (when (chat-history-p messages)
                   (setf (chat-history-messages messages) msgs)
@@ -394,7 +400,7 @@
         (let ((response (invoke-chat kernel messages
                                      :settings settings
                                      :context context)))
-          (funcall callback (list :delta (getf response :content) :done t))
+          (funcall callback (list :delta (cl-agent.core:llm-response-content response) :done t))
           response))))
 
 ;;; ============================================================

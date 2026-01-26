@@ -187,9 +187,8 @@
    #:llm-response-has-tool-calls-p
    #:llm-response-has-content-p
 
-   ;; Conversion functions
+   ;; Conversion function
    #:plist-to-llm-response
-   #:llm-response-to-plist
 
    ;; Convenience accessors
    #:llm-response-text
@@ -197,6 +196,8 @@
    #:llm-response-output-tokens
    #:llm-response-total-tokens
    #:llm-response-first-tool-call
+   #:llm-response-get-tool-calls
+   #:llm-response-get-finish-reason
 
    ;; ==================== Provider Registry ====================
    #:register-provider

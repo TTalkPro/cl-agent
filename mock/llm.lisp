@@ -64,8 +64,11 @@
 ;;; ============================================================
 
 (defmethod llm-chat ((provider mock-llm-provider) messages &key max-tokens temperature (model nil) (tools nil) system)
-  "发送聊天请求到 Mock LLM"
-  (declare (ignore max-tokens temperature model tools system))
+  "发送聊天请求到 Mock LLM
+
+返回：
+  llm-response 对象"
+  (declare (ignore max-tokens temperature model system))
 
   ;; 模拟延迟
   (let ((delay (mock-response-delay provider)))
@@ -76,8 +79,12 @@
   (when (> (mock-error-rate provider) 0)
     (when (< (random 1.0) (mock-error-rate provider))
       (return-from llm-chat
-        (list :success nil
-              :error "Mock LLM API error"))))
+        (cl-agent.core:make-llm-response
+         :content ""
+         :usage (cl-agent.core:make-llm-usage :input-tokens 0 :output-tokens 0)
+         :model "mock-model-v1"
+         :finish-reason :error
+         :raw-response (list :error "Mock LLM API error")))))
 
   ;; 获取最后一条用户消息
   (let* ((last-user-msg (loop for msg in (reverse messages)
@@ -88,14 +95,27 @@
          (response (gethash prompt responses)))
 
     (if response
-        ;; 返回预定义的响应
-        (if (consp response)
-            response
-            (list :content response
-                  :usage (list :prompt-tokens (length prompt)
-                              :completion-tokens (length response)
-                              :total-tokens (+ (length prompt)
-                                               (length response)))))
+        ;; 返回预定义的响应（转换为 llm-response）
+        (cond
+          ((cl-agent.core:llm-response-p response)
+           response)
+          ((consp response)
+           (cl-agent.core:make-llm-response
+            :content (or (getf response :content) "")
+            :tool-calls (getf response :tool-calls)
+            :usage (cl-agent.core:make-llm-usage
+                    :input-tokens (length prompt)
+                    :output-tokens (length (or (getf response :content) "")))
+            :model "mock-model-v1"
+            :finish-reason (if (getf response :tool-calls) :tool-call :stop)))
+          (t
+           (cl-agent.core:make-llm-response
+            :content response
+            :usage (cl-agent.core:make-llm-usage
+                    :input-tokens (length prompt)
+                    :output-tokens (length response))
+            :model "mock-model-v1"
+            :finish-reason :stop)))
         ;; 生成智能默认响应
         (generate-mock-response prompt messages tools))))
 
@@ -127,7 +147,7 @@
   TOOLS    - 可用工具列表
 
 返回：
-  响应 plist"
+  llm-response 对象"
 
   (let ((lower-prompt (string-downcase prompt)))
 
@@ -141,33 +161,48 @@
 
       ;; 问答场景
       ((cl-ppcre:scan "你是|what are you|介绍|introduce" lower-prompt)
-       (list :content "我是 Mock LLM，用于测试和演示。我不会调用真实的 API，但可以模拟各种交互场景。"
-             :usage (list :prompt-tokens 10 :completion-tokens 30 :total-tokens 40)))
+       (cl-agent.core:make-llm-response
+        :content "我是 Mock LLM，用于测试和演示。我不会调用真实的 API，但可以模拟各种交互场景。"
+        :usage (cl-agent.core:make-llm-usage :input-tokens 10 :output-tokens 30)
+        :model "mock-model-v1"
+        :finish-reason :stop))
 
       ;; 代码生成场景
       ((cl-ppcre:scan "代码|code|函数|function|实现|implement" lower-prompt)
-       (list :content (format nil "~%// Mock 代码实现~%(defun mock-function ()~%  \"这是一个 mock 函数\"~%  (return \"mock result\"))~%"
-                               (generate-mock-code-snippet prompt))
-             :usage (list :prompt-tokens 20 :completion-tokens 50 :total-tokens 70)))
+       (cl-agent.core:make-llm-response
+        :content (format nil "~%// Mock 代码实现~%(defun mock-function ()~%  \"这是一个 mock 函数\"~%  (return \"mock result\"))~%"
+                         (generate-mock-code-snippet prompt))
+        :usage (cl-agent.core:make-llm-usage :input-tokens 20 :output-tokens 50)
+        :model "mock-model-v1"
+        :finish-reason :stop))
 
       ;; 笑话场景
       ((cl-ppcre:scan "笑话|joke|幽默|humor" lower-prompt)
-       (list :content (generate-joke-response)
-             :usage (list :prompt-tokens 10 :completion-tokens 40 :total-tokens 50)))
+       (cl-agent.core:make-llm-response
+        :content (generate-joke-response)
+        :usage (cl-agent.core:make-llm-usage :input-tokens 10 :output-tokens 40)
+        :model "mock-model-v1"
+        :finish-reason :stop))
 
       ;; 总结场景
       ((cl-ppcre:scan "总结|summary|摘要|abstract" lower-prompt)
-       (list :content (format nil "总结：~%~A~%~%这是一个基于输入内容生成的 mock 总结。"
-                               (truncate-string prompt 50))
-             :usage (list :prompt-tokens 15 :completion-tokens 30 :total-tokens 45)))
+       (cl-agent.core:make-llm-response
+        :content (format nil "总结：~%~A~%~%这是一个基于输入内容生成的 mock 总结。"
+                         (truncate-string prompt 50))
+        :usage (cl-agent.core:make-llm-usage :input-tokens 15 :output-tokens 30)
+        :model "mock-model-v1"
+        :finish-reason :stop))
 
       ;; 默认响应
       (t
-       (list :content (format nil "Mock LLM 响应：~%~A~%~%(这是模拟的响应，用于测试和演示)"
-                               (truncate-string prompt 100))
-             :usage (list :prompt-tokens (length prompt)
-                          :completion-tokens 20
-                          :total-tokens (+ (length prompt) 20)))))))
+       (cl-agent.core:make-llm-response
+        :content (format nil "Mock LLM 响应：~%~A~%~%(这是模拟的响应，用于测试和演示)"
+                         (truncate-string prompt 100))
+        :usage (cl-agent.core:make-llm-usage
+                :input-tokens (length prompt)
+                :output-tokens 20)
+        :model "mock-model-v1"
+        :finish-reason :stop)))))
 
 (defun generate-tool-call-response (prompt tools)
   "生成模拟的工具调用响应
@@ -177,7 +212,7 @@
   TOOLS  - 可用工具列表
 
 返回：
-  响应 plist，包含工具调用"
+  llm-response 对象，包含工具调用"
 
   ;; 尝试匹配工具
   (let* ((lower-prompt (string-downcase prompt))
@@ -187,17 +222,19 @@
                      ((cl-ppcre:scan "文件|file|read|write" lower-prompt) :file-ops)
                      ((and tools (listp tools))
                       (getf (first tools) :name))
-                     (t :generic-tool))))
+                     (t :generic-tool)))
+         (tool-call-id (format nil "call_~A" (generate-random-id)))
+         (args-ht (make-hash-table :test 'equal)))
+    (setf (gethash "input" args-ht) "test")
 
-    (list :content (format nil "我将调用 ~A 工具来处理你的请求。"
-                          tool-name)
-          :tool-calls (list
-                       (list :id (format nil "call_~A" (generate-random-id))
+    (cl-agent.core:make-llm-response
+     :content (format nil "我将调用 ~A 工具来处理你的请求。" tool-name)
+     :tool-calls (list (list :id tool-call-id
                              :name tool-name
-                             :arguments "{\"input\": \"test\"}"))
-          :usage (list :prompt-tokens 20
-                      :completion-tokens 10
-                      :total-tokens 30))))
+                             :arguments args-ht))
+     :usage (cl-agent.core:make-llm-usage :input-tokens 20 :output-tokens 10)
+     :model "mock-model-v1"
+     :finish-reason :tool-call)))
 
 (defun generate-tool-arguments (tool-name prompt)
   "根据工具名称生成模拟参数

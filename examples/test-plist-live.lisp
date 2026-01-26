@@ -73,8 +73,8 @@
                                          :max-tokens 256
                                          :temperature 0.7)))
   (format t "  User: 请用一句话解释什么是 Common Lisp。~%")
-  (format t "  Assistant: ~A~%" (getf response :content))
-  (assert (> (length (getf response :content)) 0))
+  (format t "  Assistant: ~A~%" (cl-agent.core:llm-response-content response))
+  (assert (> (length (cl-agent.core:llm-response-content response)) 0))
   (format t "[TEST 1 PASSED]~%"))
 
 ;;; ============================================================
@@ -87,7 +87,7 @@
        (r1 (cl-agent.llm:llm-chat *provider* msgs1
                                     :max-tokens 128
                                     :temperature 0.3))
-       (reply1 (getf r1 :content)))
+       (reply1 (cl-agent.core:llm-response-content r1)))
   (format t "  Round 1: ~A~%" reply1)
   (let* ((msgs2 (list (list :role :user
                             :content "你好，我叫 David。请记住我的名字。")
@@ -96,7 +96,7 @@
          (r2 (cl-agent.llm:llm-chat *provider* msgs2
                                       :max-tokens 128
                                       :temperature 0.3))
-         (reply2 (getf r2 :content)))
+         (reply2 (cl-agent.core:llm-response-content r2)))
     (format t "  Round 2: ~A~%" reply2)
     (assert (> (length reply2) 0))
     (if (search "David" reply2)

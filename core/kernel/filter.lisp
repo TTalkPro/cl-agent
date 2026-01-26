@@ -475,7 +475,7 @@ Note:
    :fn (lambda (context next-fn)
          (let ((result (funcall next-fn context)))
            (format stream "[Post-Chat] Response: ~A tool-calls~%"
-                   (length (getf result :tool-calls)))
+                   (length (cl-agent.core:llm-response-tool-calls result)))
            result))))
 
 (defun make-message-transform-filter (transform-fn &key (type :pre-chat))

@@ -179,7 +179,7 @@
   RETRY-BACKOFF - 重试延迟倍数（默认 2.0，指数退避）
 
 返回：
-  响应 plist：(:content ... :model ... :usage ...)
+  llm-response 对象（包含 content、model、usage 等属性）
 
 错误处理：
   - 自动重试临时错误（网络错误、速率限制、服务器错误）
@@ -422,7 +422,7 @@
   (let ((response (chat client `((:user . ,prompt))
                        :system system
                        :temperature temperature)))
-    (getf response :content)))
+    (cl-agent.core:llm-response-content response)))
 
 (defun chat-with-tools (client prompt tools &key (system nil))
   "带工具的聊天
@@ -434,7 +434,7 @@
   SYSTEM - 系统提示（可选）
 
 返回：
-  响应 plist，可能包含工具调用
+  llm-response 对象，可能包含工具调用
 
 示例：
   (chat-with-tools *client* \"Search for AI news\"

@@ -57,9 +57,49 @@ cl-agent-error        ; Base error
 ;; ToolCall construction
 (make-tool-call :id "call_123" :name "get-weather" :arguments '(:city "Tokyo"))
 
-;; Response construction
+;; Response construction (for tool results)
 (make-response :content "..." :tool-calls [...] :metadata {...})
 ```
+
+### 2.1 Unified LLM Response Types
+
+All LLM Providers return unified `llm-response` CLOS objects:
+
+```lisp
+;; LLM response object
+(make-llm-response
+  :content "Hello!"
+  :tool-calls nil
+  :usage (make-llm-usage :input-tokens 10 :output-tokens 5)
+  :model "glm-4.7"
+  :finish-reason :stop
+  :message-id "msg_123"
+  :raw-response parsed-hash-table)
+
+;; Access response content
+(llm-response-content response)      ; => "Hello!"
+(llm-response-tool-calls response)   ; => nil or list of tool calls
+(llm-response-model response)        ; => "glm-4.7"
+(llm-response-finish-reason response) ; => :stop, :tool-call, :length, :error
+
+;; Convenience accessors
+(llm-response-has-tool-calls-p response) ; => T/NIL
+(llm-response-has-content-p response)    ; => T/NIL
+(llm-response-input-tokens response)     ; => 10
+(llm-response-output-tokens response)    ; => 5
+(llm-response-total-tokens response)     ; => 15
+(llm-response-first-tool-call response)  ; => first tool call or nil
+
+;; Tool call structure
+;; (:id "call_123" :name :GET_WEATHER :arguments #<hash-table>)
+```
+
+**Unified finish-reason values**:
+- `:stop` - Normal completion
+- `:tool-call` - Tool call required
+- `:length` - Max length reached
+- `:error` - Error occurred
+- `:content-filter` - Content filtered
 
 ### 3. Utility Functions
 

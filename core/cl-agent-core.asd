@@ -60,6 +60,7 @@
    (:file "validation")           ; Data validation
    (:file "dependency-injection") ; DI container
    (:file "data-convert")         ; Data conversion (plist <-> hash-table)
+   (:file "response")             ; Unified LLM Response Schema
 
    ;; ============================================================
    ;; Protocol Layer

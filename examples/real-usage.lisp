@@ -25,15 +25,12 @@
         (let ((response (cl-agent.llm:llm-chat
                          client
                          '((:role "user" :content "你好，请介绍一下你自己")))))
-          (format t "响应: ~A~%" (getf response :content))
-
-          ;; 检查是否有思维链（glm-4.6 特性）
-          (when (getf response :reasoning-content)
-            (format t "~%思维链: ~A~%" (getf response :reasoning-content)))
+          (format t "响应: ~A~%" (cl-agent.core:llm-response-content response))
 
           ;; 显示 token 使用
-          (let ((usage (getf response :usage)))
-            (format t "Token 使用: ~A~%" usage))))
+          (format t "Token 使用: 输入=~A 输出=~A~%"
+                  (cl-agent.core:llm-response-input-tokens response)
+                  (cl-agent.core:llm-response-output-tokens response))))
 
     (cl-agent.llm:missing-api-key-error (condition)
       (format t "错误: ~A~%" (cl-agent.llm:llm-error-message condition))
@@ -61,14 +58,14 @@
                          client
                          '((:role "user" :content "帮我计算 123 * 456"))
                          :tools tools)))
-          (format t "响应: ~A~%" (getf response :content))
+          (format t "响应: ~A~%" (cl-agent.core:llm-response-content response))
 
-          (when (getf response :tool-calls)
+          (when (cl-agent.core:llm-response-has-tool-calls-p response)
             (format t "~%工具调用:~%")
-            (dolist (call (getf response :tool-calls))
+            (dolist (call (cl-agent.core:llm-response-tool-calls response))
               (format t "  - ID: ~A~%" (getf call :id))
               (format t "    工具: ~A~%" (getf call :name))
-              (format t "    参数: ~A~%" (getf call :arguments)))))))
+              (format t "    参数: ~A~%" (getf call :arguments))))))
 
     (cl-agent.llm:missing-api-key-error (condition)
       (format t "错误: ~A~%" (cl-agent.llm:llm-error-message condition)))))
@@ -98,7 +95,7 @@
           (format t "响应完整: ~A~%" complete))
 
         ;; 最终答案
-        (format t "~%最终答案: ~A~%" (getf response :content)))
+        (format t "~%最终答案: ~A~%" (cl-agent.core:llm-response-content response)))
 
     (cl-agent.llm:missing-api-key-error (condition)
       (format t "错误: ~A~%" (cl-agent.llm:llm-error-message condition)))))
@@ -119,10 +116,11 @@
         (let ((response (cl-agent.llm:llm-chat
                          client
                          '((:role "user" :content "What is AI?")))))
-          (format t "响应: ~A~%" (getf response :content))
+          (format t "响应: ~A~%" (cl-agent.core:llm-response-content response))
 
-          (let ((usage (getf response :usage)))
-            (format t "Token 使用: ~A~%" usage))))
+          (format t "Token 使用: 输入=~A 输出=~A~%"
+                  (cl-agent.core:llm-response-input-tokens response)
+                  (cl-agent.core:llm-response-output-tokens response))))
 
     (cl-agent.llm:missing-api-key-error (condition)
       (format t "错误: ~A~%" (cl-agent.llm:llm-error-message condition))

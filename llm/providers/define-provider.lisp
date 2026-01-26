@@ -331,23 +331,32 @@
 (defun parse-openai-compatible-response (response)
   "解析 OpenAI 兼容的响应
 
-返回标准化的响应 plist"
+返回 llm-response 对象"
   (let* ((parsed (cl-agent.llm:parse-json-response response))
          (choices (gethash "choices" parsed))
          (first-choice (when choices (elt choices 0)))
          (message (when first-choice (gethash "message" first-choice)))
          (content (when message (gethash "content" message)))
          (tool-calls (when message (gethash "tool_calls" message)))
-         (usage (gethash "usage" parsed)))
+         (finish-reason (when first-choice (gethash "finish_reason" first-choice)))
+         (usage (gethash "usage" parsed))
+         (prompt-tokens (when usage (gethash "prompt_tokens" usage)))
+         (completion-tokens (when usage (gethash "completion_tokens" usage)))
+         (model-name (gethash "model" parsed))
+         (message-id (gethash "id" parsed)))
 
-    (list :content (or content "")
-          :tool-calls (when tool-calls
-                        (parse-tool-calls-openai-style tool-calls))
-          :usage (list :prompt-tokens (when usage (gethash "prompt_tokens" usage))
-                       :completion-tokens (when usage (gethash "completion_tokens" usage))
-                       :total-tokens (when usage (gethash "total_tokens" usage)))
-          :model (gethash "model" parsed)
-          :raw-response parsed)))
+    ;; 构建 llm-response 对象
+    (cl-agent.core:make-llm-response
+     :content (or content "")
+     :tool-calls (when tool-calls
+                   (parse-tool-calls-openai-style tool-calls))
+     :usage (cl-agent.core:make-llm-usage
+             :input-tokens (or prompt-tokens 0)
+             :output-tokens (or completion-tokens 0))
+     :model model-name
+     :finish-reason (cl-agent.core:normalize-finish-reason finish-reason)
+     :message-id message-id
+     :raw-response parsed)))
 
 (defun build-bearer-auth-headers (provider)
   "构建 Bearer Token 认证头"

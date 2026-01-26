@@ -39,12 +39,12 @@
       (let ((response1 (cl-agent.llm:llm-chat
                         client
                         '((:role "user" :content "你好")))))
-        (format t "对话1: ~A~%" (getf response1 :content)))
+        (format t "对话1: ~A~%" (cl-agent.core:llm-response-content response1)))
 
       (let ((response2 (cl-agent.llm:llm-chat
                         client
                         '((:role "user" :content "再见")))))
-        (format t "对话2: ~A~%" (getf response2 :content))))))
+        (format t "对话2: ~A~%" (cl-agent.core:llm-response-content response2))))))
 
 ;;; ============================================================
 ;;; Mock Agent 使用示例

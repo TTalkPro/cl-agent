@@ -57,9 +57,49 @@ cl-agent-error        ; 基础错误
 ;; ToolCall 构造
 (make-tool-call :id "call_123" :name "get-weather" :arguments '(:city "Tokyo"))
 
-;; Response 构造
+;; Response 构造（工具结果）
 (make-response :content "..." :tool-calls [...] :metadata {...})
 ```
+
+### 2.1 统一 LLM 响应类型
+
+所有 LLM Provider 返回统一的 `llm-response` CLOS 对象：
+
+```lisp
+;; LLM 响应对象
+(make-llm-response
+  :content "Hello!"
+  :tool-calls nil
+  :usage (make-llm-usage :input-tokens 10 :output-tokens 5)
+  :model "glm-4.7"
+  :finish-reason :stop
+  :message-id "msg_123"
+  :raw-response parsed-hash-table)
+
+;; 访问响应内容
+(llm-response-content response)      ; => "Hello!"
+(llm-response-tool-calls response)   ; => nil 或工具调用列表
+(llm-response-model response)        ; => "glm-4.7"
+(llm-response-finish-reason response) ; => :stop, :tool-call, :length, :error
+
+;; 便捷访问器
+(llm-response-has-tool-calls-p response) ; => T/NIL
+(llm-response-has-content-p response)    ; => T/NIL
+(llm-response-input-tokens response)     ; => 10
+(llm-response-output-tokens response)    ; => 5
+(llm-response-total-tokens response)     ; => 15
+(llm-response-first-tool-call response)  ; => 第一个工具调用或 nil
+
+;; 工具调用结构
+;; (:id "call_123" :name :GET_WEATHER :arguments #<hash-table>)
+```
+
+**finish-reason 统一值**：
+- `:stop` - 正常结束
+- `:tool-call` - 需要工具调用
+- `:length` - 达到最大长度
+- `:error` - 错误
+- `:content-filter` - 内容过滤
 
 ### 3. 工具函数
 

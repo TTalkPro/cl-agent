@@ -20,8 +20,10 @@
     (let ((response (cl-agent.llm:llm-chat
                      mock
                      '((:role "user" :content "你好！")))))
-      (format t "响应: ~A~%" (getf response :content))
-      (format t "Token 使用: ~A~%" (getf response :usage)))))
+      (format t "响应: ~A~%" (cl-agent.core:llm-response-content response))
+      (format t "Token 使用: 输入=~A 输出=~A~%"
+              (cl-agent.core:llm-response-input-tokens response)
+              (cl-agent.core:llm-response-output-tokens response)))))
 
 (defun example-mock-llm-smart-responses ()
   "示例 2: 智能 Mock 响应"
@@ -35,23 +37,23 @@
                      mock
                      '((:role "user" :content "帮我计算 1+1"))
                      :tools t)))
-      (format t "  响应: ~A~%" (getf response :content))
-      (when (getf response :tool-calls)
-        (format t "  工具调用: ~A~%" (getf response :tool-calls))))
+      (format t "  响应: ~A~%" (cl-agent.core:llm-response-content response))
+      (when (cl-agent.core:llm-response-has-tool-calls-p response)
+        (format t "  工具调用: ~A~%" (cl-agent.core:llm-response-tool-calls response))))
 
     ;; 代码生成场景
     (format t "~%代码生成场景:~%")
     (let ((response (cl-agent.llm:llm-chat
                      mock
                      '((:role "user" :content "写一个递归函数")))))
-      (format t "  响应: ~A~%" (getf response :content)))
+      (format t "  响应: ~A~%" (cl-agent.core:llm-response-content response)))
 
     ;; 笑话场景
     (format t "~%笑话场景:~%")
     (let ((response (cl-agent.llm:llm-chat
                      mock
                      '((:role "user" :content "讲个笑话")))))
-      (format t "  响应: ~A~%" (getf response :content)))))
+      (format t "  响应: ~A~%" (cl-agent.core:llm-response-content response)))))
 
 (defun example-mock-llm-predefined-responses ()
   "示例 3: 预定义响应"
@@ -76,13 +78,13 @@
     (let ((response1 (cl-agent.llm:llm-chat
                       mock
                       '((:role "user" :content "你好")))))
-      (format t "响应1: ~A~%" (getf response1 :content)))
+      (format t "响应1: ~A~%" (cl-agent.core:llm-response-content response1)))
 
     (let ((response2 (cl-agent.llm:llm-chat
                       mock
                       '((:role "user" :content "1+1等于几")))))
-      (format t "响应2: ~A~%" (getf response2 :content))
-      (format t "工具调用: ~A~%" (getf response2 :tool-calls)))))
+      (format t "响应2: ~A~%" (cl-agent.core:llm-response-content response2))
+      (format t "工具调用: ~A~%" (cl-agent.core:llm-response-tool-calls response2)))))
 
 (defun example-mock-llm-with-delay-and-errors ()
   "示例 4: 带延迟和错误的 Mock"
@@ -96,7 +98,7 @@
                      mock
                      '((:role "user" :content "测试")))))
       (let ((end (get-universal-time)))
-        (format t "  响应: ~A~%" (getf response :content))
+        (format t "  响应: ~A~%" (cl-agent.core:llm-response-content response))
         (format t "  耗时: ~A 秒~%" (- end start)))))
 
   ;; 带错误率的 Mock
@@ -106,9 +108,10 @@
       (let ((response (cl-agent.llm:llm-chat
                        mock
                        '((:role "user" :content "测试")))))
-        (if (getf response :error)
-            (format t "  请求 ~A: 错误 - ~A~%" (1+ i) (getf response :error))
-            (format t "  请求 ~A: 成功 - ~A~%" (1+ i) (getf response :content)))))))
+        (if (eq (cl-agent.core:llm-response-finish-reason response) :error)
+            (format t "  请求 ~A: 错误~%" (1+ i))
+            (format t "  请求 ~A: 成功 - ~A~%" (1+ i)
+                    (cl-agent.core:llm-response-content response)))))))
 
 ;;; ============================================================
 ;;; Mock 工具使用示例
@@ -209,13 +212,13 @@
                        mock-llm
                        '((:role "user" :content "帮我计算 123 * 456"))
                        :tools toolkit)))
-        (format t "Agent: ~A~%" (getf response :content))
+        (format t "Agent: ~A~%" (cl-agent.core:llm-response-content response))
 
-        (when (getf response :tool-calls)
+        (when (cl-agent.core:llm-response-has-tool-calls-p response)
           (format t "工具调用:~%")
-          (dolist (call (getf response :tool-calls))
+          (dolist (call (cl-agent.core:llm-response-tool-calls response))
             (format t "  - 工具: ~A~%" (getf call :name))
-            (format t "    参数: ~A~%" (getf call :arguments)))))))))
+            (format t "    参数: ~A~%" (getf call :arguments))))))))
 
 ;;; ============================================================
 ;;; 运行所有示例

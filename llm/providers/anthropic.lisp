@@ -405,7 +405,7 @@
   RESPONSE - HTTP 响应
 
 返回：
-  标准化的响应 plist
+  llm-response 对象
 
 说明：
   Anthropic 响应格式：
@@ -431,31 +431,35 @@
          (tool-use (extract-tool-use content-blocks))
          (usage (if (hash-table-p parsed)
                     (gethash "usage" parsed)
-                    (getf parsed :usage))))
+                    (getf parsed :usage)))
+         (input-tokens (if (hash-table-p usage)
+                           (gethash "input_tokens" usage)
+                           (getf usage :input_tokens)))
+         (output-tokens (if (hash-table-p usage)
+                            (gethash "output_tokens" usage)
+                            (getf usage :output_tokens)))
+         (stop-reason (if (hash-table-p parsed)
+                          (gethash "stop_reason" parsed)
+                          (getf parsed :stop_reason)))
+         (model-name (if (hash-table-p parsed)
+                         (gethash "model" parsed)
+                         (getf parsed :model)))
+         (message-id (if (hash-table-p parsed)
+                         (gethash "id" parsed)
+                         (getf parsed :id))))
 
-    ;; 构建标准响应
-    (list :content content
-          :tool-calls (when tool-use
-                       (parse-anthropic-tool-use tool-use))
-          :usage (list :prompt-tokens (if (hash-table-p usage)
-                                          (gethash "input_tokens" usage)
-                                          (getf usage :input_tokens))
-                      :completion-tokens (if (hash-table-p usage)
-                                             (gethash "output_tokens" usage)
-                                             (getf usage :output_tokens))
-                      :total-tokens (+ (or (if (hash-table-p usage)
-                                               (gethash "input_tokens" usage)
-                                               (getf usage :input_tokens)) 0)
-                                       (or (if (hash-table-p usage)
-                                               (gethash "output_tokens" usage)
-                                               (getf usage :output_tokens)) 0)))
-          :model (if (hash-table-p parsed)
-                     (gethash "model" parsed)
-                     (getf parsed :model))
-          :stop-reason (if (hash-table-p parsed)
-                           (gethash "stop_reason" parsed)
-                           (getf parsed :stop_reason))
-          :raw-response parsed)))
+    ;; 构建 llm-response 对象
+    (cl-agent.core:make-llm-response
+     :content content
+     :tool-calls (when tool-use
+                   (parse-anthropic-tool-use tool-use))
+     :usage (cl-agent.core:make-llm-usage
+             :input-tokens (or input-tokens 0)
+             :output-tokens (or output-tokens 0))
+     :model model-name
+     :finish-reason (cl-agent.core:normalize-finish-reason stop-reason)
+     :message-id message-id
+     :raw-response parsed)))
 
 (defun extract-text-content (content-blocks)
   "从内容块中提取文本

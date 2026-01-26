@@ -153,9 +153,9 @@
          (response (cl-agent.kernel:invoke-chat *kernel* messages
                      :settings '(:max-tokens 256 :temperature 0.7))))
     (format t "~%  User: 请用一句话解释什么是 Common Lisp。~%")
-    (format t "  Response content: ~A~%" (getf response :content))
-    (format t "  Tool-calls: ~A~%" (getf response :tool-calls))
-    (assert (> (length (getf response :content)) 0)
+    (format t "  Response content: ~A~%" (cl-agent.core:llm-response-content response))
+    (format t "  Tool-calls: ~A~%" (cl-agent.core:llm-response-tool-calls response))
+    (assert (> (length (cl-agent.core:llm-response-content response)) 0)
             () "invoke-chat single turn returned empty content")
     (format t "~%[TEST 2 PASSED]~%")
     response))
@@ -175,7 +175,7 @@
                                :content "你好，我叫 David。请记住我的名字。")))
          (response1 (cl-agent.kernel:invoke-chat *kernel* messages
                       :settings '(:max-tokens 128 :temperature 0.3)))
-         (reply1 (getf response1 :content)))
+         (reply1 (cl-agent.core:llm-response-content response1)))
     (format t "~%  Round 1:~%")
     (format t "    User: 你好，我叫 David。请记住我的名字。~%")
     (format t "    Assistant: ~A~%" reply1)
@@ -187,7 +187,7 @@
                             (list :role :user :content "我叫什么名字？")))
            (response2 (cl-agent.kernel:invoke-chat *kernel* messages2
                         :settings '(:max-tokens 128 :temperature 0.3)))
-           (reply2 (getf response2 :content)))
+           (reply2 (cl-agent.core:llm-response-content response2)))
       (format t "~%  Round 2:~%")
       (format t "    User: 我叫什么名字？~%")
       (format t "    Assistant: ~A~%" reply2)
