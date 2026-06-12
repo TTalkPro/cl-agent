@@ -279,6 +279,11 @@
    #:ollama-provider
    #:make-ollama-provider
 
+   ;; ==================== MiniMax 提供商 ====================
+   #:minimax-provider
+   #:make-minimax-provider
+   #:split-think-block
+
    ;; ==================== 智谱 AI 提供商 ====================
    #:zhipu-provider
    #:make-zhipu-provider

@@ -69,6 +69,7 @@
      (:file "openai")
      (:file "zhipu")
      (:file "ollama")
+     (:file "minimax")
      (:file "bailian")))       ; 阿里云百炼 DashScope
 
    ;; 6. Service layer (response normalization)

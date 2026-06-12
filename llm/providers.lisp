@@ -155,6 +155,7 @@
     (:openai (apply #'cl-agent.llm.providers:make-openai-provider args))
     (:ollama (apply #'cl-agent.llm.providers:make-ollama-provider args))
     (:zhipu (apply #'cl-agent.llm.providers:make-zhipu-provider args))
+    (:minimax (apply #'cl-agent.llm.providers:make-minimax-provider args))
     ((:bailian :dashscope)
      (apply #'cl-agent.llm.providers:make-dashscope-provider args))))
 

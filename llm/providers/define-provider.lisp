@@ -105,7 +105,9 @@
     (setf (gethash "model" body) model-name)
     (setf (gethash "messages" body)
           (convert-messages-for-openai messages))
-    (setf (gethash "temperature" body) temperature)
+    ;; temperature 为 NIL 时不写入（避免序列化为 null 触发部分 API 400）
+    (when temperature
+      (setf (gethash "temperature" body) temperature))
 
     ;; 仅在启用流式时设置 stream: true
     ;; 不发送 stream: false 避免某些 API 的兼容性问题
@@ -147,7 +149,10 @@
    'vector))
 
 (defun convert-tool-calls-for-openai (tool-calls)
-  "转换工具调用为 OpenAI 格式"
+  "转换工具调用为 OpenAI 格式
+
+注意：OpenAI wire 格式要求 function.arguments 是 JSON **字符串**，
+解析后的 hash-table/plist 在此处重新序列化（多轮工具回放的关键）。"
   (coerce
    (loop for tc in tool-calls
          for tc-hash = (make-hash-table :test 'equal)
@@ -160,7 +165,17 @@
                       (if (keywordp name)
                           (string-downcase (symbol-name name))
                           name)))
-              (setf (gethash "arguments" fn-hash) (getf tc :arguments))
+              (setf (gethash "arguments" fn-hash)
+                    (let ((args (getf tc :arguments)))
+                      (cond
+                        ((stringp args) args)
+                        ((null args) "{}")
+                        ((hash-table-p args)
+                         (cl-agent.core:json-stringify args))
+                        ((listp args)
+                         (cl-agent.core:json-stringify
+                          (cl-agent.core:plist-to-hash args)))
+                        (t (cl-agent.core:json-stringify args)))))
               (setf (gethash "function" tc-hash) fn-hash))
          collect tc-hash)
    'vector))

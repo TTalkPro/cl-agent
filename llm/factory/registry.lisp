@@ -79,6 +79,10 @@ Returns:
   (lambda (&rest args)
     (apply #'cl-agent.llm.providers:make-dashscope-provider args)))
 
+(register-provider :minimax
+  (lambda (&rest args)
+    (apply #'cl-agent.llm.providers:make-minimax-provider args)))
+
 ;;; ============================================================
 ;;; Provider Creation
 ;;; ============================================================
