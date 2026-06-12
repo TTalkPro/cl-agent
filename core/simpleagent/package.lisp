@@ -45,6 +45,21 @@
    #:queue-length
    #:queue-clear
 
+   ;; ==================== Callback Registry ====================
+   #:callback-registry
+   #:make-callback-registry
+   #:callback-registry-p
+   #:callback-entry
+   #:callback-entry-name
+   #:callback-entry-fn
+   #:callback-entry-priority
+   #:callback-entry-once-p
+   #:register-callback
+   #:unregister-callback
+   #:clear-callbacks
+   #:callback-count
+   #:fire-callbacks
+
    ;; ==================== Kernel Agent ====================
    #:kernel-agent
    #:make-kernel-agent
@@ -54,6 +69,9 @@
    #:agent-system-prompt
    #:agent-settings
    #:agent-callbacks
+   #:agent-memory
+   #:agent-conversation-id
+   #:agent-fire
 
    ;; Kernel Agent API
    #:agent-chat
@@ -69,4 +87,6 @@
    #:agent-on-tool-call
    #:agent-on-tool-result
    #:agent-on-response
-   #:agent-on-error))
+   #:agent-on-error
+   #:agent-on-chunk
+   #:agent-remove-callback))
