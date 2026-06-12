@@ -2,7 +2,7 @@
 
 [中文](README.md)
 
-A unified AI Agent framework for Common Lisp, featuring a Semantic Kernel architecture with a 7-layer modular design.
+A unified AI Agent framework for Common Lisp, featuring a Semantic Kernel architecture: a fat core (infrastructure + Kernel + SimpleAgent) surrounded by optional capability modules (LLM, Memory, RAG, MCP, Extra).
 
 ## Features
 
@@ -21,38 +21,29 @@ A unified AI Agent framework for Common Lisp, featuring a Semantic Kernel archit
 │                    CL-Agent                         │
 └─────────────────────────────────────────────────────┘
                          │
-    ┌────────────────────┼────────────────────┐
-    │                    │                    │
-    ▼                    ▼                    ▼
-┌────────┐        ┌────────────┐        ┌──────────┐
-│  Core  │        │    LLM     │        │SimpleAgent│
-│(Kernel)│        │(Providers) │        │ (Agents)  │
-└────────┘        └────────────┘        └──────────┘
-    │                    │                    │
-    ├────────────────────┼────────────────────┤
-    │                    │                    │
-    ▼                    ▼                    ▼
-┌────────┐        ┌────────────┐        ┌──────────┐
-│ Memory │        │   Tools    │        │   RAG    │
-│(Store) │        │(Tags+Reg.) │        │(Retrieve)│
-└────────┘        └────────────┘        └──────────┘
-                         │
                          ▼
-                  ┌────────────┐
-                  │    MCP     │
-                  │(Protocols) │
-                  └────────────┘
+┌─────────────────────────────────────────────────────┐
+│                  Core (fat core)                    │
+│  Infrastructure + Kernel + LLM protocol +           │
+│  SimpleAgent (KernelAgent)                          │
+└─────────────────────────────────────────────────────┘
+    ▲                ▲                ▲
+    │implements      │depends on      │depends on
+┌────────┐    ┌────────────┐    ┌──────────────────┐
+│  LLM   │    │Memory / RAG│    │      Extra       │
+│(Provid.)│   │   / MCP    │    │ Process + Tools  │
+└────────┘    └────────────┘    │ + ProcessAgent   │
+                                └──────────────────┘
 ```
 
 ## Modules
 
 | Module | Description |
 |--------|-------------|
-| **core** | Core infrastructure: Kernel, Context, Filter, Service abstractions |
-| **llm** | LLM provider implementations (Anthropic, OpenAI, ZhipuAI, Ollama) |
-| **tools** | Tool system: Tool Registry + Tag filtering + Presets |
-| **simpleagent** | Simple agent implementations (KernelAgent, ProcessAgent) |
+| **core** | Fat core: infrastructure, Kernel (Context/Filter/Service), LLM protocol, SimpleAgent (KernelAgent) |
+| **llm** | LLM provider implementations (Anthropic, OpenAI, ZhipuAI, Ollama), implements core's llm-chat protocol |
 | **memory** | Unified memory management (checkpoints, stores, long-term memory) |
+| **extra** | Optional extras: Process framework, Tools system (Registry + Tag filtering + Presets), ProcessAgent |
 | **rag** | Retrieval-Augmented Generation pipeline |
 | **mcp** | Model Context Protocol implementation |
 | **protocols** | Protocol support (MCP, A2A) |

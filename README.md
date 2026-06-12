@@ -2,7 +2,7 @@
 
 [English](README_EN.md)
 
-基于 Common Lisp 的统一 AI Agent 框架，采用语义内核架构和 7 层模块化设计。
+基于 Common Lisp 的统一 AI Agent 框架，采用语义内核架构：胖核心（基础设施 + Kernel + SimpleAgent）+ 外围能力模块（LLM、Memory、RAG、MCP、Extra）。
 
 ## 特性
 
@@ -21,41 +21,31 @@
 │                    CL-Agent                         │
 └─────────────────────────────────────────────────────┘
                          │
-    ┌────────────────────┼────────────────────┐
-    │                    │                    │
-    ▼                    ▼                    ▼
-┌────────┐        ┌────────────┐        ┌──────────┐
-│  Core  │        │    LLM     │        │SimpleAgent│
-│(内核)  │        │(LLM提供商) │        │ (Agent)  │
-└────────┘        └────────────┘        └──────────┘
-    │                    │                    │
-    ├────────────────────┼────────────────────┤
-    │                    │                    │
-    ▼                    ▼                    ▼
-┌────────┐        ┌────────────┐        ┌──────────┐
-│ Memory │        │   Tools    │        │   RAG    │
-│(记忆)  │        │ (工具+标签)│        │(检索增强)│
-└────────┘        └────────────┘        └──────────┘
-                         │
                          ▼
-                  ┌────────────┐
-                  │    MCP     │
-                  │  (协议)    │
-                  └────────────┘
+┌─────────────────────────────────────────────────────┐
+│                  Core（胖核心）                      │
+│   基础设施 + Kernel + LLM 协议 + SimpleAgent        │
+└─────────────────────────────────────────────────────┘
+    ▲                ▲                ▲
+    │实现协议        │依赖             │依赖
+┌────────┐    ┌────────────┐    ┌──────────────────┐
+│  LLM   │    │Memory / RAG│    │      Extra       │
+│(提供商)│    │   / MCP    │    │ Process+Tools+   │
+└────────┘    └────────────┘    │  ProcessAgent    │
+                                └──────────────────┘
 ```
 
 ## 模块说明
 
 | 模块 | 描述 |
 |------|------|
-| **core** | 核心基础设施：Kernel、Context、Filter、Service 抽象 |
-| **llm** | LLM 提供商实现（Anthropic、OpenAI、智谱、Ollama） |
-| **tools** | 工具系统：Tool Registry + Tag 过滤 + 预设配置 |
-| **simpleagent** | 简单 Agent 实现（KernelAgent、ProcessAgent） |
+| **core** | 胖核心：基础设施、Kernel（Context/Filter/Service）、LLM 协议、SimpleAgent（KernelAgent） |
+| **llm** | LLM 提供商实现（Anthropic、OpenAI、智谱、Ollama），实现 core 的 llm-chat 协议 |
 | **memory** | 统一记忆管理（检查点、存储、长期记忆） |
 | **rag** | 检索增强生成管道 |
 | **mcp** | 模型上下文协议实现 |
-| **protocols** | 协议支持（MCP、A2A） |
+| **extra** | 可选扩展：Process 框架、工具系统（Registry + Tag 过滤 + 预设）、ProcessAgent |
+| **protocols** | 协议支持（MCP、A2A，独立系统，未纳入主构建） |
 
 ## 安装
 
