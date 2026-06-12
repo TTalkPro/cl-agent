@@ -17,9 +17,9 @@
 ;;;;     - Service (LLM abstraction)
 ;;;;     - Provider protocol (LLM interface)
 ;;;;     - Builder (fluent construction)
-;;;;     - Filter Chain (4-type pipeline)
-;;;;     - 3-Tier Invoke API
-;;;;   - SimpleAgent runtime (KernelAgent chat loop)
+;;;;     - Filter Chain (onion, :chat/:tool)
+;;;;     - Invoke primitives (invoke-chat / invoke-tool only)
+;;;;   - SimpleAgent runtime (run-tool-loop + KernelAgent)
 ;;;;
 ;;;; Note:
 ;;;;   The Process framework and ProcessAgent live in cl-agent-extra.
@@ -107,7 +107,7 @@
      (:file "service")        ; Service abstraction
      (:file "filter")         ; 4-type filter pipeline
      (:file "kernel")         ; Kernel class + Builder
-     (:file "chat")           ; 3-tier Invoke API (onion chains)
+     (:file "chat")           ; Invoke primitives: invoke-chat / invoke-tool
      (:file "memory-filter"))) ; ChatMemory protocol + Memory Filter
 
    ;; ============================================================
@@ -118,11 +118,21 @@
     ((:file "package")
      (:file "common")         ; Base agent, events, message queue
      (:file "callbacks")      ; Callback registry (CLOS)
+     (:file "loop")           ; run-tool-loop (Agent runtime tool loop)
      (:file "kernel-agent"))))) ; KernelAgent chat loop
 
 ;; ============================================================
 ;; Changelog
 ;; ============================================================
+;;
+;; v6.2.0:
+;; - Kernel 瘦身：工具循环 run-tool-loop 下沉到 simpleagent
+;;   （Kernel 只负责 invoke-chat / invoke-tool 两个原语）
+;; - Agent 回调完全独立：kernel 不再接受回调；filter 不再暴露给
+;;   Agent 使用者（agent-add-filter 移除）
+;; - Agent 私有 memory-filter：经 run-chat-chain :extra-filters
+;;   请求级挂载，共享 kernel 零污染；:memory 创建时可替换
+;; - make-kernel-agent 接受 kernel / provider / service（ensure-kernel）
 ;;
 ;; v6.1.0:
 ;; - Onion filter pipeline (around/before/after, :chat/:tool phases,

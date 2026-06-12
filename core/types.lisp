@@ -253,7 +253,7 @@ Returns:
 ;;; ============================================================
 
 (defun make-invoke-result (&key text tool-calls-made history context)
-  "Create an invoke result plist (returned by invoke-kernel).
+  "Create an invoke result plist (returned by run-tool-loop).
 
 Parameters:
   TEXT            - Final text response

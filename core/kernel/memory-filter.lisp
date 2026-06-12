@@ -16,8 +16,8 @@
 ;;;;   (let* ((store (make-in-memory-chat-store))
 ;;;;          (kernel (make-kernel :service svc
 ;;;;                               :filters (list (make-memory-filter store)))))
-;;;;     ;; context 携带 conversation-id，invoke-kernel 自动进入 delta 模式
-;;;;     (invoke-kernel kernel (list (user-message "你好"))
+;;;;     ;; context 携带 conversation-id，run-tool-loop（simpleagent）自动进入 delta 模式
+;;;;     (cl-agent.simpleagent:run-tool-loop kernel (list (user-message "你好"))
 ;;;;                    :context (list :conversation-id "conv-1")))
 
 (in-package #:cl-agent.kernel)
