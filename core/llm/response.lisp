@@ -206,6 +206,13 @@ Returns:
     :initform nil
     :type (or keyword null)
     :documentation "Why the response ended (:stop, :tool-call, :max-tokens, etc.)")
+   (reasoning
+    :initarg :reasoning
+    :accessor llm-response-reasoning
+    :initform nil
+    :type (or string null)
+    :documentation "Reasoning/thinking content (DeepSeek/GLM reasoning_content,
+Anthropic thinking blocks)")
    (message-id
     :initarg :message-id
     :accessor llm-response-message-id
@@ -242,6 +249,7 @@ Finish Reason:
                                usage
                                model
                                finish-reason
+                               reasoning
                                message-id
                                raw-response)
   "Create an llm-response instance.
@@ -249,9 +257,10 @@ Finish Reason:
 Parameters:
   CONTENT       - Text content
   TOOL-CALLS    - List of llm-tool-call objects or plists (converted automatically)
-  USAGE         - llm-usage object or plist (converted automatically)
+  USAGE         - llm-usage object, plist or hash-table (converted automatically)
   MODEL         - Model name string
   FINISH-REASON - Finish reason keyword
+  REASONING     - Reasoning/thinking content (optional)
   MESSAGE-ID    - Provider message ID
   RAW-RESPONSE  - Raw provider response
 
@@ -268,24 +277,65 @@ Returns:
                                             :arguments (getf tc :arguments)
                                             :raw (getf tc :raw))))
                                      (or tool-calls nil))
-                 :usage (cond
-                          ((typep usage 'llm-usage) usage)
-                          ((listp usage)
-                           (make-llm-usage
-                            :input-tokens (or (getf usage :prompt-tokens)
-                                              (getf usage :input-tokens)
-                                              0)
-                            :output-tokens (or (getf usage :completion-tokens)
-                                               (getf usage :output-tokens)
-                                               0)
-                            :total-tokens (getf usage :total-tokens)
-                            :cache-read-tokens (getf usage :cache-read-tokens)
-                            :cache-creation-tokens (getf usage :cache-creation-tokens)))
-                          (t nil))
+                 :usage (normalize-usage usage)
                  :model model
                  :finish-reason finish-reason
+                 :reasoning reasoning
                  :message-id message-id
                  :raw-response raw-response))
+
+;;; ============================================================
+;;; Permissive Usage Normalization（单一来源）
+;;; ============================================================
+;;; 中立层"容许已知别名"：接受任一已知字段名并产出统一 llm-usage，
+;;; 不需要知道这是哪个 provider。新 provider 若用非主流字段名，
+;;; 只需在这里加别名（参照 clj-agent design/response-path-consolidation.md）。
+
+(defun normalize-usage (usage)
+  "把任意形态的 usage 归一化为 llm-usage 对象（幂等）。
+
+接受：
+  - llm-usage 对象（原样返回）
+  - plist：:prompt-tokens|:input-tokens / :completion-tokens|:output-tokens / ...
+  - hash-table（provider 原始响应）：
+      input  - prompt_tokens | input_tokens
+      output - completion_tokens | output_tokens
+      cache-read - prompt_tokens_details.cached_tokens (OpenAI)
+                 | cache_read_input_tokens (Anthropic)
+                 | prompt_cache_hit_tokens (DeepSeek)
+      cache-creation - cache_creation_input_tokens (Anthropic)
+  - NIL：返回 NIL"
+  (flet ((ht-get (ht &rest keys)
+           (loop for k in keys
+                 for v = (gethash k ht)
+                 when v return v)))
+    (cond
+      ((null usage) nil)
+      ((typep usage 'llm-usage) usage)
+      ((hash-table-p usage)
+       (let* ((details (gethash "prompt_tokens_details" usage))
+              (cached (or (and (hash-table-p details)
+                               (gethash "cached_tokens" details))
+                          (ht-get usage "cache_read_input_tokens"
+                                  "prompt_cache_hit_tokens"))))
+         (make-llm-usage
+          :input-tokens (or (ht-get usage "prompt_tokens" "input_tokens") 0)
+          :output-tokens (or (ht-get usage "completion_tokens" "output_tokens") 0)
+          :total-tokens (ht-get usage "total_tokens")
+          :cache-read-tokens cached
+          :cache-creation-tokens (gethash "cache_creation_input_tokens" usage))))
+      ((listp usage)
+       (make-llm-usage
+        :input-tokens (or (getf usage :prompt-tokens)
+                          (getf usage :input-tokens)
+                          0)
+        :output-tokens (or (getf usage :completion-tokens)
+                           (getf usage :output-tokens)
+                           0)
+        :total-tokens (getf usage :total-tokens)
+        :cache-read-tokens (getf usage :cache-read-tokens)
+        :cache-creation-tokens (getf usage :cache-creation-tokens)))
+      (t nil))))
 
 (defmethod print-object ((response llm-response) stream)
   "Print llm-response object"
@@ -336,19 +386,20 @@ Mappings:
     (let ((reason-str (string-downcase (string reason))))
       (cond
         ;; Stop/complete
-        ((or (string= reason-str "stop")
-             (string= reason-str "end_turn"))
+        ((member reason-str '("stop" "end_turn" "stop_sequence" "eos")
+                 :test #'string=)
          :stop)
         ;; Tool calls
-        ((or (string= reason-str "tool_calls")
-             (string= reason-str "tool_use"))
+        ((member reason-str '("tool_calls" "tool_use" "function_call")
+                 :test #'string=)
          :tool-call)
         ;; Max tokens
-        ((or (string= reason-str "length")
-             (string= reason-str "max_tokens"))
+        ((member reason-str '("length" "max_tokens" "max_output_tokens")
+                 :test #'string=)
          :max-tokens)
-        ;; Content filter
-        ((string= reason-str "content_filter")
+        ;; Content filter (GLM 用 "sensitive")
+        ((member reason-str '("content_filter" "sensitive")
+                 :test #'string=)
          :content-filter)
         ;; Default - convert to keyword as-is
         (t (intern (string-upcase reason-str) :keyword))))))

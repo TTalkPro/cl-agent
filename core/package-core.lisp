@@ -158,6 +158,7 @@
    #:llm-response-usage
    #:llm-response-model
    #:llm-response-finish-reason
+   #:llm-response-reasoning
    #:llm-response-message-id
    #:llm-response-raw
 
@@ -181,6 +182,7 @@
    ;; Finish reason type
    #:finish-reason
    #:normalize-finish-reason
+   #:normalize-usage
 
    ;; Response predicates
    #:llm-response-has-tool-calls-p

@@ -378,3 +378,55 @@
           signal-validation-error
           signal-tool-error
           ensure-api-key))
+
+;;; ============================================================
+;;; 统一错误分类（retryable 判断的单一来源）
+;;; ============================================================
+;;; 参照 clj-agent design/error-model-unification.md：
+;;; 一次操作失败 = 一个条件对象 + 一套分类约定，
+;;; 任意层的调用方用一致方式决定是否重试。
+
+(defun transient-status-p (status)
+  "HTTP 状态码是否为瞬态（可重试）。
+
+瞬态：408 / 409 / 425 / 429 / 5xx
+非瞬态：其余 4xx（400 参数错、401/403 鉴权、404 等）"
+  (and (integerp status)
+       (or (member status '(408 409 425 429))
+           (>= status 500))))
+
+(defgeneric error-retryable-p (condition)
+  (:documentation "判断错误是否可重试（统一分类入口）。
+
+分类约定：
+  - api-error / llm-error：有状态码按 transient-status-p；
+    无状态码视为网络层失败 → 可重试
+  - timeout-error：可重试
+  - validation-error / config-error / missing-api-key-error：不可重试
+  - 其他错误：不可重试（保守默认）"))
+
+(defmethod error-retryable-p ((condition error))
+  "保守默认：未知错误不重试"
+  nil)
+
+(defmethod error-retryable-p ((condition api-error))
+  "API 错误：按 HTTP 状态码分类；无状态码视为网络失败（可重试）"
+  (let ((status (api-status-code condition)))
+    (if status
+        (transient-status-p status)
+        t)))
+
+(defmethod error-retryable-p ((condition timeout-error))
+  "超时：可重试"
+  t)
+
+(defmethod error-retryable-p ((condition validation-error))
+  "参数验证失败：不可重试"
+  nil)
+
+(defmethod error-retryable-p ((condition config-error))
+  "配置错误（含缺 API key）：不可重试"
+  nil)
+
+(export '(error-retryable-p
+          transient-status-p))
