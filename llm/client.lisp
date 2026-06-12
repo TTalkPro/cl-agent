@@ -275,7 +275,7 @@
                 (error condition))))))))
 
 (defun retryable-error-p (condition)
-  "检查错误是否可重试
+  "检查错误是否可重试（委托 cl-agent.core:error-retryable-p 统一分类）
 
 参数：
   CONDITION - 错误条件
@@ -283,31 +283,18 @@
 返回：
   T 如果可重试，NIL 否则
 
-可重试的错误类型：
-  - 网络/连接错误
-  - 速率限制（429）
-  - 服务器错误（5xx）
-  - 超时错误"
+分类约定（单一来源在 core/conditions.lisp）：
+  - 瞬态 HTTP 状态（408/409/425/429/5xx）可重试
+  - 鉴权/参数错误（400/401/403/404 等）不可重试
+  - 无状态码的网络层失败、超时可重试"
   (typecase condition
-    ;; HTTP 错误
+    ;; 裸 HTTP 错误（cl-agent.http 条件，不在 core 体系内）
     (cl-agent.http:http-error
      (let ((status (cl-agent.http:http-error-status condition)))
-       (or (null status)                  ; 连接错误
-           (= status 429)                 ; 速率限制
-           (>= status 500))))            ; 服务器错误
-
-    ;; API 错误（包括 LLM 错误，检查状态码）
-    (cl-agent.core:api-error
-     (let ((status (cl-agent.core:api-status-code condition)))
        (or (null status)
-           (= status 429)
-           (>= status 500))))
-
-    ;; 超时错误
-    (cl-agent.core:timeout-error t)
-
-    ;; 其他错误 - 默认不重试
-    (otherwise nil)))
+           (cl-agent.core:transient-status-p status))))
+    ;; core 条件体系：统一分类
+    (otherwise (cl-agent.core:error-retryable-p condition))))
 
 (defun normalize-messages (messages)
   "标准化消息格式
@@ -334,70 +321,6 @@
               ;; 其他情况，返回原样
               (t msg)))
           messages))
-
-(defun chat-generic (client messages &key system tools temperature max-tokens)
-  "通用聊天实现（回退方案）
-
-参数：
-  CLIENT      - 客户端实例
-  MESSAGES    - 消息列表
-  SYSTEM      - 系统提示
-  TOOLS       - 工具列表
-  TEMPERATURE - 温度
-  MAX-TOKENS  - 最大 token 数
-
-返回：
-  响应 plist"
-  (let* ((provider (client-provider client))
-         ;; 构建请求体
-         (request-body (build-chat-request-body
-                        provider
-                        messages
-                        :system system
-                        :tools (when tools (convert-tools-to-provider tools provider))
-                        :temperature temperature
-                        :max-tokens max-tokens
-                        :stream nil))
-         ;; 构建 URL
-         (request-url (concatenate 'string
-                                   (client-base-url client)
-                                   (provider-chat-endpoint provider)))
-         ;; 构建请求头
-         (request-headers (provider-headers provider (client-api-key client))))
-
-    ;; 发送请求
-    (handler-case
-        (let* ((http-response
-                 (cl-agent.http:http-post request-url
-                                          :body (cl-agent.core:json-stringify request-body)
-                                          :headers request-headers
-                                          :timeout 120
-                                          :parse-json nil))
-               (response-body (cl-agent.http:http-response-body http-response))
-               ;; 解析响应
-               (parsed-response
-                 (if (stringp response-body)
-                     (cl-agent.core:json-parse response-body)
-                     response-body)))
-
-          (parse-chat-response parsed-response provider))
-
-      ;; HTTP 错误处理
-      (cl-agent.http:http-error (condition)
-        (cl-agent.core:signal-error 'cl-agent.core:llm-error
-                                    :message (format nil "HTTP 请求失败: ~A"
-                                                     (cl-agent.http:http-error-status condition))
-                                    :provider (provider-name provider)
-                                    :status-code (cl-agent.http:http-error-status condition)
-                                    :url request-url
-                                    :cause condition))
-
-      (error (condition)
-        (cl-agent.core:signal-error 'cl-agent.core:llm-error
-                                    :message (format nil "未知错误: ~A" condition)
-                                    :provider (provider-name provider)
-                                    :url request-url
-                                    :cause condition)))))
 
 ;;; ============================================================
 ;;; 便捷 API

@@ -29,10 +29,10 @@
 ;;;;       (build-provider))
 
 (asdf:defsystem #:cl-agent-llm
-  :description "CL-Agent LLM Service Layer - Multi-Provider LLM Client (v4.0.0)"
+  :description "CL-Agent LLM Service Layer - Multi-Provider LLM Client (v4.1.0)"
   :author "David"
   :license "MIT"
-  :version "4.0.0"
+  :version "4.1.0"
 
   :depends-on (#:cl-agent-core
                #:cl-ppcre)
@@ -63,10 +63,12 @@
    (:module "provider-impls"
     :pathname "providers/"
     :components
-    ((:file "define-provider")  ; Common macros and functions
+    ((:file "define-provider")  ; Shared wire helpers (OpenAI style)
+     (:file "openai-compat")    ; OpenAI 兼容基座 + define-openai-compat-provider
      (:file "anthropic")
      (:file "openai")
      (:file "zhipu")
+     (:file "ollama")
      (:file "bailian")))       ; 阿里云百炼 DashScope
 
    ;; 6. Service layer (response normalization)

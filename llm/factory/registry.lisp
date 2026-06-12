@@ -65,11 +65,19 @@ Returns:
 
 (register-provider :openai
   (lambda (&rest args)
-    (apply #'make-openai-provider args)))
+    (apply #'cl-agent.llm.providers:make-openai-provider args)))
 
 (register-provider :zhipu
   (lambda (&rest args)
     (apply #'cl-agent.llm.providers:make-zhipu-provider args)))
+
+(register-provider :ollama
+  (lambda (&rest args)
+    (apply #'cl-agent.llm.providers:make-ollama-provider args)))
+
+(register-provider :dashscope
+  (lambda (&rest args)
+    (apply #'cl-agent.llm.providers:make-dashscope-provider args)))
 
 ;;; ============================================================
 ;;; Provider Creation

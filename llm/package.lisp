@@ -64,21 +64,14 @@
    #:provider-stream-endpoint
    #:provider-timeout
 
-   ;; 提供商类型
-   #:anthropic-provider
-   #:ollama-provider
 
    ;; ==================== Service Layer (响应标准化) ====================
-   ;; 核心标准化函数
+   ;; 归一化（单一来源：provider 自身产出 llm-response，
+   ;; usage/finish-reason 别名归一在 cl-agent.core）
+   #:ensure-llm-response
    #:normalize-response
    #:chat-with-normalization
-   ;; Provider 特定标准化
-   #:normalize-anthropic-response
-   #:normalize-openai-response
-   #:normalize-zhipu-response
-   #:normalize-ollama-response
-   #:normalize-dashscope-response
-   #:normalize-usage
+   #:normalize-usage            ; 重导出 cl-agent.core:normalize-usage
    ;; llm-response 工具函数
    #:response-reasoning-content
    #:response-complete-p
@@ -270,10 +263,21 @@
    #:anthropic-model-context-window
    #:anthropic-model-max-output
 
+   ;; ==================== OpenAI 兼容基座 ====================
+   #:openai-compat-provider
+   #:define-openai-compat-provider
+   #:provider-auth-headers
+   #:provider-finalize-request
+   #:parse-openai-compat-response
+   #:provider-api-key
+
    ;; ==================== OpenAI 提供商 ====================
    #:openai-provider
    #:make-openai-provider
-   #:provider-api-key
+
+   ;; ==================== Ollama 提供商 ====================
+   #:ollama-provider
+   #:make-ollama-provider
 
    ;; ==================== 智谱 AI 提供商 ====================
    #:zhipu-provider
