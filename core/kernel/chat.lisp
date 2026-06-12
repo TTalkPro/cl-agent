@@ -219,24 +219,21 @@
   如果函数未找到则发出错误"))
 
 (defmethod invoke-tool ((kernel kernel) fn-name args &key context)
-  "通过过滤器管道执行单个工具"
+  "通过 :tool 洋葱链执行单个工具"
   (let ((tool (kernel-find-tool kernel fn-name)))
     (unless tool
       (error "Tool ~A not found in kernel" fn-name))
-    (let* ((all-filters (kernel-filters kernel))
-           (pre-filters (filter-by-type all-filters :pre-invocation))
-           (post-filters (filter-by-type all-filters :post-invocation))
-           (execute-fn (lambda (ctx)
-                         (kernel-execute-tool kernel
-                                              (getf ctx :tool-name)
-                                              (getf ctx :tool-args))))
-           (inner-chain (build-filter-chain post-filters execute-fn))
-           (full-chain (build-filter-chain pre-filters inner-chain))
-           (ctx (list* :tool-name fn-name
-                       :tool-args args
-                       :kernel kernel
-                       context)))
-      (funcall full-chain ctx))))
+    (let* ((terminal (lambda (request)
+                       (kernel-execute-tool kernel
+                                            (tool-request-name request)
+                                            (tool-request-args request))))
+           (chain (build-phase-chain (kernel-filters kernel) :tool terminal))
+           (request (make-tool-request :tool-name fn-name
+                                       :args args
+                                       :tool tool
+                                       :context context
+                                       :kernel kernel)))
+      (funcall chain request))))
 
 ;;; ============================================================
 ;;; Tier 2: invoke-chat - 单次 LLM 调用
@@ -259,29 +256,46 @@
 返回：
   LLM 响应 plist (:content ... :tool-calls ... :usage ...)"))
 
+(defun run-chat-chain (kernel request)
+  "把 chat-request 送入 :chat 洋葱链，最内层 terminal 真正调 LLM。
+
+chat filter 可以改写 request 的 messages / tools / tool-choice /
+system-prompt / settings（参见 chat-request）。
+
+参数：
+  KERNEL  - Kernel 实例
+  REQUEST - chat-request 实例
+
+返回：
+  llm-response 对象"
+  (let* ((service (kernel-get-service kernel))
+         (terminal (lambda (req)
+                     (service-chat service
+                                   (chat-request-messages req)
+                                   (unless (eq (chat-request-tool-choice req) :none)
+                                     (chat-request-tools req))
+                                   (let ((settings (chat-request-settings req)))
+                                     (if (chat-request-system-prompt req)
+                                         (list* :system-prompt (chat-request-system-prompt req)
+                                                settings)
+                                         settings)))))
+         (chain (build-phase-chain (kernel-filters kernel) :chat terminal)))
+    (funcall chain request)))
+
 (defmethod invoke-chat ((kernel kernel) messages &key settings context)
-  "单次 LLM 调用（无工具循环）"
+  "单次 LLM 调用（无工具循环），经过 :chat 洋葱链"
   (let* ((system-prompt (getf settings :system-prompt))
          (msgs (normalize-messages messages))
          (msgs-with-system (prepare-messages-with-system msgs system-prompt))
-         (tools (kernel-get-tools kernel))
-         (service (kernel-get-service kernel))
-         (all-filters (kernel-filters kernel))
-         (pre-chat-filters (filter-by-type all-filters :pre-chat))
-         (post-chat-filters (filter-by-type all-filters :post-chat))
-         (chat-fn (lambda (ctx)
-                    (service-chat service
-                                  (getf ctx :messages)
-                                  (getf ctx :tools)
-                                  (list :max-tokens (getf settings :max-tokens)
-                                        :temperature (getf settings :temperature)))))
-         (inner-chain (build-filter-chain post-chat-filters chat-fn))
-         (full-chain (build-filter-chain pre-chat-filters inner-chain))
-         (chat-ctx (list :messages msgs-with-system
-                         :tools tools
-                         :kernel kernel
-                         :context-object context)))
-    (funcall full-chain chat-ctx)))
+         (request (make-chat-request
+                   :messages msgs-with-system
+                   :tools (kernel-get-tools kernel)
+                   :tool-choice (or (getf settings :tool-choice) :auto)
+                   ;; system 已折叠进 messages，避免经 settings 重复下发
+                   :settings (alexandria:remove-from-plist settings :system-prompt)
+                   :context context
+                   :kernel kernel)))
+    (run-chat-chain kernel request)))
 
 ;;; ============================================================
 ;;; Tier 3: invoke-kernel - 完整工具调用循环
@@ -308,64 +322,98 @@
 返回：
   结果 plist (:text ... :tool-calls-made ... :history ... :context ...)"))
 
+(defun context-conversation-id (context)
+  "从执行上下文中读取 conversation-id（memory filter 的会话键）。
+
+CONTEXT 可以是 context 实例、plist 或 NIL。"
+  (typecase context
+    (context (context-get context :conversation-id))
+    (list (getf context :conversation-id))
+    (t nil)))
+
 (defmethod invoke-kernel ((kernel kernel) messages &key settings context)
-  "带自动工具执行的完整工具调用循环"
+  "带自动工具执行的完整工具调用循环。
+
+每一轮 LLM 调用都经过 :chat 洋葱链（memory / logging 等 chat filter
+在循环内生效）；工具执行经过 :tool 链。
+
+当 CONTEXT 中携带 :conversation-id 时进入 delta 模式：每轮只把
+增量消息（首轮为入参消息，后续为工具结果）交给 chat 链，由
+memory filter 负责展开完整历史——store 是对话的唯一事实来源。"
   (let* ((tool-choice (or (getf settings :tool-choice) :auto))
          (max-attempts (getf settings :max-attempts 10))
          (system-prompt (getf settings :system-prompt))
          (on-tool-call (getf settings :on-tool-call))
          (on-tool-result (getf settings :on-tool-result))
-         (msgs (normalize-messages messages))
-         (msgs (prepare-messages-with-system msgs system-prompt))
+         (conversation-id (context-conversation-id context))
+         (delta-mode (and conversation-id t))
+         (incoming (normalize-messages messages))
+         ;; 全量模式：system 折叠进消息；delta 模式：system 经 request 槽位下发
+         (msgs (if delta-mode
+                   incoming
+                   (prepare-messages-with-system incoming system-prompt)))
+         (chain-settings (alexandria:remove-from-plist
+                          settings
+                          :system-prompt :tool-choice :max-attempts
+                          :on-tool-call :on-tool-result))
          (tools (unless (eq tool-choice :none)
                   (kernel-get-tools kernel)))
-         (service (kernel-get-service kernel))
          (ctx (or context (make-context :messages msgs)))
+         (delta msgs)              ; 本轮要发送的增量
          (tool-calls-made nil)
          (attempts 0))
-    ;; 主循环
+    ;; 主循环：每轮经过 chat 洋葱链
     (loop
       (when (>= attempts max-attempts)
         (error "invoke-kernel exceeded max-attempts (~A)" max-attempts))
-      ;; 调用 LLM
-      (let ((response (service-chat service msgs tools
-                                    (list :max-tokens (getf settings :max-tokens)
-                                          :temperature (getf settings :temperature)))))
-        ;; response 现在是 llm-response 对象
-        (let ((response-tool-calls (cl-agent.core:llm-response-tool-calls response)))
-          (if (and response-tool-calls (not (eq tool-choice :none)))
-              ;; 有工具调用 - 转换为 plist 格式用于消息
-              (let ((tool-calls-plist
-                      (mapcar (lambda (tc)
-                                (list :id (cl-agent.core:llm-tool-call-id tc)
-                                      :name (cl-agent.core:llm-tool-call-name tc)
-                                      :arguments (cl-agent.core:llm-tool-call-arguments tc)))
-                              response-tool-calls)))
-                (incf attempts)
-                ;; 添加 assistant 响应
-                (let ((assistant-msg (list :role :assistant
-                                           :content (or (cl-agent.core:llm-response-content response) "")
-                                           :tool-calls tool-calls-plist)))
-                  (setf msgs (append msgs (list assistant-msg)))
-                  (context-add-message ctx assistant-msg))
-                ;; 执行工具调用
-                (multiple-value-bind (results messages)
-                    (execute-tool-calls kernel tool-calls-plist ctx
-                                        on-tool-call on-tool-result)
-                  (setf tool-calls-made (append tool-calls-made results))
-                  (setf msgs (append msgs messages))
-                  (dolist (msg messages)
-                    (context-add-message ctx msg))))
-              ;; 无工具调用 - 返回最终响应
-              (let ((text (or (cl-agent.core:llm-response-content response) "")))
-                ;; 更新 chat-history（如果使用）
-                (when (chat-history-p messages)
-                  (setf (chat-history-messages messages) msgs)
-                  (history-add messages :assistant text))
-                (return (list :text text
-                              :tool-calls-made tool-calls-made
-                              :history msgs
-                              :context ctx)))))))))
+      (let* ((request (make-chat-request
+                       :messages (if delta-mode delta msgs)
+                       :tools tools
+                       :tool-choice tool-choice
+                       :system-prompt (when delta-mode system-prompt)
+                       :settings chain-settings
+                       :context ctx
+                       :kernel kernel))
+             (response (run-chat-chain kernel request))
+             (response-tool-calls (cl-agent.core:llm-response-tool-calls response)))
+        (if (and response-tool-calls (not (eq tool-choice :none)))
+            ;; 有工具调用
+            (let ((tool-calls-plist
+                    (mapcar (lambda (tc)
+                              (list :id (cl-agent.core:llm-tool-call-id tc)
+                                    :name (cl-agent.core:llm-tool-call-name tc)
+                                    :arguments (cl-agent.core:llm-tool-call-arguments tc)))
+                            response-tool-calls)))
+              (incf attempts)
+              ;; 记录 assistant 响应（delta 模式下由 memory filter 落库，
+              ;; 本地 msgs 仅用于返回 :history）
+              (let ((assistant-msg (list :role :assistant
+                                         :content (or (cl-agent.core:llm-response-content response) "")
+                                         :tool-calls tool-calls-plist)))
+                (setf msgs (append msgs (list assistant-msg)))
+                (when (typep ctx 'context)
+                  (context-add-message ctx assistant-msg)))
+              ;; 执行工具调用（经 :tool 链）
+              (multiple-value-bind (results tool-messages)
+                  (execute-tool-calls kernel tool-calls-plist ctx
+                                      on-tool-call on-tool-result)
+                (setf tool-calls-made (append tool-calls-made results))
+                (setf msgs (append msgs tool-messages))
+                (setf delta tool-messages)   ; 下一轮只发工具结果
+                (when (typep ctx 'context)
+                  (dolist (msg tool-messages)
+                    (context-add-message ctx msg)))))
+            ;; 无工具调用 - 返回最终响应
+            (let ((text (or (cl-agent.core:llm-response-content response) "")))
+              ;; 更新 chat-history（如果使用）
+              (when (chat-history-p messages)
+                (setf (chat-history-messages messages) msgs)
+                (history-add messages :assistant text))
+              (return (list :text text
+                            :tool-calls-made tool-calls-made
+                            :history msgs
+                            :context ctx
+                            :response response))))))))
 
 ;;; ============================================================
 ;;; 流式支持

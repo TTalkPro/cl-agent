@@ -93,6 +93,10 @@
                (:file "tests/test-kernel-filter")
                (:file "tests/test-kernel-chat")
 
+               ;; ChatMemory + Memory Filter tests
+               ;; (依赖 test-kernel-chat 中的 sequenced mock)
+               (:file "tests/test-memory-filter")
+
                ;; LLM tests
                (:file "tests/test-llm")
 

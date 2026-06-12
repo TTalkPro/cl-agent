@@ -106,7 +106,8 @@
      (:file "service")        ; Service abstraction
      (:file "filter")         ; 4-type filter pipeline
      (:file "kernel")         ; Kernel class + Builder
-     (:file "chat")))         ; 3-tier Invoke API
+     (:file "chat")           ; 3-tier Invoke API (onion chains)
+     (:file "memory-filter"))) ; ChatMemory protocol + Memory Filter
 
    ;; ============================================================
    ;; SimpleAgent Runtime
@@ -115,11 +116,24 @@
     :components
     ((:file "package")
      (:file "common")         ; Base agent, events, message queue
+     (:file "callbacks")      ; Callback registry (CLOS)
      (:file "kernel-agent"))))) ; KernelAgent chat loop
 
 ;; ============================================================
 ;; Changelog
 ;; ============================================================
+;;
+;; v6.1.0:
+;; - Onion filter pipeline (around/before/after, :chat/:tool phases,
+;;   CLOS chat-request/tool-request, legacy 4-type mapping preserved)
+;; - invoke-kernel now routes every LLM round through the :chat chain
+;;   (delta mode when context carries :conversation-id)
+;; - ChatMemory protocol (mem-get/add/clear) + in-memory/windowed stores
+;;   + memory-filter (CLOS, specializes filter-around)
+;; - CLOS callback registry for agents (multi-callback, priority,
+;;   error isolation, once semantics); KernelAgent fires
+;;   :on-message/:on-tool-call/:on-tool-result/:on-response/:on-error/:on-chunk
+;; - KernelAgent :memory integration (history self-managed by store)
 ;;
 ;; v6.0.0:
 ;; - Moved Process framework to cl-agent-extra

@@ -603,22 +603,8 @@ Signals:
   Error if tool not found"))
 
 (defmethod invoke ((kernel kernel) tool-name args &key context)
-  "Execute tool through filter chain."
-  ;; Verify tool exists
-  (unless (kernel-find-tool kernel tool-name)
-    (error "Tool ~A not found in kernel" tool-name))
-
-  (let* ((filters (kernel-filters kernel))
-         (execute-fn (lambda (ctx)
-                       (kernel-execute-tool kernel
-                                            (getf ctx :tool-name)
-                                            (getf ctx :tool-args))))
-         (chain (build-filter-chain filters execute-fn))
-         (ctx (list* :tool-name tool-name
-                     :tool-args args
-                     :kernel kernel
-                     context)))
-    (funcall chain ctx)))
+  "Execute tool through the tool filter chain (delegates to invoke-tool)."
+  (invoke-tool kernel tool-name args :context context))
 
 ;;; ============================================================
 ;;; Kernel Modification API
