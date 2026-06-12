@@ -429,15 +429,10 @@
                              (getf parsed :content)))
          (content (extract-text-content content-blocks))
          (tool-use (extract-tool-use content-blocks))
+         (reasoning (extract-thinking-content content-blocks))
          (usage (if (hash-table-p parsed)
                     (gethash "usage" parsed)
                     (getf parsed :usage)))
-         (input-tokens (if (hash-table-p usage)
-                           (gethash "input_tokens" usage)
-                           (getf usage :input_tokens)))
-         (output-tokens (if (hash-table-p usage)
-                            (gethash "output_tokens" usage)
-                            (getf usage :output_tokens)))
          (stop-reason (if (hash-table-p parsed)
                           (gethash "stop_reason" parsed)
                           (getf parsed :stop_reason)))
@@ -449,17 +444,37 @@
                          (getf parsed :id))))
 
     ;; 构建 llm-response 对象
+    ;; usage 走 cl-agent.core:normalize-usage（含 cache_read/cache_creation 字段）
     (cl-agent.core:make-llm-response
      :content content
      :tool-calls (when tool-use
                    (parse-anthropic-tool-use tool-use))
-     :usage (cl-agent.core:make-llm-usage
-             :input-tokens (or input-tokens 0)
-             :output-tokens (or output-tokens 0))
+     :usage (cl-agent.core:normalize-usage usage)
      :model model-name
      :finish-reason (cl-agent.core:normalize-finish-reason stop-reason)
+     :reasoning reasoning
      :message-id message-id
      :raw-response parsed)))
+
+(defun extract-thinking-content (content-blocks)
+  "提取 Anthropic thinking blocks（扩展思考）为 reasoning 字符串。
+
+参数：
+  CONTENT-BLOCKS - Anthropic 内容块（vector 或 list）
+
+返回：
+  拼接的 thinking 文本，没有则 NIL"
+  (let ((blocks (cond
+                  ((vectorp content-blocks) (coerce content-blocks 'list))
+                  ((listp content-blocks) content-blocks)
+                  (t nil)))
+        (thinking nil))
+    (dolist (block blocks)
+      (when (and (hash-table-p block)
+                 (equal (gethash "type" block) "thinking"))
+        (push (gethash "thinking" block) thinking)))
+    (when thinking
+      (format nil "~{~A~^~%~}" (nreverse thinking)))))
 
 (defun extract-text-content (content-blocks)
   "从内容块中提取文本

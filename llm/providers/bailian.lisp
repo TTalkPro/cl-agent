@@ -216,24 +216,26 @@
     \"request_id\": \"...\"
   }
 
-返回标准化的响应 plist"
+返回统一的 llm-response 对象"
   (let* ((parsed (cl-agent.llm:parse-json-response response))
          (output (gethash "output" parsed))
          (choices (when output (gethash "choices" output)))
-         (first-choice (when choices (elt choices 0)))
+         (first-choice (when (and choices (plusp (length choices)))
+                         (elt choices 0)))
          (message (when first-choice (gethash "message" first-choice)))
          (content (when message (gethash "content" message)))
          (tool-calls (when message (gethash "tool_calls" message)))
-         (usage (gethash "usage" parsed)))
+         (finish-reason (when first-choice (gethash "finish_reason" first-choice))))
 
-    (list :content (or content "")
-          :tool-calls (when tool-calls
-                        (parse-dashscope-tool-calls tool-calls))
-          :usage (list :prompt-tokens (when usage (gethash "input_tokens" usage))
-                       :completion-tokens (when usage (gethash "output_tokens" usage))
-                       :total-tokens (when usage (gethash "total_tokens" usage)))
-          :model (gethash "model" parsed)
-          :raw-response parsed)))
+    (cl-agent.core:make-llm-response
+     :content (or content "")
+     :tool-calls (when tool-calls
+                   (parse-dashscope-tool-calls tool-calls))
+     :usage (cl-agent.core:normalize-usage (gethash "usage" parsed))
+     :model (gethash "model" parsed)
+     :finish-reason (cl-agent.core:normalize-finish-reason finish-reason)
+     :message-id (gethash "request_id" parsed)
+     :raw-response parsed)))
 
 (defun parse-dashscope-tool-calls (tool-calls)
   "解析 DashScope 工具调用"

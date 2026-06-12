@@ -46,93 +46,32 @@
   "默认智谱 AI 模型")
 
 ;;; ============================================================
-;;; Anthropic 提供商
+;;; Anthropic 提供商（委托 providers/anthropic.lisp 的正式实现）
 ;;; ============================================================
 
-(defclass anthropic-provider (base-provider)
-  ((api-key :initarg :api-key
-            :reader anthropic-provider-api-key
-            :documentation "Anthropic API 密钥"))
-  (:documentation "Anthropic Claude 提供商
+(defun make-anthropic-provider (&rest args)
+  "创建 Anthropic 提供商（委托 cl-agent.llm.providers 的实现）。
 
-支持 Claude 3.5 Sonnet、Claude 3 Opus 等模型"))
-
-(defun make-anthropic-provider (&key (api-url *anthropic-api-url*)
-                                      (model *default-anthropic-model*)
-                                      api-key
-                                      (timeout 120))
-  "创建 Anthropic 提供商
-
-参数：
-  API-URL  - API 基础 URL（可选，默认官方 API）
-  MODEL    - 默认模型（可选，默认 claude-3-5-sonnet）
-  API-KEY  - API 密钥（可选，从环境变量读取）
-  TIMEOUT  - 请求超时时间（可选，默认 120 秒）
-
-返回：
-  Anthropic 提供商实例
-
-示例：
-  ;; 使用默认配置
-  (make-anthropic-provider)
-
-  ;; 指定模型
-  (make-anthropic-provider :model \"claude-3-opus-20240229\")"
-
-  ;; 使用公共工厂函数
-  (%make-provider-internal 'anthropic-provider
-                           :name :anthropic
-                           :api-url api-url
-                           :default-model model
-                           :chat-endpoint "/v1/messages"
-                           :stream-endpoint "/v1/messages"
-                           :timeout timeout
-                           :api-key api-key
-                           :api-key-env-var "ANTHROPIC_API_KEY"
-                           :require-api-key-p t))
+参数同 cl-agent.llm.providers:make-anthropic-provider。"
+  (apply #'cl-agent.llm.providers:make-anthropic-provider args))
 
 ;;; ============================================================
-;;; Ollama 提供商
+;;; Ollama 提供商（委托 providers/ollama.lisp 的 OpenAI 兼容实现）
 ;;; ============================================================
 
-(defclass ollama-provider (base-provider)
-  ()
-  (:documentation "Ollama 本地模型提供商
+(defun make-ollama-provider (&rest args)
+  "创建 Ollama 提供商（委托 cl-agent.llm.providers 的实现）。
 
-支持本地运行的开源模型，如 Llama、Mistral 等"))
+参数同 cl-agent.llm.providers:make-ollama-provider。"
+  (apply #'cl-agent.llm.providers:make-ollama-provider args))
 
-(defun make-ollama-provider (&key (api-url *ollama-api-url*)
-                                   (model *default-ollama-model*)
-                                   (timeout 120))
-  "创建 Ollama 提供商
+(defun make-openai-provider (&rest args)
+  "创建 OpenAI 提供商（委托 cl-agent.llm.providers 的实现）。"
+  (apply #'cl-agent.llm.providers:make-openai-provider args))
 
-参数：
-  API-URL - API URL（可选，默认 localhost:11434）
-  MODEL   - 默认模型（可选，默认 llama3.2）
-  TIMEOUT - 请求超时时间（可选，默认 120 秒）
-
-返回：
-  Ollama 提供商实例
-
-说明：
-  Ollama 是本地模型服务，不需要 API 密钥
-
-示例：
-  ;; 使用默认配置
-  (make-ollama-provider)
-
-  ;; 指定模型
-  (make-ollama-provider :model \"mistral\")"
-
-  ;; 使用公共工厂函数（Ollama 不需要 API 密钥）
-  (%make-provider-internal 'ollama-provider
-                           :name :ollama
-                           :api-url api-url
-                           :default-model model
-                           :chat-endpoint "/api/chat"
-                           :stream-endpoint "/api/chat"
-                           :timeout timeout
-                           :require-api-key-p nil))
+(defun make-zhipu-provider (&rest args)
+  "创建智谱 AI 提供商（委托 cl-agent.llm.providers 的实现）。"
+  (apply #'cl-agent.llm.providers:make-zhipu-provider args))
 
 ;;; ============================================================
 ;;; 内部工厂函数（提取公共模式）
@@ -214,8 +153,10 @@
   (ecase type
     (:anthropic (apply #'cl-agent.llm.providers:make-anthropic-provider args))
     (:openai (apply #'cl-agent.llm.providers:make-openai-provider args))
-    (:ollama (apply #'make-ollama-provider args))
-    (:zhipu (apply #'cl-agent.llm.providers:make-zhipu-provider args))))
+    (:ollama (apply #'cl-agent.llm.providers:make-ollama-provider args))
+    (:zhipu (apply #'cl-agent.llm.providers:make-zhipu-provider args))
+    ((:bailian :dashscope)
+     (apply #'cl-agent.llm.providers:make-dashscope-provider args))))
 
 ;;; ============================================================
 ;;; 提供商访问器（统一接口）
@@ -549,134 +490,9 @@
     (ceiling (/ char-count 4.0))))
 
 ;;; ============================================================
-;;; 内部请求函数（扁平化重构）
+;;; 说明：提供商协议实现已收敛到 providers/ 目录
 ;;; ============================================================
-
-(defun %do-llm-request (provider messages &key
-                                           model
-                                           api-key
-                                           temperature
-                                           max-tokens
-                                           tools
-                                           system)
-  "执行 LLM 请求的内部函数（扁平化版本）
-
-参数：
-  PROVIDER    - 提供商实例
-  MESSAGES    - 消息列表
-  MODEL       - 模型名称
-  API-KEY     - API 密钥（Ollama 可选）
-  TEMPERATURE - 温度参数
-  MAX-TOKENS  - 最大 token 数
-  TOOLS       - 工具列表
-  SYSTEM      - 系统提示
-
-返回：
-  解析后的响应 plist
-
-说明：
-  将 LLM 请求的 6 层调用扁平化为 2 层：
-    chat → %do-llm-request
-  代替原来的：
-    chat → llm-chat → build-request → make-http-request → parse-response"
-  (let* ((model-name (or model (provider-default-model provider)))
-         ;; 1. 构建请求体
-         (request-body (build-chat-request-body
-                        provider
-                        messages
-                        :temperature temperature
-                        :max-tokens (or max-tokens 4096)
-                        :tools tools
-                        :system system)))
-
-    ;; 更新模型
-    (setf (gethash "model" request-body) model-name)
-
-    ;; 2. 构建 URL
-    (let ((url (build-provider-url provider (provider-chat-endpoint provider))))
-
-      ;; 3. 构建请求头
-      (let ((headers (if api-key
-                         (provider-headers provider api-key)
-                         `(("Content-Type" . "application/json")))))
-
-        ;; 4. 发送请求
-        (let ((response (make-http-request
-                         url
-                         headers
-                         (cl-agent.core:json-stringify request-body)
-                         :timeout (provider-timeout provider))))
-
-          ;; 5. 解析响应
-          (parse-chat-response response provider))))))
-
-;;; ============================================================
-;;; 提供商协议实现
-;;; ============================================================
-;;; Anthropic 和 Ollama 的协议实现在这里定义
-;;; OpenAI 和 智谱AI 的实现在 providers/ 目录下的单独文件中
-
-(defmethod llm-chat ((provider anthropic-provider) messages
-                     &key max-tokens (temperature 0.7) model tools system)
-  "发送聊天请求到 Anthropic
-
-参数：
-  PROVIDER    - Anthropic 提供商实例
-  MESSAGES    - 消息列表
-  MAX-TOKENS  - 最大 token 数（可选）
-  TEMPERATURE - 温度参数（可选）
-  MODEL       - 模型名称（可选）
-  TOOLS       - 工具列表（可选）
-  SYSTEM      - 系统提示（可选）
-
-返回：
-  响应 plist
-
-说明：
-  使用 %do-llm-request 扁平化实现"
-  (%do-llm-request provider messages
-                   :model model
-                   :api-key (anthropic-provider-api-key provider)
-                   :temperature temperature
-                   :max-tokens max-tokens
-                   :tools tools
-                   :system system))
-
-(defmethod llm-chat ((provider ollama-provider) messages
-                     &key max-tokens (temperature 0.7) model tools system)
-  "发送聊天请求到 Ollama
-
-参数：
-  PROVIDER    - Ollama 提供商实例
-  MESSAGES    - 消息列表
-  MAX-TOKENS  - 最大 token 数（可选）
-  TEMPERATURE - 温度参数（可选）
-  MODEL       - 模型名称（可选）
-  TOOLS       - 工具列表（可选，Ollama 可能不完全支持）
-  SYSTEM      - 系统提示（可选）
-
-返回：
-  响应 plist
-
-说明：
-  使用 %do-llm-request 扁平化实现。
-  Ollama 对工具支持有限，忽略 tools 和 system 参数。"
-  (declare (ignore tools system)) ;; Ollama 对工具支持有限
-  (%do-llm-request provider messages
-                   :model model
-                   :api-key nil  ;; Ollama 不需要 API 密钥
-                   :temperature temperature
-                   :max-tokens max-tokens))
-
-(defmethod llm-available-p ((provider anthropic-provider))
-  "检查 Anthropic 提供商是否可用"
-  (and (slot-boundp provider 'api-key)
-       (anthropic-provider-api-key provider)))
-
-(defmethod llm-available-p ((provider ollama-provider))
-  "检查 Ollama 提供商是否可用
-
-说明：
-  Ollama 是本地服务，总是返回 t
-  实际可用性取决于 Ollama 服务是否运行"
-  t)
+;;; - openai / zhipu / ollama：providers/{openai,zhipu,ollama}.lisp
+;;;   （基于 providers/openai-compat.lisp 基座，统一返回 llm-response）
+;;; - anthropic：providers/anthropic.lisp（原生 Messages API）
+;;; - dashscope：providers/bailian.lisp（DashScope 原生格式）
