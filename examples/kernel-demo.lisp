@@ -139,7 +139,7 @@
     (cl-agent.kernel:history-add history :user "你好，今天天气怎么样？")
 
     ;; 执行 invoke-kernel（mock 不会触发工具调用，直接返回文本）
-    (let ((result (cl-agent.kernel:invoke-kernel kernel
+    (let ((result (cl-agent.simpleagent:invoke-kernel kernel
                     (cl-agent.kernel:chat-history-messages history)
                     :settings '(:system-prompt "You are a helpful weather assistant."))))
       (format t "~%Response: ~A~%" (getf result :text))

@@ -153,7 +153,7 @@
   (cl-agent.kernel:history-add history :user "北京今天天气怎么样？")
   (format t "  User: 北京今天天气怎么样？~%")
 
-  (let ((result (cl-agent.kernel:invoke-kernel kernel
+  (let ((result (cl-agent.simpleagent:invoke-kernel kernel
                   (cl-agent.kernel:chat-history-messages history)
                   :settings (list
                              :system-prompt "你是天气助手。查询天气时必须使用 get-current-weather 工具。"

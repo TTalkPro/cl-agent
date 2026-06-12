@@ -207,7 +207,7 @@
 
   (let* ((messages (list (list :role :user
                                :content "北京今天天气怎么样？")))
-         (result (cl-agent.kernel:invoke-kernel *kernel-with-filter* messages
+         (result (cl-agent.simpleagent:invoke-kernel *kernel-with-filter* messages
                    :settings (list :system-prompt "你是天气助手。查询天气时必须使用 get_current_weather 工具。"
                                    :max-attempts 5
                                    :on-tool-call (lambda (name args)
@@ -239,7 +239,7 @@
   ;; 第一轮：查天气
   (let* ((messages1 (list (list :role :user
                                 :content "北京今天天气怎么样？")))
-         (result1 (cl-agent.kernel:invoke-kernel *kernel* messages1
+         (result1 (cl-agent.simpleagent:invoke-kernel *kernel* messages1
                     :settings (list :system-prompt "你是助手。查询天气用 get_current_weather，计算用 calculate。"
                                     :max-attempts 5
                                     :on-tool-call (lambda (name args)
@@ -254,7 +254,7 @@
            (messages2 (append history
                               (list (list :role :assistant :content (getf result1 :text))
                                     (list :role :user :content "帮我计算 (+ 10 20 30)"))))
-           (result2 (cl-agent.kernel:invoke-kernel *kernel* messages2
+           (result2 (cl-agent.simpleagent:invoke-kernel *kernel* messages2
                       :settings (list :system-prompt "你是助手。查询天气用 get_current_weather，计算用 calculate。"
                                       :max-attempts 5
                                       :on-tool-call (lambda (name args)
