@@ -178,7 +178,7 @@
                   :service mock
                   :plugins '(test-chat-tools-plugin)
                   :filters (list (cl-agent.kernel:make-memory-filter store)))))
-    (let ((result (cl-agent.kernel:invoke-kernel
+    (let ((result (cl-agent.simpleagent:run-tool-loop
                    kernel
                    (list (list :role :user :content "Weather in Beijing?"))
                    :context (list :conversation-id "conv-loop"))))
@@ -204,9 +204,9 @@
                   :service mock
                   :filters (list (cl-agent.kernel:make-memory-filter store))))
          (context (list :conversation-id "conv-multi")))
-    (cl-agent.kernel:invoke-kernel
+    (cl-agent.simpleagent:run-tool-loop
      kernel (list (list :role :user :content "turn-1")) :context context)
-    (cl-agent.kernel:invoke-kernel
+    (cl-agent.simpleagent:run-tool-loop
      kernel (list (list :role :user :content "turn-2")) :context context)
     (let ((stored (cl-agent.kernel:mem-get store "conv-multi")))
       (is (= 4 (length stored)))

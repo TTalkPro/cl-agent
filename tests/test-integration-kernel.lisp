@@ -49,7 +49,7 @@
          (kernel (cl-agent.kernel:make-kernel :service mock))
          (history (cl-agent.kernel:make-chat-history)))
     (cl-agent.kernel:history-add history :user "你好")
-    (let ((result (cl-agent.kernel:invoke-kernel kernel history)))
+    (let ((result (cl-agent.simpleagent:run-tool-loop kernel history)))
       (is (stringp (getf result :text)))
       (is (> (length (getf result :text)) 0)))))
 
@@ -71,7 +71,7 @@
                   :plugins '(test-integ-math-plugin)))
          (history (cl-agent.kernel:make-chat-history)))
     (cl-agent.kernel:history-add history :user "What is 3+5?")
-    (let ((result (cl-agent.kernel:invoke-kernel kernel history)))
+    (let ((result (cl-agent.simpleagent:run-tool-loop kernel history)))
       (is (string= "The answer is 8." (getf result :text)))
       ;; 验证工具确实被调用了
       (let ((tool-calls (getf result :tool-calls-made)))
@@ -98,7 +98,7 @@
                                   :stream log-output))))
          (history (cl-agent.kernel:make-chat-history)))
     (cl-agent.kernel:history-add history :user "Say hello to World")
-    (let ((result (cl-agent.kernel:invoke-kernel kernel history)))
+    (let ((result (cl-agent.simpleagent:run-tool-loop kernel history)))
       (is (string= "Greeting sent!" (getf result :text)))
       ;; 验证 logging filter 记录了日志
       (let ((logs (string-downcase (get-output-stream-string log-output))))
@@ -116,7 +116,7 @@
 ;;;          (kernel (cl-agent.kernel:make-kernel :service provider))
 ;;;          (history (cl-agent.kernel:make-chat-history)))
 ;;;     (cl-agent.kernel:history-add history :user "1+1=?")
-;;;     (let ((result (cl-agent.kernel:invoke-kernel kernel history
+;;;     (let ((result (cl-agent.simpleagent:run-tool-loop kernel history
 ;;;                     :settings '(:function-choice :none))))
 ;;;       (is (stringp (getf result :text)))
 ;;;       (is (search "2" (getf result :text))))))
