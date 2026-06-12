@@ -15,7 +15,7 @@
     (load ql-setup)))
 
 ;; Add paths
-(dolist (dir '("" "core/" "llm/" "simpleagent/"))
+(dolist (dir '("" "core/" "llm/" "extra/"))
   (pushnew (merge-pathnames dir *project-root*) asdf:*central-registry* :test #'equal))
 
 (format t "~%Loading cl-agent-core...~%")

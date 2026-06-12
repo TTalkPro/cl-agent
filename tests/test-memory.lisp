@@ -10,7 +10,7 @@
 (in-package :cl-agent/tests)
 
 ;; 记忆管理测试套件
-(def-suite memory-suite :in cl-agent-tests:lisp-in-agents-suite
+(def-suite memory-suite :in cl-agent-suite
   :description "统一记忆管理系统测试")
 
 (in-suite memory-suite)
@@ -92,7 +92,7 @@
     (cl-agent.memory:store-put store '("ns1" "sub") "key" "value3")
 
     ;; 列出命名空间
-    (let ((namespaces (cl-agent.memory:store-list-namespaces store)))
+    (let ((namespaces (cl-agent.memory:store-list-namespaces store nil)))
       (is (>= (length namespaces) 2)))
 
     ;; 清除特定命名空间

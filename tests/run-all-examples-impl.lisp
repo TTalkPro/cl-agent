@@ -212,19 +212,19 @@
 
 (with-test ("Process Agent Creation")
   (let* ((kernel (cl-agent.kernel:make-kernel :service *anthropic-provider*))
-         (agent (cl-agent.simpleagent:make-process-agent kernel
+         (agent (cl-agent.extra.agent:make-process-agent kernel
                   :name "process-test")))
     (assert agent () "Process agent not created")))
 
 (with-test ("Event Bus Integration")
-  (let ((bus (cl-agent.simpleagent:agent-event-bus
-               (cl-agent.simpleagent:make-process-agent
+  (let ((bus (cl-agent.extra.agent:agent-event-bus
+               (cl-agent.extra.agent:make-process-agent
                  (cl-agent.kernel:make-kernel :service *anthropic-provider*)))))
     (assert bus () "Event bus not created")))
 
 (with-test ("Event Queue Integration")
-  (let ((queue (cl-agent.simpleagent:agent-event-queue
-                 (cl-agent.simpleagent:make-process-agent
+  (let ((queue (cl-agent.extra.agent:agent-event-queue
+                 (cl-agent.extra.agent:make-process-agent
                    (cl-agent.kernel:make-kernel :service *anthropic-provider*)))))
     (assert queue () "Event queue not created")))
 

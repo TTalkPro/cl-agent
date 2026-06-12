@@ -69,8 +69,8 @@
          (chain (cl-agent.kernel:build-filter-chain (list filter) execute-fn))
          (result (funcall chain '(:tool-name :test-tool :tool-args (:x 1)))))
     (is (string= "result-value" result))
-    (let ((log-output (get-output-stream-string output)))
-      (is (search "Calling tool" log-output))
+    (let ((log-output (string-downcase (get-output-stream-string output))))
+      (is (search "calling tool" log-output))
       (is (search "test-tool" log-output)))))
 
 (test test-error-handling-filter
@@ -150,6 +150,7 @@
     ;; 没有 kernel 时不检查敏感性，直接执行
     (let ((result (funcall chain '(:tool-name :test-filter-dangerous-op :kernel nil))))
       (is (string= "executed" result)))
-    ;; 有 kernel 时检查敏感性
+    ;; 有 kernel 时检查敏感性（审批被拒 → 返回 :error 结果）
     (let ((result (funcall chain (list :tool-name :test-filter-dangerous-op :kernel kernel))))
-      (is (getf result :denied)))))
+      (is (getf result :error))
+      (is (search "denied" (getf result :message))))))

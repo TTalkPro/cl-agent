@@ -9,7 +9,7 @@
 (push #p"/home/david/workspace/cl-agent/tools/" asdf:*central-registry*)
 
 (asdf:load-system :cl-agent-llm)
-(asdf:load-system :cl-agent-tools)
+(asdf:load-system :cl-agent-extra)
 
 (format t "~%========================================~%")
 (format t "GLM-4.7 Unified Response Test~%")

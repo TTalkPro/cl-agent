@@ -52,7 +52,7 @@
 (dolist (file '("package" "event" "step" "state-machine" "human-loop" "process" "runtime"))
   (format t "  Loading process/~A...~%" file)
   (handler-case
-      (load (merge-pathnames (format nil "core/process/~A.lisp" file) *project-root*))
+      (load (merge-pathnames (format nil "extra/process/~A.lisp" file) *project-root*))
     (error (e)
       (format t "  ERROR loading ~A: ~A~%" file e)
       (return))))

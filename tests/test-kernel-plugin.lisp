@@ -51,7 +51,7 @@
   (setup-test-tools-and-plugin)
   (is (eq t (cl-agent.kernel:plugin-p 'test-weather-plugin)))
   (is (string= "Weather related tools"
-                (cl-agent.kernel:plugin-description 'test-weather-plugin))))
+                (cl-agent.core:plugin-description 'test-weather-plugin))))
 
 (test test-plugin-tool-symbols
   "测试获取插件的工具符号列表"
@@ -88,7 +88,7 @@
 
   ;; 检查 plugin 元数据
   (is (eq t (cl-agent.kernel:plugin-p 'test-demo-plugin)))
-  (is (string= "Demo plugin" (cl-agent.kernel:plugin-description 'test-demo-plugin)))
+  (is (string= "Demo plugin" (cl-agent.core:plugin-description 'test-demo-plugin)))
   ;; 包含两个工具
   (let ((tools (cl-agent.kernel:plugin-tool-symbols 'test-demo-plugin)))
     (is (= 2 (length tools)))

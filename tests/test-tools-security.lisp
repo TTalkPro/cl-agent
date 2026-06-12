@@ -84,7 +84,7 @@
     ;; Short input should pass
     (multiple-value-bind (valid errors)
         (cl-agent.tools:validate-input validator "short")
-      (is valid)
+      (is-true valid)
       (is (null errors)))
     ;; Long input should fail
     (multiple-value-bind (valid errors)
@@ -99,7 +99,7 @@
     ;; Normal input should pass
     (multiple-value-bind (valid errors)
         (cl-agent.tools:validate-input validator "hello world")
-      (is valid)
+      (is-true valid)
       (is (null errors)))
     ;; Input with blocked pattern should fail
     (multiple-value-bind (valid errors)
@@ -223,9 +223,9 @@
 (test secure-tool-creation
   "Test secure tool wrapper creation"
   (let* ((inner-tool (cl-agent.tools:make-simple-tool
-                      :name "test-tool"
-                      :description "A test tool"
-                      :handler (lambda (&rest args) args)))
+                      :test-tool
+                      "A test tool"
+                      (lambda (&rest args) args)))
          (secure (cl-agent.tools:make-secure-tool inner-tool
                    :rate-limit 60
                    :timeout 30)))

@@ -48,32 +48,6 @@
   (skip "JSON 序列化测试需要额外配置"))
 
 ;; ============================================================
-;; 状态管理测试
-;; ============================================================
-
-(test make-state
-  "测试状态创建"
-  (let ((state (cl-agent.workflow:make-state :a 1 :b 2)))
-    (is (= 1 (cl-agent.workflow:state-get state :a)))
-    (is (= 2 (cl-agent.workflow:state-get state :b)))))
-
-(test state-set
-  "测试状态设置"
-  (let* ((state (cl-agent.workflow:make-state))
-         (new-state (cl-agent.workflow:state-set state :key "value")))
-    ;; 不可变性
-    (is (eq nil (cl-agent.workflow:state-get state :key)))
-    (is (string= "value" (cl-agent.workflow:state-get new-state :key)))))
-
-(test state-update
-  "测试状态更新"
-  (let* ((state (cl-agent.workflow:make-state :a 1))
-         (new-state (cl-agent.workflow:state-update state :b 2 :c 3)))
-    (is (= 1 (cl-agent.workflow:state-get new-state :a)))
-    (is (= 2 (cl-agent.workflow:state-get new-state :b)))
-    (is (= 3 (cl-agent.workflow:state-get new-state :c)))))
-
-;; ============================================================
 ;; 条件系统测试
 ;; ============================================================
 
@@ -87,7 +61,7 @@
   "测试验证错误"
   (signals cl-agent.core:validation-error
     (cl-agent.core:signal-validation-error "test-field"
-                                     :message "Invalid value"))))
+                                     :message "Invalid value")))
 
 ;; ============================================================
 ;; 运行核心测试

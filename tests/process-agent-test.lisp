@@ -2,7 +2,7 @@
 ;;;; CL-Agent - Process Agent Test with GLM-4.7 Providers
 ;;;;
 ;;;; This test verifies the updated process-agent integration with
-;;;; the core/process framework, including event injection and
+;;;; the process framework (cl-agent-extra), including event injection and
 ;;;; human-in-the-loop support.
 ;;;;
 ;;;; Test Providers:
@@ -26,7 +26,7 @@
   (:import-from #:cl-agent.kernel
                 #:make-kernel
                 #:kernel-add-function)
-  (:import-from #:cl-agent.simpleagent
+  (:import-from #:cl-agent.extra.agent
                 #:make-process-agent
                 #:agent-start
                 #:agent-stop

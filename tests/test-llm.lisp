@@ -4,7 +4,7 @@
 (in-package :cl-agent/tests)
 
 ;; LLM API 测试套件
-(def-suite llm-suite :in cl-agent-tests:lisp-in-agents-suite
+(def-suite llm-suite :in cl-agent-suite
   :description "LLM 服务层测试")
 
 (in-suite llm-suite)
@@ -15,21 +15,21 @@
 
 (test make-provider-anthropic
   "测试创建 Anthropic 提供商"
-  (let ((provider (cl-agent.llm:make-provider :anthropic)))
-    (is (eq (cl-agent.llm:provider-name provider) :anthropic))
+  (let ((provider (cl-agent.llm:make-provider :anthropic :api-key "test-key")))
+    (is (eq (cl-agent.core:provider-name provider) :anthropic))
     (is (stringp (cl-agent.llm:provider-api-url provider)))
     (is (stringp (cl-agent.llm:provider-default-model provider)))))
 
 (test make-provider-openai
   "测试创建 OpenAI 提供商"
-  (let ((provider (cl-agent.llm:make-provider :openai)))
-    (is (eq (cl-agent.llm:provider-name provider) :openai))
+  (let ((provider (cl-agent.llm:make-provider :openai :api-key "test-key")))
+    (is (eq (cl-agent.core:provider-name provider) :openai))
     (is (stringp (cl-agent.llm:provider-api-url provider)))))
 
 (test make-provider-ollama
   "测试创建 Ollama 提供商"
   (let ((provider (cl-agent.llm:make-provider :ollama)))
-    (is (eq (cl-agent.llm:provider-name provider) :ollama))
+    (is (eq (cl-agent.core:provider-name provider) :ollama))
     (is (stringp (cl-agent.llm:provider-api-url provider)))))
 
 ;; ============================================================
@@ -86,14 +86,14 @@
 
 (test estimate-cost-anthropic
   "测试 Anthropic 成本估算"
-  (let ((provider (cl-agent.llm:make-provider :anthropic)))
+  (let ((provider (cl-agent.llm:make-provider :anthropic :api-key "test-key")))
     (let ((cost (cl-agent.llm:estimate-cost provider 1000 500)))
       (is (numberp cost))
       (is (> cost 0)))))
 
 (test estimate-cost-openai
   "测试 OpenAI 成本估算"
-  (let ((provider (cl-agent.llm:make-provider :openai)))
+  (let ((provider (cl-agent.llm:make-provider :openai :api-key "test-key")))
     (let ((cost (cl-agent.llm:estimate-cost provider 1000 500)))
       (is (numberp cost))
       (is (> cost 0)))))
@@ -111,12 +111,12 @@
 
 (test convert-message-simple
   "测试简单消息转换"
-  (let ((provider (cl-agent.llm:make-provider :anthropic))
+  (let ((provider (cl-agent.llm:make-provider :anthropic :api-key "test-key"))
         (message '(:user . "Hello")))
     (let ((converted (cl-agent.llm:convert-message-to-provider message provider)))
-      (is (consp converted))
-      (is (assoc "role" converted :test #'string=))
-      (is (assoc "content" converted :test #'string=)))))
+      (is (hash-table-p converted))
+      (is (string= "user" (gethash "role" converted)))
+      (is (string= "Hello" (gethash "content" converted))))))
 
 ;; ============================================================
 ;; 请求体构建测试
@@ -124,36 +124,35 @@
 
 (test build-request-body-basic
   "测试基本请求体构建"
-  (let ((provider (cl-agent.llm:make-provider :anthropic))
+  (let ((provider (cl-agent.llm:make-provider :anthropic :api-key "test-key"))
         (messages '((:user . "Hello"))))
     (let ((body (cl-agent.llm:build-chat-request-body
                    provider messages)))
-      (is (consp body))
-      (is (assoc "model" body :test #'string=))
-      (is (assoc "messages" body :test #'string=))
-      (is (assoc "stream" body :test #'string=)))))
+      (is (hash-table-p body))
+      (is (stringp (gethash "model" body)))
+      (is (vectorp (gethash "messages" body)))
+      (multiple-value-bind (val present) (gethash "stream" body)
+        (declare (ignore val))
+        (is (not (null present)))))))
 
 (test build-request-body-with-system
   "测试带系统提示的请求体构建"
-  (let ((provider (cl-agent.llm:make-provider :anthropic))
+  (let ((provider (cl-agent.llm:make-provider :anthropic :api-key "test-key"))
         (messages '((:user . "Hello"))))
     (let ((body (cl-agent.llm:build-chat-request-body
                    provider messages
                    :system "You are a helpful assistant.")))
-      (is (assoc "system" body :test #'string=))
-      (is (string= (getf (assoc "system" body :test #'string=) "system")
+      (is (string= (gethash "system" body)
                    "You are a helpful assistant.")))))
 
 (test build-request-body-with-temperature
   "测试带温度的请求体构建"
-  (let ((provider (cl-agent.llm:make-provider :anthropic))
+  (let ((provider (cl-agent.llm:make-provider :anthropic :api-key "test-key"))
         (messages '((:user . "Hello"))))
     (let ((body (cl-agent.llm:build-chat-request-body
                    provider messages
                    :temperature 0.5)))
-      (is (assoc "temperature" body :test #'string=))
-      (is (= (getf (assoc "temperature" body :test #'string=) "temperature")
-             0.5)))))
+      (is (= 0.5 (gethash "temperature" body))))))
 
 ;; ============================================================
 ;; 响应解析测试
@@ -161,28 +160,28 @@
 
 (test parse-response-anthropic
   "测试解析 Anthropic 响应"
-  (let ((provider (cl-agent.llm:make-provider :anthropic))
-        (response "{ "content": [{"text": "Hello!"}], "model": "claude-3", "usage": {"input_tokens": 10, "output_tokens": 5}}"))
+  (let ((provider (cl-agent.llm:make-provider :anthropic :api-key "test-key"))
+        (response "{\"content\": [{\"text\": \"Hello!\"}], \"model\": \"claude-3\", \"usage\": {\"input_tokens\": 10, \"output_tokens\": 5}}"))
     (let ((parsed (cl-agent.llm:parse-chat-response response provider)))
       (is (consp parsed))
-      (is (assoc :content parsed))
-      (is (assoc :model parsed))
-      (is (assoc :usage parsed)))))
+      (is (string= "Hello!" (getf parsed :content)))
+      (is (string= "claude-3" (getf parsed :model)))
+      (is (not (null (getf parsed :usage)))))))
 
 (test parse-response-openai
   "测试解析 OpenAI 响应"
-  (let ((provider (cl-agent.llm:make-provider :openai))
-        (response "{ "choices": [{"message": {"content": "Hi!"}}], "model": "gpt-4", "usage": {"prompt_tokens": 10, "completion_tokens": 5}}"))
+  (let ((provider (cl-agent.llm:make-provider :openai :api-key "test-key"))
+        (response "{\"choices\": [{\"message\": {\"content\": \"Hi!\"}}], \"model\": \"gpt-4\", \"usage\": {\"prompt_tokens\": 10, \"completion_tokens\": 5}}"))
     (let ((parsed (cl-agent.llm:parse-chat-response response provider)))
       (is (consp parsed))
-      (is (assoc :content parsed))
-      (is (assoc :model parsed)))))
+      (is (string= "Hi!" (getf parsed :content)))
+      (is (string= "gpt-4" (getf parsed :model))))))
 
 ;; ============================================================
 ;; 集成测试（需要 API 密钥）
 ;; ============================================================
 
-(test-integration chat-with-api
+(test chat-with-api
   "集成测试：实际 API 调用"
   ;; 注意：这个测试需要真实的 API 密钥和网络连接
   ;; 默认跳过，仅在设置环境变量时运行

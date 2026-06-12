@@ -16,7 +16,7 @@
     (load ql-setup)))
 
 ;; Add paths
-(dolist (dir '("" "core/" "llm/" "memory/" "tools/" "mock/" "simpleagent/" "mcp/" "rag/" "plugin/" "protocols/"))
+(dolist (dir '("" "core/" "llm/" "memory/" "extra/" "mock/" "mcp/" "rag/" "plugin/" "protocols/"))
   (let ((path (merge-pathnames dir *project-root*)))
     (when (probe-file path)
       (pushnew path asdf:*central-registry* :test #'equal))))
@@ -34,11 +34,9 @@
       (format t "Loading cl-agent-memory...~%")
       (asdf:load-system :cl-agent-memory)
 
-      (format t "Loading cl-agent-tools...~%")
-      (asdf:load-system :cl-agent-tools)
+      (format t "Loading cl-agent-extra...~%")
+      (asdf:load-system :cl-agent-extra)
 
-      (format t "Loading cl-agent-simpleagent...~%")
-      (asdf:load-system :cl-agent-simpleagent)
 
       (format t "~%=== Testing Process Framework Symbols ===~%")
       (format t "  make-event-bus: ~A~%" (fboundp (find-symbol "MAKE-EVENT-BUS" "CL-AGENT.PROCESS")))

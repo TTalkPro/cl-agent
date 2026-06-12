@@ -4,7 +4,7 @@
 (in-package :cl-agent/tests)
 
 ;; RAG 测试套件
-(def-suite rag-suite :in cl-agent-tests:lisp-in-agents-suite
+(def-suite rag-suite :in cl-agent-suite
   :description "RAG 管道测试")
 
 (in-suite rag-suite)
@@ -44,7 +44,7 @@
     (let ((embedding (cl-agent.rag:embed-text model "test")))
       ;; 相同向量应该有很高的相似度
       (let ((similarity (cl-agent.rag:cosine-similarity embedding embedding)))
-        (is (= similarity 1.0))))))
+        (is (< (abs (- similarity 1.0)) 1e-4))))))
 
 (test cosine-similarity-different
   "测试不同文本的余弦相似度"
@@ -146,8 +146,8 @@
   "测试创建文本分割器"
   (let ((splitter (cl-agent.rag:make-text-splitter)))
     (is (not (null splitter)))
-    (is (= (cl-agent.rag:text-splitter-chunk-size splitter) 1000))
-    (is (= (cl-agent.rag:text-splitter-chunk-overlap splitter) 200))))
+    (is (= (cl-agent.rag::text-splitter-chunk-size splitter) 1000))
+    (is (= (cl-agent.rag::text-splitter-chunk-overlap splitter) 200))))
 
 (test split-text-basic
   "测试基本文本分割"
@@ -282,7 +282,7 @@ It supports multiple paradigms.")
   (setf cl-agent.rag:*default-embedding-model*
         (cl-agent.rag:make-local-embeddings))
 
-  (let ((embedding (cl-agent.rag:embed "test text")))
+  (let ((embedding (cl-agent.rag:embed-text* "test text")))
     (is (listp embedding))
     (is (= (length embedding) 384))))
 

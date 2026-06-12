@@ -101,8 +101,8 @@
     (let ((result (cl-agent.kernel:invoke-kernel kernel history)))
       (is (string= "Greeting sent!" (getf result :text)))
       ;; 验证 logging filter 记录了日志
-      (let ((logs (get-output-stream-string log-output)))
-        (is (search "Calling tool" logs))
+      (let ((logs (string-downcase (get-output-stream-string log-output))))
+        (is (search "calling tool" logs))
         (is (search "greet" logs))))))
 
 ;;; ============================================================

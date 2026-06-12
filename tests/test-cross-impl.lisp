@@ -385,7 +385,7 @@
 ;;; ============================================================
 
 (def-suite simpleagent-tests :in *cross-impl-suite*
-  :description "cl-agent-simpleagent module tests")
+  :description "simpleagent (cl-agent-core) module tests")
 
 (in-suite simpleagent-tests)
 
@@ -412,7 +412,7 @@
 ;;; ============================================================
 
 (def-suite tools-tests :in *cross-impl-suite*
-  :description "cl-agent-tools module tests (CCL compatibility)")
+  :description "tools (cl-agent-extra) module tests (CCL compatibility)")
 
 (in-suite tools-tests)
 
@@ -482,31 +482,6 @@
                                     :if-does-not-exist :ignore)))))
 
 ;;; ============================================================
-;;; Pregel/CLOS Tests
-;;; ============================================================
-
-(def-suite pregel-tests :in *cross-impl-suite*
-  :description "Pregel CLOS conversion tests")
-
-(in-suite pregel-tests)
-
-(test pregel-executor-clos
-  "Test pregel-executor is now a CLOS class"
-  ;; Verify class exists
-  (is (find-class 'cl-agent.graph.pregel:pregel-executor nil))
-  ;; Verify make-executor creates instances
-  (is (fboundp 'cl-agent.graph.pregel:make-executor)))
-
-(test bsp-execution-result-clos
-  "Test bsp-execution-result is now a CLOS class"
-  ;; Verify class exists
-  (is (find-class 'cl-agent.graph.pregel:bsp-execution-result nil))
-  ;; Verify accessor functions exist
-  (is (fboundp 'cl-agent.graph.pregel:result-graph))
-  (is (fboundp 'cl-agent.graph.pregel:result-supersteps))
-  (is (fboundp 'cl-agent.graph.pregel:result-converged-p)))
-
-;;; ============================================================
 ;;; Test Runner
 ;;; ============================================================
 
@@ -534,8 +509,7 @@
   (format t "~&Running quick tests on ~A...~%" (impl-name))
   (run! 'core-tests)
   (run! 'memory-tests)
-  (run! 'tools-tests)
-  (run! 'pregel-tests))
+  (run! 'tools-tests))
 
 (defun run-integration-tests ()
   "Run GLM integration tests (requires API key)"

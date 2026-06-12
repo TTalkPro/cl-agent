@@ -1,5 +1,5 @@
 ;;;; test-simpleagent.lisp
-;;;; CL-Agent - SimpleAgent Module Tests
+;;;; CL-Agent - SimpleAgent Module Tests (KernelAgent in core, ProcessAgent in extra)
 
 (in-package :cl-agent/tests)
 
@@ -16,6 +16,7 @@
 (test kernel-agent-creation
   "Test KernelAgent creation"
   (let ((agent (cl-agent.simpleagent:make-kernel-agent
+                (cl-agent.kernel:make-kernel)
                 :name "test-agent"
                 :system-prompt "You are a test assistant.")))
     (is (not (null agent)))
@@ -25,30 +26,33 @@
 
 (test kernel-agent-with-kernel
   "Test KernelAgent with explicit kernel"
-  (let* ((kernel (cl-agent.core:make-kernel))
+  (let* ((kernel (cl-agent.kernel:make-kernel))
          (agent (cl-agent.simpleagent:make-kernel-agent
-                 :kernel kernel
+                 kernel
                  :name "kernel-agent")))
     (is (not (null agent)))
     (is (eq kernel (cl-agent.simpleagent:agent-kernel agent)))))
 
 (test kernel-agent-history
   "Test KernelAgent conversation history management"
-  (let ((agent (cl-agent.simpleagent:make-kernel-agent :name "history-test")))
-    ;; Initially empty
+  (let ((agent (cl-agent.simpleagent:make-kernel-agent
+                (cl-agent.kernel:make-kernel)
+                :name "history-test")))
+    ;; Initially empty (no system prompt)
     (is (null (cl-agent.simpleagent:agent-history agent)))
 
-    ;; Clear history should work on empty
-    (cl-agent.simpleagent:agent-clear-history agent)
+    ;; Reset should work on empty
+    (cl-agent.simpleagent:agent-reset agent)
     (is (null (cl-agent.simpleagent:agent-history agent)))))
 
 ;;; ============================================================
-;;; ProcessAgent Tests
+;;; ProcessAgent Tests (cl-agent-extra)
 ;;; ============================================================
 
 (test process-agent-creation
   "Test ProcessAgent creation"
-  (let ((agent (cl-agent.simpleagent:make-process-agent
+  (let ((agent (cl-agent.extra.agent:make-process-agent
+                (cl-agent.kernel:make-kernel)
                 :name "process-agent"
                 :system-prompt "Process test")))
     (is (not (null agent)))
@@ -56,27 +60,35 @@
 
 (test process-agent-state
   "Test ProcessAgent state management"
-  (let ((agent (cl-agent.simpleagent:make-process-agent :name "state-test")))
+  (let ((agent (cl-agent.extra.agent:make-process-agent
+                (cl-agent.kernel:make-kernel)
+                :name "state-test")))
     ;; Initial state
-    (is (eq :idle (cl-agent.simpleagent:process-agent-state agent)))
-
-    ;; State transitions
-    (setf (cl-agent.simpleagent:process-agent-state agent) :running)
-    (is (eq :running (cl-agent.simpleagent:process-agent-state agent)))
-
-    (setf (cl-agent.simpleagent:process-agent-state agent) :paused)
-    (is (eq :paused (cl-agent.simpleagent:process-agent-state agent)))))
+    (is (eq :stopped (cl-agent.extra.agent:agent-state agent)))
+    (is (not (cl-agent.extra.agent:agent-running-p agent)))
+    (is (not (cl-agent.extra.agent:agent-paused-p agent)))
+    (is (cl-agent.extra.agent:agent-stopped-p agent))))
 
 (test process-agent-pause-resume
   "Test ProcessAgent pause/resume functionality"
-  (let ((agent (cl-agent.simpleagent:make-process-agent :name "pause-test")))
-    ;; Pause
-    (cl-agent.simpleagent:process-agent-pause agent)
-    (is (cl-agent.simpleagent:process-agent-paused-p agent))
+  (let ((agent (cl-agent.extra.agent:make-process-agent
+                (cl-agent.kernel:make-kernel)
+                :name "pause-test")))
+    (cl-agent.extra.agent:agent-start agent)
+    (unwind-protect
+        (progn
+          (is (cl-agent.extra.agent:agent-running-p agent))
 
-    ;; Resume
-    (cl-agent.simpleagent:process-agent-resume agent)
-    (is (not (cl-agent.simpleagent:process-agent-paused-p agent)))))
+          ;; Pause
+          (cl-agent.extra.agent:agent-pause agent)
+          (is (cl-agent.extra.agent:agent-paused-p agent))
+
+          ;; Resume
+          (cl-agent.extra.agent:agent-resume agent)
+          (is (not (cl-agent.extra.agent:agent-paused-p agent)))
+          (is (cl-agent.extra.agent:agent-running-p agent)))
+      (cl-agent.extra.agent:agent-stop agent))
+    (is (cl-agent.extra.agent:agent-stopped-p agent))))
 
 ;;; ============================================================
 ;;; Agent Protocol Tests
@@ -84,15 +96,21 @@
 
 (test agent-protocol-interface
   "Test common agent protocol interface"
-  (let ((agent (cl-agent.simpleagent:make-kernel-agent :name "protocol-test")))
+  (let ((agent (cl-agent.simpleagent:make-kernel-agent
+                (cl-agent.kernel:make-kernel)
+                :name "protocol-test")))
+    ;; Agent predicate and identity
+    (is (cl-agent.simpleagent:agent-p agent))
+    (is (stringp (cl-agent.simpleagent:agent-id agent)))
+
     ;; Name accessor
     (is (stringp (cl-agent.simpleagent:agent-name agent)))
 
     ;; History accessor
     (is (listp (cl-agent.simpleagent:agent-history agent)))
 
-    ;; Clear history method
-    (cl-agent.simpleagent:agent-clear-history agent)
+    ;; Reset method
+    (cl-agent.simpleagent:agent-reset agent)
     (is (null (cl-agent.simpleagent:agent-history agent)))))
 
 ;;; ============================================================
@@ -106,4 +124,3 @@
     (is (eq :user (cl-agent.core:message-role user-msg)))
     (is (eq :system (cl-agent.core:message-role system-msg)))
     (is (string= "Hello" (cl-agent.core:message-content user-msg)))))
-

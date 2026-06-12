@@ -21,6 +21,20 @@
                :accessor mock-call-count))
   (:documentation "按顺序返回预定义响应的 Mock LLM"))
 
+(defun plist-response->llm-response (plist)
+  "把测试用 plist 响应转换为统一的 llm-response 对象"
+  (let ((tool-calls (mapcar (lambda (tc)
+                              (cl-agent.core:make-llm-tool-call
+                               :id (getf tc :id)
+                               :name (getf tc :name)
+                               :arguments (getf tc :arguments)))
+                            (getf plist :tool-calls))))
+    (cl-agent.core:make-llm-response
+     :content (or (getf plist :content) "")
+     :tool-calls tool-calls
+     :model "mock-model"
+     :finish-reason (if tool-calls :tool-call :stop))))
+
 (defmethod cl-agent.llm:llm-chat ((provider sequenced-mock-llm) messages &key max-tokens temperature model tools system)
   (declare (ignore max-tokens temperature model tools system))
   (let* ((idx (mock-call-count provider))
@@ -29,7 +43,7 @@
                        (nth idx responses)
                        (list :content "Default response"))))
     (incf (mock-call-count provider))
-    response))
+    (plist-response->llm-response response)))
 
 (defun make-sequenced-mock (&rest responses)
   "创建按顺序响应的 Mock LLM"
@@ -258,9 +272,10 @@
          (kernel (make-chat-test-kernel mock))
          (messages (list (list :role :user :content "What's the weather?"))))
     (let ((response (cl-agent.kernel:invoke-chat kernel messages)))
-      ;; invoke-chat 直接返回 LLM 响应，不处理 tool-calls
-      (is (string= "I want to call a tool" (getf response :content)))
-      (is (not (null (getf response :tool-calls)))))))
+      ;; invoke-chat 直接返回 llm-response 对象，不处理 tool-calls
+      (is (string= "I want to call a tool"
+                   (cl-agent.core:llm-response-content response)))
+      (is (not (null (cl-agent.core:llm-response-tool-calls response)))))))
 
 (test test-invoke-chat-with-system-prompt
   "测试 invoke-chat 使用 system-prompt"
