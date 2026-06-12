@@ -6,27 +6,37 @@
 ;;;;
 ;;;; Overview:
 ;;;;   Optional extras built on top of cl-agent-core:
+;;;;   - Checkpoint (process state snapshots: store protocol + lineage
+;;;;     + branching + time travel; merged from cl-agent-memory)
 ;;;;   - Process framework (events, steps, state machine, human-in-the-loop)
-;;;;   - Tools system (provider/registry, builtin tools, security, resilience)
 ;;;;   - ProcessAgent (pauseable/resumable agent on the process framework)
 ;;;;
 ;;;; Usage:
 ;;;;   (asdf:load-system :cl-agent-extra)
 
 (asdf:defsystem #:cl-agent-extra
-  :description "CL-Agent Extra - Process Framework + Tools + ProcessAgent"
+  :description "CL-Agent Extra - Checkpoint + Process Framework + ProcessAgent"
   :author "David"
   :license "MIT"
   :version "1.0.0"
 
   :depends-on (#:cl-agent-core      ; infrastructure + kernel + simpleagent
-               #:quri               ; 域名检查（tools/security）
-               #:bordeaux-threads   ; rate limiter / circuit breaker / agent threads
-               #:cl-ppcre)          ; 输入验证
+               #:bordeaux-threads)  ; agent threads
 
   :serial t
   :components
   (;; ============================================================
+   ;; Checkpoint（流程状态快照：Store 协议 + 内存后端 + 时间旅行）
+   ;; ============================================================
+   (:module "checkpoint"
+    :components
+    ((:file "package")
+     (:file "store-protocol")  ; Store 协议 + store-item
+     (:file "memory-backend")  ; 内存 Store 后端
+     (:file "protocol")        ; Checkpoint 类 + 协议
+     (:file "manager")))       ; CheckpointManager（谱系/分支/时间旅行）
+
+   ;; ============================================================
    ;; Process Framework
    ;; ============================================================
    (:module "process"
@@ -38,41 +48,6 @@
      (:file "human-loop")     ; Human-in-the-loop support
      (:file "process")        ; Process definition
      (:file "runtime")))      ; Process runtime execution
-
-   ;; ============================================================
-   ;; Tools System
-   ;; ============================================================
-   (:module "tools"
-    :components
-    ((:file "package")
-
-     ;; Provider 系统核心
-     (:file "protocol")
-     (:file "registry")
-
-     ;; 工具核心
-     (:file "core")
-     (:file "macros")
-     (:file "tool-factories")
-
-     ;; 工具实现
-     (:file "search")
-     (:file "shell")
-     (:file "file")
-     (:file "http")
-
-     ;; Builtin Tools with Tags
-     (:file "builtin")
-     ;; Tool Presets
-     (:file "presets")
-
-     ;; Security and Resilience
-     (:file "security")
-     (:file "resilience")
-
-     ;; Provider 实现
-     (:file "providers/builtin")
-     (:file "providers/custom")))
 
    ;; ============================================================
    ;; ProcessAgent (depends on process framework + simpleagent)

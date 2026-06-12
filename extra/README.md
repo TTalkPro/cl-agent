@@ -6,8 +6,8 @@
 
 | 子模块 | 目录 | 描述 |
 |--------|------|------|
+| **Checkpoint** | `checkpoint/` | 流程状态快照：Store 协议 + 内存后端 + 谱系/分支/时间旅行（包 `cl-agent.checkpoint`，原 cl-agent-memory 的 process 相关部分） |
 | **Process 框架** | `process/` | 事件系统、Step 抽象、状态机、Human-in-the-Loop、Process 运行时（包 `cl-agent.process`） |
-| **工具系统** | `tools/` | Tool Registry + Tag 过滤 + 内置工具（HTTP/文件/搜索/Shell）+ 安全与弹性（包 `cl-agent.tools`） |
 | **ProcessAgent** | `agent/` | 可暂停/恢复的后台线程 Agent，集成 Process 框架（包 `cl-agent.extra.agent`） |
 
 ## 加载
@@ -18,8 +18,8 @@
 
 ## 与 core 的关系
 
-- core 的 Kernel 通过运行时反射（`find-symbol`）软依赖 `cl-agent.tools`：
-  未加载 extra 时 Kernel 没有工具注册表（优雅降级）；加载后自动可用。
+- 工具注册表现在是 core 的原生能力（`cl-agent.kernel` 的 tool 类 +
+  tool-registry），extra 不再承载工具系统。
 - `ProcessAgent`（`cl-agent.extra.agent:process-agent`）继承 core 的
   `cl-agent.simpleagent:kernel-agent`，并依赖 `cl-agent.process` 的事件总线、
   事件队列与 human-loop 管理器。
