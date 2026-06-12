@@ -181,11 +181,37 @@
    #:filter-type
    #:filter-name
    #:filter-fn
+   #:filter-around-fn
+   #:filter-before-fn
+   #:filter-after-fn
    #:filter-priority
+   #:filter-phase
    #:filter-apply
+   #:filter-around
    #:normalize-filter
 
+   ;; Request Objects
+   #:chat-request
+   #:make-chat-request
+   #:chat-request-messages
+   #:chat-request-tools
+   #:chat-request-tool-choice
+   #:chat-request-system-prompt
+   #:chat-request-settings
+   #:chat-request-context
+   #:chat-request-kernel
+   #:tool-request
+   #:make-tool-request
+   #:tool-request-name
+   #:tool-request-args
+   #:tool-request-tool
+   #:tool-request-context
+   #:tool-request-kernel
+   #:req-get
+
    ;; Filter Results
+   #:filter-result
+   #:filter-result-p
    #:make-filter-result
    #:filter-result-action
    #:filter-result-context
@@ -194,10 +220,27 @@
 
    ;; Filter Chain Building
    #:build-filter-chain
+   #:build-phase-chain
    #:build-typed-filter-chain
    #:combine-filters
    #:filter-by-type
+   #:filter-by-phase
    #:sort-filters-by-priority
+
+   ;; ==================== ChatMemory + Memory Filter ====================
+   #:mem-get
+   #:mem-add
+   #:mem-clear
+   #:in-memory-chat-store
+   #:make-in-memory-chat-store
+   #:windowed-chat-store
+   #:make-windowed-chat-store
+   #:memory-filter
+   #:make-memory-filter
+   #:memory-filter-store
+   #:llm-response->neutral-message
+   #:context-conversation-id
+   #:run-chat-chain
 
    ;; Built-in Filters
    #:make-logging-filter
