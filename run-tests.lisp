@@ -4,7 +4,7 @@
 (require :asdf)
 
 ;; Add paths
-(dolist (dir '("." "core/" "llm/" "memory/" "extra/" "mock/"))
+(dolist (dir '("." "core/" "llm/" "extra/" "mock/"))
   (pushnew (truename dir) asdf:*central-registry* :test #'equal))
 
 ;; Load quicklisp if available
@@ -19,9 +19,6 @@
 ;; Load core modules
 (format t "Loading cl-agent-core...~%")
 (asdf:load-system :cl-agent-core)
-
-(format t "Loading cl-agent-memory...~%")
-(asdf:load-system :cl-agent-memory)
 
 (format t "Loading cl-agent-llm...~%")
 (asdf:load-system :cl-agent-llm)

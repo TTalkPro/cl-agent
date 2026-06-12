@@ -9,9 +9,10 @@ A unified AI Agent framework for Common Lisp, featuring a Semantic Kernel archit
 - **Multi-Provider LLM Support**: Anthropic Claude, OpenAI GPT, ZhipuAI GLM, Ollama
 - **Flexible Tool System**: Direct tool registration + Tag-based filtering
 - **Tool Presets**: Built-in security levels and feature presets for quick configuration
-- **Comprehensive Memory**: Short-term checkpoints + Long-term persistent storage
-- **RAG Pipeline**: Text splitting, embeddings, vector storage, retrieval
-- **Protocol Support**: MCP (Model Context Protocol) + A2A (Agent-to-Agent)
+- **Checkpoint**: Process state snapshots (lineage/branching/time travel, in extra)
+- **Native Tool Registry**: Built into the kernel with tag-based filtering
+- **Onion Filter Pipeline**: around/before/after on :chat and :tool chains
+- **ChatMemory**: Conversation history self-managed by a memory filter
 - **Security & Resilience**: Rate limiting, input validation, retry, timeout, circuit breaker
 
 ## Architecture
@@ -30,8 +31,8 @@ A unified AI Agent framework for Common Lisp, featuring a Semantic Kernel archit
     ▲                ▲                ▲
     │implements      │depends on      │depends on
 ┌────────┐    ┌────────────┐    ┌──────────────────┐
-│  LLM   │    │Memory / RAG│    │      Extra       │
-│(Provid.)│   │   / MCP    │    │ Process + Tools  │
+│  LLM   │    │   Extra    │    │                  │
+│(Provid.)│   │ Checkpoint │    │                  │
 └────────┘    └────────────┘    │ + ProcessAgent   │
                                 └──────────────────┘
 ```
@@ -42,11 +43,8 @@ A unified AI Agent framework for Common Lisp, featuring a Semantic Kernel archit
 |--------|-------------|
 | **core** | Fat core: infrastructure, Kernel (Context/Filter/Service), LLM protocol, SimpleAgent (KernelAgent) |
 | **llm** | LLM provider implementations (Anthropic, OpenAI, ZhipuAI, Ollama), implements core's llm-chat protocol |
-| **memory** | Unified memory management (checkpoints, stores, long-term memory) |
-| **extra** | Optional extras: Process framework, Tools system (Registry + Tag filtering + Presets), ProcessAgent |
-| **rag** | Retrieval-Augmented Generation pipeline |
-| **mcp** | Model Context Protocol implementation |
-| **protocols** | Protocol support (MCP, A2A) |
+| **extra** | Optional extras: Checkpoint (process state snapshots), Process framework, ProcessAgent |
+| **protocols** | A2A protocol support (standalone system, not in main build) |
 
 ## Installation
 
@@ -89,7 +87,7 @@ cd cl-agent
 ```lisp
 ;; Create a tool
 (defvar *weather-tool*
-  (cl-agent.tools:make-simple-tool
+  (cl-agent.kernel:make-tool
     :get_weather
     "Get current weather for a city"
     (lambda (&key city)

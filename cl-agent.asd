@@ -1,7 +1,7 @@
 ;;;; cl-agent.asd
 ;;;; CL-Agent - Unified AI Agent Framework (Meta-System)
 ;;;;
-;;;; Version: 6.0.0 (Semantic Kernel + clj-agent Architecture)
+;;;; Version: 7.0.0 (Semantic Kernel + clj-agent Architecture)
 ;;;; Author: David
 ;;;;
 ;;;; Overview:
@@ -12,10 +12,7 @@
 ;;;; Architecture:
 ;;;;   Layer 1 - Core:   cl-agent-core (Infrastructure + Kernel + SimpleAgent)
 ;;;;   Layer 2 - LLM:    cl-agent-llm (Provider implementations, implements llm-chat protocol)
-;;;;   Layer 3 - Memory: cl-agent-memory (Store + Snapshot + Long-term Memory)
-;;;;   Layer 4 - RAG:    cl-agent-rag (Retrieval-Augmented Generation)
-;;;;   Layer 5 - MCP:    cl-agent-mcp (Model Context Protocol)
-;;;;   Layer 6 - Extra:  cl-agent-extra (Process framework, Tools, ProcessAgent)
+;;;;   Layer 3 - Extra:  cl-agent-extra (Checkpoint, Process framework, ProcessAgent)
 ;;;;
 ;;;; Usage:
 ;;;;   (asdf:load-system :cl-agent)
@@ -23,10 +20,7 @@
 ;;;; Loading Individual Subsystems:
 ;;;;   (asdf:load-system :cl-agent-core)   ; Infrastructure + Kernel + SimpleAgent
 ;;;;   (asdf:load-system :cl-agent-llm)    ; LLM Provider implementations
-;;;;   (asdf:load-system :cl-agent-memory) ; Unified memory management
-;;;;   (asdf:load-system :cl-agent-rag)    ; RAG pipeline
-;;;;   (asdf:load-system :cl-agent-mcp)    ; MCP client/server
-;;;;   (asdf:load-system :cl-agent-extra)  ; Process framework + Tools + ProcessAgent
+;;;;   (asdf:load-system :cl-agent-extra)  ; Checkpoint + Process framework + ProcessAgent
 ;;;;
 ;;;; Major Changes (v6.0.0):
 ;;;;   - Core restructured: Process framework moved out, SimpleAgent moved in
@@ -35,6 +29,8 @@
 ;;;;   - Removed remaining graph engine leftovers (process is the only workflow story)
 ;;;;
 ;;;; Changelog:
+;;;;   v7.0.0 - 减法：删除 RAG / MCP / tools 子系统（工具注册表内置到 core）；
+;;;;            删除 cl-agent-memory（checkpoint 并入 cl-agent-extra）
 ;;;;   v6.0.0 - Core = infra + kernel + simpleagent; extras split out; graph leftovers removed
 ;;;;   v5.0.0 - clj-agent architecture alignment, 7 modules
 ;;;;   v4.0.0 - Semantic Kernel architecture
@@ -44,7 +40,7 @@
   :description "Unified AI Agent Framework - Meta System (Semantic Kernel + clj-agent)"
   :author "David"
   :license "MIT"
-  :version "6.0.0"
+  :version "7.0.0"
 
   ;; Meta-system contains no components, only declares dependencies
   :depends-on (;; Layer 1: Core (Infrastructure + Kernel + SimpleAgent)
@@ -53,16 +49,7 @@
                ;; Layer 2: LLM (Provider implementations)
                #:cl-agent-llm
 
-               ;; Layer 3: Memory (Unified memory management)
-               #:cl-agent-memory
-
-               ;; Layer 4: RAG (Retrieval-Augmented Generation)
-               #:cl-agent-rag
-
-               ;; Layer 5: MCP (Model Context Protocol)
-               #:cl-agent-mcp
-
-               ;; Layer 6: Extra (Process framework + Tools + ProcessAgent)
+               ;; Layer 3: Extra (Checkpoint + Process framework + ProcessAgent)
                #:cl-agent-extra)
 
   :in-order-to ((asdf:test-op (asdf:test-op #:cl-agent-test))))
@@ -103,17 +90,8 @@
                ;; SimpleAgent tests
                (:file "tests/test-simpleagent")
 
-               ;; Memory tests
-               (:file "tests/test-memory")
-
-               ;; Tools security and resilience tests
-               (:file "tests/test-tools-security")
-
-               ;; RAG tests
-               (:file "tests/test-rag")
-
-               ;; MCP tests
-               (:file "tests/test-mcp")
+               ;; Checkpoint tests
+               (:file "tests/test-checkpoint")
 
                ;; Integration tests
                (:file "tests/test-integration-kernel"))
