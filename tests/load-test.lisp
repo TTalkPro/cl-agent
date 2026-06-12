@@ -16,7 +16,7 @@
     (load ql-setup)))
 
 ;; Add paths
-(dolist (dir '("" "core/" "llm/" "memory/" "extra/" "mock/" "mcp/" "rag/" "plugin/" "protocols/"))
+(dolist (dir '("" "core/" "llm/" "extra/" "mock/" "protocols/"))
   (let ((path (merge-pathnames dir *project-root*)))
     (when (probe-file path)
       (pushnew path asdf:*central-registry* :test #'equal))))
@@ -30,9 +30,6 @@
 
       (format t "Loading cl-agent-llm...~%")
       (asdf:load-system :cl-agent-llm)
-
-      (format t "Loading cl-agent-memory...~%")
-      (asdf:load-system :cl-agent-memory)
 
       (format t "Loading cl-agent-extra...~%")
       (asdf:load-system :cl-agent-extra)

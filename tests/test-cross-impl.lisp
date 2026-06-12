@@ -264,121 +264,121 @@
 ;;; ============================================================
 
 (def-suite memory-tests :in *cross-impl-suite*
-  :description "cl-agent-memory module tests")
+  :description "checkpoint (cl-agent-extra) module tests")
 
 (in-suite memory-tests)
 
 (test checkpoint-creation
   "Test checkpoint creation and basic operations"
-  (let ((cp (cl-agent.memory:make-checkpoint
+  (let ((cp (cl-agent.checkpoint:make-checkpoint
              :thread-id "test-thread"
              :metadata '(:test t))))
     (is (not (null cp)))
-    (is (cl-agent.memory:checkpoint-p cp))
-    (is (string= (cl-agent.memory:checkpoint-thread-id cp) "test-thread"))
-    (is (stringp (cl-agent.memory:checkpoint-id cp)))))
+    (is (cl-agent.checkpoint:checkpoint-p cp))
+    (is (string= (cl-agent.checkpoint:checkpoint-thread-id cp) "test-thread"))
+    (is (stringp (cl-agent.checkpoint:checkpoint-id cp)))))
 
 (test checkpoint-channel-operations
   "Test checkpoint channel get/set with hash-table storage"
-  (let ((cp (cl-agent.memory:make-checkpoint :thread-id "test")))
+  (let ((cp (cl-agent.checkpoint:make-checkpoint :thread-id "test")))
     ;; Set channel value
-    (cl-agent.memory:checkpoint-set-channel cp "messages" '("msg1" "msg2"))
+    (cl-agent.checkpoint:checkpoint-set-channel cp "messages" '("msg1" "msg2"))
     ;; Get channel value
-    (is (equal (cl-agent.memory:checkpoint-get-channel cp "messages")
+    (is (equal (cl-agent.checkpoint:checkpoint-get-channel cp "messages")
                '("msg1" "msg2")))
     ;; Test messages convenience functions
-    (cl-agent.memory:checkpoint-set-messages cp '(:user "hello"))
-    (is (equal (cl-agent.memory:checkpoint-get-messages cp) '(:user "hello")))
+    (cl-agent.checkpoint:checkpoint-set-messages cp '(:user "hello"))
+    (is (equal (cl-agent.checkpoint:checkpoint-get-messages cp) '(:user "hello")))
     ;; Verify channel-values is a hash-table
-    (is (hash-table-p (cl-agent.memory:checkpoint-channel-values cp)))))
+    (is (hash-table-p (cl-agent.checkpoint:checkpoint-channel-values cp)))))
 
 (test checkpoint-config-creation
   "Test checkpoint config"
-  (let ((config (cl-agent.memory:make-checkpoint-config
+  (let ((config (cl-agent.checkpoint:make-checkpoint-config
                  :thread-id "thread-1"
                  :checkpoint-id "cp-123")))
-    (is (cl-agent.memory:checkpoint-config-p config))
-    (is (string= (cl-agent.memory:config-thread-id config) "thread-1"))
-    (is (string= (cl-agent.memory:config-checkpoint-id config) "cp-123"))))
+    (is (cl-agent.checkpoint:checkpoint-config-p config))
+    (is (string= (cl-agent.checkpoint:config-thread-id config) "thread-1"))
+    (is (string= (cl-agent.checkpoint:config-checkpoint-id config) "cp-123"))))
 
 (test store-item-creation
   "Test store item creation"
-  (let ((item (cl-agent.memory:make-store-item
+  (let ((item (cl-agent.checkpoint:make-store-item
                :namespace '("test")
                :key "key-1"
                :value '(:data "test"))))
-    (is (cl-agent.memory:store-item-p item))
-    (is (equal (cl-agent.memory:store-item-namespace item) '("test")))
-    (is (string= (cl-agent.memory:store-item-key item) "key-1"))))
+    (is (cl-agent.checkpoint:store-item-p item))
+    (is (equal (cl-agent.checkpoint:store-item-namespace item) '("test")))
+    (is (string= (cl-agent.checkpoint:store-item-key item) "key-1"))))
 
 (test memory-store-backend
   "Test memory store backend with hash-table storage"
-  (let ((store (cl-agent.memory:make-memory-store-backend)))
+  (let ((store (cl-agent.checkpoint:make-memory-store-backend)))
     (is (not (null store)))
     ;; Test put with hash-table value
     (let ((ht (make-hash-table :test #'equal)))
       (setf (gethash "data" ht) "test-value")
-      (cl-agent.memory:store-put store '("test") "key-ht" ht))
+      (cl-agent.checkpoint:store-put store '("test") "key-ht" ht))
     ;; Test put with plist value
-    (cl-agent.memory:store-put store '("test") "key1" '(:value 42))
+    (cl-agent.checkpoint:store-put store '("test") "key1" '(:value 42))
     ;; Test get
-    (let ((item (cl-agent.memory:store-get store '("test") "key1")))
+    (let ((item (cl-agent.checkpoint:store-get store '("test") "key1")))
       (is (not (null item)))
-      (is (equal (cl-agent.memory:store-item-value item) '(:value 42))))
+      (is (equal (cl-agent.checkpoint:store-item-value item) '(:value 42))))
     ;; Test delete
-    (is (cl-agent.memory:store-delete store '("test") "key1"))
-    (is (null (cl-agent.memory:store-get store '("test") "key1")))))
+    (is (cl-agent.checkpoint:store-delete store '("test") "key1"))
+    (is (null (cl-agent.checkpoint:store-get store '("test") "key1")))))
 
 (test checkpoint-manager
   "Test checkpoint manager save/load"
-  (let* ((store (cl-agent.memory:make-memory-store-backend))
-         (manager (cl-agent.memory:make-checkpoint-manager :store store))
-         (config (cl-agent.memory:make-checkpoint-config :thread-id "test-thread")))
+  (let* ((store (cl-agent.checkpoint:make-memory-store-backend))
+         (manager (cl-agent.checkpoint:make-checkpoint-manager :store store))
+         (config (cl-agent.checkpoint:make-checkpoint-config :thread-id "test-thread")))
     (is (not (null manager)))
     ;; Save checkpoint
-    (let ((cp (cl-agent.memory:make-checkpoint :thread-id "test-thread")))
-      (cl-agent.memory:checkpoint-set-messages cp '("test message"))
-      (cl-agent.memory:checkpoint-save manager config cp)
+    (let ((cp (cl-agent.checkpoint:make-checkpoint :thread-id "test-thread")))
+      (cl-agent.checkpoint:checkpoint-set-messages cp '("test message"))
+      (cl-agent.checkpoint:checkpoint-save manager config cp)
       ;; Load checkpoint
-      (let ((loaded (cl-agent.memory:checkpoint-load manager config)))
+      (let ((loaded (cl-agent.checkpoint:checkpoint-load manager config)))
         (is (not (null loaded)))
-        (is (equal (cl-agent.memory:checkpoint-get-messages loaded)
+        (is (equal (cl-agent.checkpoint:checkpoint-get-messages loaded)
                    '("test message")))))))
 
 (test checkpoint-naming-unified
   "Test unified checkpoint-* naming convention"
-  (let* ((store (cl-agent.memory:make-memory-store-backend))
-         (manager (cl-agent.memory:make-checkpoint-manager :store store))
-         (config (cl-agent.memory:make-checkpoint-config :thread-id "naming-test")))
+  (let* ((store (cl-agent.checkpoint:make-memory-store-backend))
+         (manager (cl-agent.checkpoint:make-checkpoint-manager :store store))
+         (config (cl-agent.checkpoint:make-checkpoint-config :thread-id "naming-test")))
     ;; Test all checkpoint-* methods exist and work
-    (let ((cp (cl-agent.memory:make-checkpoint :thread-id "naming-test")))
+    (let ((cp (cl-agent.checkpoint:make-checkpoint :thread-id "naming-test")))
       ;; checkpoint-save
-      (is (not (null (cl-agent.memory:checkpoint-save manager config cp))))
+      (is (not (null (cl-agent.checkpoint:checkpoint-save manager config cp))))
       ;; checkpoint-load
-      (is (not (null (cl-agent.memory:checkpoint-load manager config))))
+      (is (not (null (cl-agent.checkpoint:checkpoint-load manager config))))
       ;; checkpoint-get-latest
-      (is (not (null (cl-agent.memory:checkpoint-get-latest manager config))))
+      (is (not (null (cl-agent.checkpoint:checkpoint-get-latest manager config))))
       ;; checkpoint-list-all
-      (is (listp (cl-agent.memory:checkpoint-list-all manager config)))
+      (is (listp (cl-agent.checkpoint:checkpoint-list-all manager config)))
       ;; checkpoint-list-branches
-      (is (listp (cl-agent.memory:checkpoint-list-branches manager config))))))
+      (is (listp (cl-agent.checkpoint:checkpoint-list-branches manager config))))))
 
 (test checkpoint-time-travel
   "Test checkpoint time travel operations"
-  (let* ((store (cl-agent.memory:make-memory-store-backend))
-         (manager (cl-agent.memory:make-checkpoint-manager :store store))
-         (config (cl-agent.memory:make-checkpoint-config :thread-id "time-travel-test")))
+  (let* ((store (cl-agent.checkpoint:make-memory-store-backend))
+         (manager (cl-agent.checkpoint:make-checkpoint-manager :store store))
+         (config (cl-agent.checkpoint:make-checkpoint-config :thread-id "time-travel-test")))
     ;; Create multiple checkpoints
     (dotimes (i 3)
-      (let ((cp (cl-agent.memory:make-checkpoint :thread-id "time-travel-test")))
-        (cl-agent.memory:checkpoint-set-channel cp "step" i)
-        (cl-agent.memory:checkpoint-save manager config cp)))
+      (let ((cp (cl-agent.checkpoint:make-checkpoint :thread-id "time-travel-test")))
+        (cl-agent.checkpoint:checkpoint-set-channel cp "step" i)
+        (cl-agent.checkpoint:checkpoint-save manager config cp)))
     ;; Test time travel methods exist as generic functions
-    (is (fboundp 'cl-agent.memory:checkpoint-go-back))
-    (is (fboundp 'cl-agent.memory:checkpoint-go-forward))
-    (is (fboundp 'cl-agent.memory:checkpoint-goto))
-    (is (fboundp 'cl-agent.memory:checkpoint-switch-branch))
-    (is (fboundp 'cl-agent.memory:checkpoint-delete-branch))))
+    (is (fboundp 'cl-agent.checkpoint:checkpoint-go-back))
+    (is (fboundp 'cl-agent.checkpoint:checkpoint-go-forward))
+    (is (fboundp 'cl-agent.checkpoint:checkpoint-goto))
+    (is (fboundp 'cl-agent.checkpoint:checkpoint-switch-branch))
+    (is (fboundp 'cl-agent.checkpoint:checkpoint-delete-branch))))
 
 ;;; ============================================================
 ;;; SimpleAgent Module Tests
@@ -412,7 +412,7 @@
 ;;; ============================================================
 
 (def-suite tools-tests :in *cross-impl-suite*
-  :description "tools (cl-agent-extra) module tests (CCL compatibility)")
+  :description "portable file/directory operation tests (CCL compatibility)")
 
 (in-suite tools-tests)
 

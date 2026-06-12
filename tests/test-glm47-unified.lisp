@@ -6,7 +6,6 @@
 
 (push #p"/home/david/workspace/cl-agent/core/" asdf:*central-registry*)
 (push #p"/home/david/workspace/cl-agent/llm/" asdf:*central-registry*)
-(push #p"/home/david/workspace/cl-agent/tools/" asdf:*central-registry*)
 
 (asdf:load-system :cl-agent-llm)
 (asdf:load-system :cl-agent-extra)

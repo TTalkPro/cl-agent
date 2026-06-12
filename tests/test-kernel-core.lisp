@@ -14,7 +14,7 @@
 
 (defun make-test-core-weather-tool ()
   "创建测试用天气工具"
-  (make-instance 'cl-agent.tools:tool
+  (make-instance 'cl-agent.kernel:tool
                  :name :test-core-get-weather
                  :description "Get weather"
                  :handler (lambda (&key city) (format nil "Sunny in ~A" city))
@@ -25,7 +25,7 @@
 
 (defun make-test-core-math-tool ()
   "创建测试用数学工具"
-  (make-instance 'cl-agent.tools:tool
+  (make-instance 'cl-agent.kernel:tool
                  :name :test-core-calculate
                  :description "Calculate"
                  :handler (lambda (&key a b) (+ a b))
@@ -69,11 +69,11 @@
     ;; 查找天气工具
     (let ((tool (cl-agent.kernel:kernel-find-tool kernel :test-core-get-weather)))
       (is (not (null tool)))
-      (is (eq :test-core-get-weather (cl-agent.tools:tool-name tool))))
+      (is (eq :test-core-get-weather (cl-agent.kernel:tool-name tool))))
     ;; 查找数学工具
     (let ((tool (cl-agent.kernel:kernel-find-tool kernel :test-core-calculate)))
       (is (not (null tool)))
-      (is (eq :test-core-calculate (cl-agent.tools:tool-name tool))))))
+      (is (eq :test-core-calculate (cl-agent.kernel:tool-name tool))))))
 
 (test test-kernel-find-tool-not-found
   "测试查找不存在的工具返回 nil"

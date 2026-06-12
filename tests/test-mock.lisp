@@ -148,25 +148,25 @@
   "测试创建 Mock 计算器工具"
   (let ((tool (cl-agent.mock:make-calculator-tool)))
     (is (typep tool 'cl-agent.mock:mock-tool))
-    (is (eq (cl-agent.tools:tool-name tool) :calculator))))
+    (is (eq (cl-agent.mock::tool-name tool) :calculator))))
 
 (test make-search-tool
   "测试创建 Mock 搜索工具"
   (let ((tool (cl-agent.mock:make-search-tool)))
     (is (typep tool 'cl-agent.mock:mock-tool))
-    (is (eq (cl-agent.tools:tool-name tool) :search))))
+    (is (eq (cl-agent.mock::tool-name tool) :search))))
 
 (test make-file-tool
   "测试创建 Mock 文件工具"
   (let ((tool (cl-agent.mock:make-file-tool)))
     (is (typep tool 'cl-agent.mock:mock-tool))
-    (is (eq (cl-agent.tools:tool-name tool) :file-ops))))
+    (is (eq (cl-agent.mock::tool-name tool) :file-ops))))
 
 (test make-database-tool
   "测试创建 Mock 数据库工具"
   (let ((tool (cl-agent.mock:make-database-tool)))
     (is (typep tool 'cl-agent.mock:mock-tool))
-    (is (eq (cl-agent.tools:tool-name tool) :database))))
+    (is (eq (cl-agent.mock::tool-name tool) :database))))
 
 (test make-mock-toolkit
   "测试创建完整 Mock 工具包"
@@ -179,7 +179,7 @@
 (test mock-tool-execute-calculator
   "测试 Mock 计算器工具执行"
   (let ((tool (cl-agent.mock:make-calculator-tool)))
-    (let ((result (cl-agent.tools:tool-execute
+    (let ((result (cl-agent.mock::tool-execute
                    tool
                    '(:expression "1+1"))))
       (is (getf result :success))
@@ -188,7 +188,7 @@
 (test mock-tool-execute-search
   "测试 Mock 搜索工具执行"
   (let ((tool (cl-agent.mock:make-search-tool)))
-    (let ((result (cl-agent.tools:tool-execute
+    (let ((result (cl-agent.mock::tool-execute
                    tool
                    '(:query "测试查询"))))
       (is (getf result :success))
@@ -197,7 +197,7 @@
 (test mock-tool-execute-file-read
   "测试 Mock 文件工具执行（读取）"
   (let ((tool (cl-agent.mock:make-file-tool)))
-    (let ((result (cl-agent.tools:tool-execute
+    (let ((result (cl-agent.mock::tool-execute
                    tool
                    '(:action :read :path "/tmp/test.txt"))))
       (is (getf result :success)))))
@@ -205,7 +205,7 @@
 (test mock-tool-execute-file-write
   "测试 Mock 文件工具执行（写入）"
   (let ((tool (cl-agent.mock:make-file-tool)))
-    (let ((result (cl-agent.tools:tool-execute
+    (let ((result (cl-agent.mock::tool-execute
                    tool
                    '(:action :write :path "/tmp/test.txt" :content "test"))))
       (is (getf result :success)))))
@@ -213,7 +213,7 @@
 (test mock-tool-execute-file-list
   "测试 Mock 文件工具执行（列出）"
   (let ((tool (cl-agent.mock:make-file-tool)))
-    (let ((result (cl-agent.tools:tool-execute
+    (let ((result (cl-agent.mock::tool-execute
                    tool
                    '(:action :list :path "/tmp"))))
       (is (getf result :success))
@@ -222,7 +222,7 @@
 (test mock-tool-execute-database
   "测试 Mock 数据库工具执行"
   (let ((tool (cl-agent.mock:make-database-tool)))
-    (let ((result (cl-agent.tools:tool-execute
+    (let ((result (cl-agent.mock::tool-execute
                    tool
                    '(:query "SELECT * FROM users"))))
       (is (getf result :success))
@@ -232,7 +232,7 @@
   "测试带延迟的 Mock 工具"
   (let ((tool (cl-agent.mock:make-calculator-tool :delay 0.1)))
     (let ((start (get-internal-real-time))
-          (result (cl-agent.tools:tool-execute
+          (result (cl-agent.mock::tool-execute
                    tool
                    '(:expression "1+1")))
           (end (get-internal-real-time)))
@@ -245,7 +245,7 @@
         (success-count 0)
         (total-count 10))
     (dotimes (i total-count)
-      (let ((result (cl-agent.tools:tool-execute
+      (let ((result (cl-agent.mock::tool-execute
                      tool
                      '(:expression "1+1"))))
         (when (getf result :success)
