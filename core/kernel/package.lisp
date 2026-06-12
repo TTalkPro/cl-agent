@@ -12,7 +12,7 @@
 ;;;;   - 3-Tier Invoke API:
 ;;;;     1. invoke-tool - Execute single tool through filter chain
 ;;;;     2. invoke-chat - Single LLM call (no tool loop)
-;;;;     3. invoke-kernel - Full tool-calling loop
+;;;;     (工具循环 run-tool-loop 位于 cl-agent.simpleagent)
 
 (defpackage #:cl-agent.kernel
   (:use #:common-lisp
@@ -178,21 +178,19 @@
    #:builder-with-context
    #:build-kernel
 
-   ;; ==================== 3-Tier Invoke API ====================
-   ;; Tier 1: Tool Execution
+   ;; ==================== Invoke 原语 ====================
+   ;; （工具循环 run-tool-loop 在 cl-agent.simpleagent —— Kernel 不负责全流程）
+   ;; Tool Execution
    #:invoke
    #:invoke-tool
 
-   ;; Tier 2: Single LLM Call
+   ;; Single LLM Call
    #:invoke-chat
    #:invoke-chat-stream
 
-   ;; Tier 3: Full Loop
-   #:invoke-kernel
-
-   ;; Convenience
-   #:quick-chat
-   #:chat-with-tools
+   ;; 消息辅助（供 Agent 运行时使用）
+   #:normalize-messages
+   #:prepare-messages-with-system
 
    ;; ==================== Filter System ====================
    ;; Filter Class
