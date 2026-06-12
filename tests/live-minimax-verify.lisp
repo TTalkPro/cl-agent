@@ -5,7 +5,7 @@
 ;;;;   A. LLM Provider 层：openai-compat 基座、llm-response 归一化、
 ;;;;      <think> 推理块剥离、usage 别名（含 cached_tokens）、错误分类
 ;;;;   B. Kernel 层：invoke-chat（:chat 洋葱链 + chat-request 改写）、
-;;;;      invoke-kernel 完整工具循环（:tool 链 filter 触发）
+;;;;      run-tool-loop 完整工具循环（simpleagent，:tool 链 filter 触发）
 ;;;;   C. Agent 层：KernelAgent + ChatMemory 多轮记忆 + callback 事件流
 ;;;;
 ;;;; 运行：
@@ -151,7 +151,7 @@
 
 (format t "  ... invoke-kernel 工具循环（真实 API，约 2 次往返）~%")
 (defvar *loop-result*
-  (cl-agent.kernel:invoke-kernel
+  (cl-agent.simpleagent:run-tool-loop
    *kernel-tools*
    (list (list :role :user
                :content "请调用 get_weather 工具查询北京的天气，然后告诉我结果。"))
@@ -180,8 +180,9 @@
 (defvar *store* (cl-agent.kernel:make-in-memory-chat-store))
 
 (defvar *agent*
+  ;; 直接传 provider —— make-kernel-agent 自动包装 Kernel（创建时可指定/替换）
   (cl-agent.simpleagent:make-kernel-agent
-   (cl-agent.kernel:make-kernel :service *provider*)
+   *provider*
    :name "minimax-agent"
    :system-prompt "你是一个简洁的助手，回答尽量简短。"
    :settings '(:max-tokens 2048)
@@ -212,6 +213,13 @@
                       (cl-agent.kernel:mem-get *store* "live-conv"))))
 (check "C5. agent-get-history 读取 store 历史"
        (= 4 (length (cl-agent.simpleagent:agent-get-history *agent*))))
+(check "C6. memory-filter 是 Agent 私有的（kernel filters 零污染）"
+       (and (null (cl-agent.kernel:kernel-filters
+                   (cl-agent.simpleagent:agent-kernel *agent*)))
+            (not (null (cl-agent.simpleagent:agent-memory-filter *agent*)))))
+(check "C7. provider 直接创建 Agent（ensure-kernel 自动包装）"
+       (typep (cl-agent.simpleagent:agent-kernel *agent*)
+              'cl-agent.kernel:kernel))
 
 (format t "  第二轮回答: ~A~%"
         (subseq *turn2* 0 (min 80 (length *turn2*))))

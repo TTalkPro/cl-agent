@@ -145,7 +145,7 @@
        (kernel (cl-agent.kernel:make-kernel :service service)))
 
   (format t "~%Testing invoke-kernel with Anthropic-compatible provider:~%")
-  (let ((result (cl-agent.kernel:invoke-kernel
+  (let ((result (cl-agent.simpleagent:invoke-kernel
                  kernel
                  (list (list :role :user :content "Say hello in 3 words"))
                  :settings (list :tool-choice :none))))
@@ -158,7 +158,7 @@
            (kernel (cl-agent.kernel:make-kernel :service service)))
 
       (format t "~%Testing invoke-kernel with OpenAI-compatible provider:~%")
-      (let ((result (cl-agent.kernel:invoke-kernel
+      (let ((result (cl-agent.simpleagent:invoke-kernel
                      kernel
                      (list (list :role :user :content "Say hi in 3 words"))
                      :settings (list :tool-choice :none))))
