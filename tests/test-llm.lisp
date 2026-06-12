@@ -199,3 +199,111 @@
 (defun run-llm-tests ()
   "运行所有 LLM 测试"
   (run! 'llm-suite))
+
+;; ============================================================
+;; OpenAI 兼容基座测试（统一归一化路径）
+;; ============================================================
+
+(test openai-compat-provider-hierarchy
+  "测试 openai/zhipu/ollama 均为 openai-compat 子类"
+  (is (typep (cl-agent.llm:make-provider :openai :api-key "test-key")
+             'cl-agent.llm.providers:openai-compat-provider))
+  (is (typep (cl-agent.llm:make-provider :zhipu :api-key "test-key")
+             'cl-agent.llm.providers:openai-compat-provider))
+  (is (typep (cl-agent.llm:make-provider :ollama)
+             'cl-agent.llm.providers:openai-compat-provider)))
+
+(test openai-compat-parse-response
+  "测试统一响应解析：内容 / 工具调用对象化 / usage 别名 / reasoning"
+  (let* ((response "{\"id\": \"chatcmpl-1\", \"model\": \"glm-4.6\",
+                     \"choices\": [{\"finish_reason\": \"tool_calls\",
+                       \"message\": {\"content\": \"checking\",
+                         \"reasoning_content\": \"think step by step\",
+                         \"tool_calls\": [{\"id\": \"call_1\",
+                           \"function\": {\"name\": \"get_weather\",
+                             \"arguments\": \"{\\\"city\\\": \\\"Tokyo\\\"}\"}}]}}],
+                     \"usage\": {\"prompt_tokens\": 11, \"completion_tokens\": 7,
+                       \"prompt_tokens_details\": {\"cached_tokens\": 4}}}")
+         (parsed (cl-agent.llm.providers:parse-openai-compat-response response)))
+    ;; 统一返回 llm-response 对象
+    (is (cl-agent.core:llm-response-p parsed))
+    (is (string= "checking" (cl-agent.core:llm-response-content parsed)))
+    ;; reasoning 提取到独立槽位
+    (is (string= "think step by step" (cl-agent.core:llm-response-reasoning parsed)))
+    ;; finish-reason 归一化
+    (is (eq :tool-call (cl-agent.core:llm-response-finish-reason parsed)))
+    ;; tool-calls 是 llm-tool-call 对象，arguments 已解析
+    (let ((tc (first (cl-agent.core:llm-response-tool-calls parsed))))
+      (is (typep tc 'cl-agent.core:llm-tool-call))
+      (is (string= "call_1" (cl-agent.core:llm-tool-call-id tc)))
+      (is (eq :get_weather (cl-agent.core:llm-tool-call-name tc)))
+      (is (hash-table-p (cl-agent.core:llm-tool-call-arguments tc))))
+    ;; usage 别名归一（含 cached_tokens）
+    (let ((usage (cl-agent.core:llm-response-usage parsed)))
+      (is (= 11 (cl-agent.core:llm-usage-input-tokens usage)))
+      (is (= 7 (cl-agent.core:llm-usage-output-tokens usage)))
+      (is (= 4 (cl-agent.core:llm-usage-cache-read-tokens usage))))))
+
+(test zhipu-auth-headers
+  "测试智谱认证头特化：id.secret 直传，普通 key 走 Bearer"
+  (let* ((dotted (cl-agent.llm:make-provider :zhipu :api-key "id.secret"))
+         (plain (cl-agent.llm:make-provider :zhipu :api-key "plainkey"))
+         (h1 (cdr (assoc "Authorization"
+                         (cl-agent.llm.providers:provider-auth-headers dotted)
+                         :test #'string=)))
+         (h2 (cdr (assoc "Authorization"
+                         (cl-agent.llm.providers:provider-auth-headers plain)
+                         :test #'string=))))
+    (is (string= "id.secret" h1))
+    (is (string= "Bearer plainkey" h2))))
+
+(test ollama-openai-compat-endpoint
+  "测试 Ollama 走 OpenAI 兼容端点"
+  (let ((provider (cl-agent.llm:make-provider :ollama)))
+    (is (string= "/v1/chat/completions"
+                 (cl-agent.llm:provider-chat-endpoint provider)))
+    (is (cl-agent.llm:llm-available-p provider))))
+
+;; ============================================================
+;; 统一错误分类测试
+;; ============================================================
+
+(test error-retryable-classification
+  "测试 error-retryable-p 统一分类"
+  ;; 鉴权/参数错误：不可重试
+  (is (not (cl-agent.core:error-retryable-p
+            (make-condition 'cl-agent.core:llm-error
+                            :message "auth" :status-code 401))))
+  (is (not (cl-agent.core:error-retryable-p
+            (make-condition 'cl-agent.core:llm-error
+                            :message "bad" :status-code 400))))
+  ;; 瞬态错误：可重试
+  (is (cl-agent.core:error-retryable-p
+       (make-condition 'cl-agent.core:llm-error
+                       :message "rate" :status-code 429)))
+  (is (cl-agent.core:error-retryable-p
+       (make-condition 'cl-agent.core:llm-error
+                       :message "server" :status-code 503)))
+  ;; 无状态码（网络层失败）：可重试
+  (is (cl-agent.core:error-retryable-p
+       (make-condition 'cl-agent.core:llm-error :message "network")))
+  ;; 超时：可重试
+  (is (cl-agent.core:error-retryable-p
+       (make-condition 'cl-agent.core:timeout-error :message "timeout")))
+  ;; 验证/配置错误：不可重试
+  (is (not (cl-agent.core:error-retryable-p
+            (make-condition 'cl-agent.core:validation-error :message "invalid"))))
+  (is (not (cl-agent.core:error-retryable-p
+            (make-condition 'cl-agent.core:missing-api-key-error :message "no key")))))
+
+(test transient-status-classification
+  "测试 HTTP 瞬态状态码分类"
+  (is (cl-agent.core:transient-status-p 429))
+  (is (cl-agent.core:transient-status-p 500))
+  (is (cl-agent.core:transient-status-p 503))
+  (is (cl-agent.core:transient-status-p 408))
+  (is (not (cl-agent.core:transient-status-p 400)))
+  (is (not (cl-agent.core:transient-status-p 401)))
+  (is (not (cl-agent.core:transient-status-p 403)))
+  (is (not (cl-agent.core:transient-status-p 404)))
+  (is (not (cl-agent.core:transient-status-p 200))))

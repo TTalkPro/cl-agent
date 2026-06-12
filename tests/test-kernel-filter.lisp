@@ -154,3 +154,142 @@
     (let ((result (funcall chain (list :tool-name :test-filter-dangerous-op :kernel kernel))))
       (is (getf result :error))
       (is (search "denied" (getf result :message))))))
+
+;;; ============================================================
+;;; 洋葱式 Filter 测试（around / before / after / phase）
+;;; ============================================================
+
+(test test-onion-before-after-order
+  "测试洋葱序：before 正序、after 逆序"
+  (let* ((order nil)
+         (f1 (cl-agent.kernel:make-filter
+              :type :chat :name "f1" :priority 10
+              :before (lambda (req) (push :f1-before order) req)
+              :after (lambda (resp) (push :f1-after order) resp)))
+         (f2 (cl-agent.kernel:make-filter
+              :type :chat :name "f2" :priority 20
+              :before (lambda (req) (push :f2-before order) req)
+              :after (lambda (resp) (push :f2-after order) resp)))
+         (terminal (lambda (req)
+                     (declare (ignore req))
+                     (push :terminal order)
+                     :response))
+         (chain (cl-agent.kernel:build-phase-chain (list f2 f1) :chat terminal)))
+    (is (eq :response (funcall chain :request)))
+    ;; priority 10 在外层：f1-before 最先、f1-after 最后
+    (is (equal '(:f1-before :f2-before :terminal :f2-after :f1-after)
+               (reverse order)))))
+
+(test test-onion-around-short-circuit
+  "测试 around 短路：不调 chain，下游不执行"
+  (let* ((terminal-called nil)
+         (cache (cl-agent.kernel:make-filter
+                 :type :tool :name "cache"
+                 :around (lambda (req chain)
+                           (declare (ignore req chain))
+                           "cached-result")))
+         (terminal (lambda (req)
+                     (declare (ignore req))
+                     (setf terminal-called t)
+                     "real-result"))
+         (chain (cl-agent.kernel:build-phase-chain (list cache) :tool terminal)))
+    (is (string= "cached-result" (funcall chain :request)))
+    (is (null terminal-called))))
+
+(test test-onion-around-retry
+  "测试 around 重试：闭包跨 before/after 段共享状态"
+  (let* ((attempts 0)
+         (retry (cl-agent.kernel:make-filter
+                 :type :tool :name "retry"
+                 :around (lambda (req chain)
+                           (loop
+                             (handler-case
+                                 (return (funcall chain req))
+                               (error ()
+                                 (when (>= attempts 3) (error "give up"))))))))
+         (terminal (lambda (req)
+                     (declare (ignore req))
+                     (incf attempts)
+                     (if (< attempts 3)
+                         (error "flaky")
+                         "ok")))
+         (chain (cl-agent.kernel:build-phase-chain (list retry) :tool terminal)))
+    (is (string= "ok" (funcall chain :request)))
+    (is (= 3 attempts))))
+
+(test test-phase-selection
+  "测试 phase 选择：chat 链只挂 chat filter（含旧类型映射）"
+  (let* ((hits nil)
+         (chat-f (cl-agent.kernel:make-filter
+                  :type :chat :name "c"
+                  :before (lambda (req) (push :chat hits) req)))
+         (tool-f (cl-agent.kernel:make-filter
+                  :type :tool :name "t"
+                  :before (lambda (req) (push :tool hits) req)))
+         (legacy-pre-chat (cl-agent.kernel:make-filter
+                           :type :pre-chat :name "lc"
+                           :before (lambda (req) (push :legacy-chat hits) req)))
+         (legacy-pre-inv (cl-agent.kernel:make-filter
+                          :type :pre-invocation :name "li"
+                          :before (lambda (req) (push :legacy-tool hits) req)))
+         (all (list chat-f tool-f legacy-pre-chat legacy-pre-inv))
+         (terminal (lambda (req) (declare (ignore req)) :done)))
+    ;; chat 链
+    (funcall (cl-agent.kernel:build-phase-chain all :chat terminal) :req)
+    (is (null (set-difference hits '(:chat :legacy-chat))))
+    (is (= 2 (length hits)))
+    ;; tool 链
+    (setf hits nil)
+    (funcall (cl-agent.kernel:build-phase-chain all :tool terminal) :req)
+    (is (null (set-difference hits '(:tool :legacy-tool))))
+    (is (= 2 (length hits)))))
+
+(test test-chat-request-rewrite
+  "测试 chat filter 改写 chat-request 的 tools / tool-choice"
+  (let* ((seen-tools nil)
+         (seen-choice nil)
+         (injector (cl-agent.kernel:make-filter
+                    :type :chat :name "injector"
+                    :before (lambda (req)
+                              (setf (cl-agent.kernel:chat-request-tools req)
+                                    '((:name "injected")))
+                              (setf (cl-agent.kernel:chat-request-tool-choice req)
+                                    :required)
+                              req)))
+         (terminal (lambda (req)
+                     (setf seen-tools (cl-agent.kernel:chat-request-tools req)
+                           seen-choice (cl-agent.kernel:chat-request-tool-choice req))
+                     :resp))
+         (chain (cl-agent.kernel:build-phase-chain (list injector) :chat terminal))
+         (request (cl-agent.kernel:make-chat-request :messages nil)))
+    (funcall chain request)
+    (is (equal '((:name "injected")) seen-tools))
+    (is (eq :required seen-choice))))
+
+(test test-filter-result-clos
+  "测试 CLOS filter-result 控制流（:skip 短路）"
+  (let* ((skipper (cl-agent.kernel:make-filter
+                   :type :tool :name "skipper"
+                   :fn (lambda (req next-fn)
+                         (declare (ignore req next-fn))
+                         (cl-agent.kernel:make-filter-result
+                          :skip :result "skipped-value"))))
+         (terminal (lambda (req) (declare (ignore req)) "real"))
+         (chain (cl-agent.kernel:build-filter-chain (list skipper) terminal)))
+    (is (cl-agent.kernel:filter-result-p
+         (cl-agent.kernel:make-filter-result :continue)))
+    (is (string= "skipped-value" (funcall chain :req)))))
+
+(test test-class-based-filter-apply
+  "测试类式 filter：仅特化 filter-apply 也能挂入链"
+  (let ((applied nil))
+    (defclass test-apply-only-filter (cl-agent.kernel:filter) ())
+    (defmethod cl-agent.kernel:filter-apply ((f test-apply-only-filter) request)
+      (declare (ignore request))
+      (setf applied t)
+      (list :action :continue))
+    (let* ((f (make-instance 'test-apply-only-filter :type :chat :name "apply-only"))
+           (terminal (lambda (req) (declare (ignore req)) :done))
+           (chain (cl-agent.kernel:build-phase-chain (list f) :chat terminal)))
+      (is (eq :done (funcall chain :req)))
+      (is (eq t applied)))))

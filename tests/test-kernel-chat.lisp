@@ -320,9 +320,9 @@
          (filter (cl-agent.kernel:make-filter
                   :type :pre-invocation
                   :name "test-filter"
-                  :fn (lambda (context next-fn)
-                        (push (getf context :tool-name) filter-log)
-                        (funcall next-fn context))))
+                  :fn (lambda (request next-fn)
+                        (push (cl-agent.kernel:req-get request :tool-name) filter-log)
+                        (funcall next-fn request))))
          (mock (make-sequenced-mock
                 ;; 两个工具调用
                 (list :content ""
