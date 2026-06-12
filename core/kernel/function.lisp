@@ -47,16 +47,26 @@
   "检查符号是否标注为 kernel-function"
   (get symbol :kernel-function))
 
-(defun tool-description (symbol)
-  "获取工具描述"
+;; 工具元数据访问器是泛型函数：
+;; - symbol：symbol-plist 工具（declare-tool / deftool）
+;; - tool 实例：原生注册表工具（方法在 tool-registry.lisp）
+
+(defgeneric tool-description (tool)
+  (:documentation "获取工具描述"))
+
+(defmethod tool-description ((symbol symbol))
   (get symbol :description))
 
-(defun tool-parameters (symbol)
-  "获取工具参数规格"
+(defgeneric tool-parameters (tool)
+  (:documentation "获取工具参数规格"))
+
+(defmethod tool-parameters ((symbol symbol))
   (get symbol :parameters))
 
-(defun tool-name (symbol)
-  "获取工具的 keyword 名称"
+(defgeneric tool-name (tool)
+  (:documentation "获取工具的 keyword 名称"))
+
+(defmethod tool-name ((symbol symbol))
   (get symbol :tool-name))
 
 (defun tool-schema (symbol)

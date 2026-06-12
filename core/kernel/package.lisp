@@ -35,6 +35,28 @@
    #:tool-name
    #:validate-tool-args
 
+   ;; ==================== Native Tool Registry ====================
+   #:tool
+   #:make-tool
+   #:tool-instance-p
+   #:tool-handler
+   #:tool-tags
+   #:tool-category
+   #:tool-add-tag
+   #:tool-has-tag-p
+   #:tool-registry
+   #:make-tool-registry
+   #:register-tool
+   #:unregister-tool
+   #:find-tool
+   #:list-tools
+   #:list-tools-by-tags
+   #:get-tools-schema-by-tags
+   #:list-all-tags
+   #:registry-tool-count
+   #:validate-arguments
+   #:tool-to-json-schema
+
    ;; ==================== Schema Tools ====================
    #:params->json-schema
    #:schema-to-hash-table
@@ -149,7 +171,6 @@
    #:with-tools
    #:with-tool-registry
    #:with-active-tags
-   #:with-preset
    ;; Service and filter
    #:add-service
    #:add-filter

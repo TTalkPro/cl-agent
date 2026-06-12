@@ -10,8 +10,7 @@
 ;;;;
 ;;;; 注意：
 ;;;;   - LLM 服务包已移至 llm/package-llm.lisp
-;;;;   - 持久化功能（checkpoint, memory）已移至 cl-agent-memory
-;;;;   - 时间旅行功能已集成到 CheckpointManager（cl-agent.memory:checkpoint-manager）
+;;;;   - Checkpoint（流程状态快照/时间旅行）位于 cl-agent-extra（cl-agent.checkpoint）
 
 ;;; ============================================================
 ;;; Core Infrastructure Package

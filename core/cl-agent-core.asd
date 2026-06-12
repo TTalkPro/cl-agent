@@ -102,6 +102,7 @@
      (:file "function")       ; Tool function metadata
      (:file "macros")         ; deftool/defplugin macros
      (:file "plugin")         ; Plugin metadata
+     (:file "tool-registry")  ; Native tool class + registry (CLOS)
      (:file "context")        ; Context state management
      (:file "service")        ; Service abstraction
      (:file "filter")         ; 4-type filter pipeline

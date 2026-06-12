@@ -17,116 +17,10 @@
 ;;;;   - Tag-based tool filtering
 ;;;;
 ;;;; Note:
-;;;;   This file uses the cl-agent.tools package if available.
-;;;;   Functions are resolved at runtime to avoid circular dependencies.
+;;;;   Tools are first-class kernel citizens (native registry in
+;;;;   tool-registry.lisp) -- no external tools module required.
 
 (in-package #:cl-agent.kernel)
-
-;;; ============================================================
-;;; Runtime Package Resolution (avoid circular dependencies)
-;;; ============================================================
-
-(defun tools-package-available-p ()
-  "Check if cl-agent.tools package is available."
-  (find-package :cl-agent.tools))
-
-(defun call-tools-function (name &rest args)
-  "Call a function from cl-agent.tools package by name.
-   Returns NIL if package not available."
-  (when (tools-package-available-p)
-    (let ((fn (find-symbol (string name) :cl-agent.tools)))
-      (when (and fn (fboundp fn))
-        (apply (symbol-function fn) args)))))
-
-(defun make-default-tool-registry ()
-  "Create a default tool registry if cl-agent.tools is available."
-  (call-tools-function "MAKE-TOOL-REGISTRY"))
-
-;;; ============================================================
-;;; Tools Package Function Wrappers
-;;; ============================================================
-;;; These functions wrap calls to cl-agent.tools package to avoid
-;;; compile-time dependencies while maintaining clean code.
-
-(defun %tools-register-tool (registry tool)
-  "Register a tool to registry."
-  (call-tools-function "REGISTER-TOOL" registry tool))
-
-(defun %tools-unregister-tool (registry tool-name)
-  "Unregister a tool from registry."
-  (call-tools-function "UNREGISTER-TOOL" registry tool-name))
-
-(defun %tools-find-tool (registry tool-name)
-  "Find a tool in registry."
-  (call-tools-function "FIND-TOOL" registry tool-name))
-
-(defun %tools-list-tools (registry)
-  "List all tools in registry."
-  (call-tools-function "LIST-TOOLS" registry))
-
-(defun %tools-list-tools-by-tags (registry tags &key (mode :any))
-  "List tools by tags."
-  (call-tools-function "LIST-TOOLS-BY-TAGS" registry tags :mode mode))
-
-(defun %tools-registry-tool-count (registry)
-  "Get tool count from registry."
-  (or (call-tools-function "REGISTRY-TOOL-COUNT" registry) 0))
-
-(defun %tools-invalidate-cache (registry)
-  "Invalidate registry cache."
-  (call-tools-function "INVALIDATE-CACHE" registry))
-
-(defun %tools-get-tools-schema-by-tags (registry tags &key (mode :any))
-  "Get tools schema by tags."
-  (call-tools-function "GET-TOOLS-SCHEMA-BY-TAGS" registry tags :mode mode))
-
-(defun %tools-tool-to-json-schema (tool)
-  "Convert tool to JSON schema."
-  (call-tools-function "TOOL-TO-JSON-SCHEMA" tool))
-
-(defun %tools-validate-arguments (tool args)
-  "Validate tool arguments."
-  (call-tools-function "VALIDATE-ARGUMENTS" tool args))
-
-(defun %tools-tool-handler (tool)
-  "Get tool handler."
-  (call-tools-function "TOOL-HANDLER" tool))
-
-(defun %tools-tool-name (tool)
-  "Get tool name."
-  (call-tools-function "TOOL-NAME" tool))
-
-(defun %tools-tool-description (tool)
-  "Get tool description."
-  (call-tools-function "TOOL-DESCRIPTION" tool))
-
-(defun %tools-tool-tags (tool)
-  "Get tool tags."
-  (call-tools-function "TOOL-TAGS" tool))
-
-(defun %tools-tool-category (tool)
-  "Get tool category."
-  (call-tools-function "TOOL-CATEGORY" tool))
-
-(defun %tools-tool-add-tag (tool tag)
-  "Add tag to tool."
-  (call-tools-function "TOOL-ADD-TAG" tool tag))
-
-(defun %tools-list-all-tags (registry)
-  "List all tags in registry."
-  (call-tools-function "LIST-ALL-TAGS" registry))
-
-(defun %tools-quick-setup-tools (&key preset security-level)
-  "Quick setup tools with preset."
-  (call-tools-function "QUICK-SETUP-TOOLS" :preset preset :security-level security-level))
-
-(defun %tools-make-tool (&rest initargs)
-  "Create a cl-agent.tools:tool instance (reflectively).
-   Returns NIL if the tools package is not available."
-  (when (tools-package-available-p)
-    (let ((tool-class (find-symbol "TOOL" :cl-agent.tools)))
-      (when tool-class
-        (apply #'make-instance tool-class initargs)))))
 
 ;;; ============================================================
 ;;; Kernel Class
@@ -228,7 +122,7 @@ Returns:
     ;; Create default tool-registry if not provided and tools package is available
     (unless (kernel-tool-registry kernel)
       (setf (kernel-tool-registry kernel)
-            (make-default-tool-registry)))
+            (make-tool-registry)))
     ;; Register plugin tools into the registry
     (dolist (plugin plugins)
       (kernel-add-plugin kernel plugin))
@@ -299,7 +193,7 @@ Returns:
   ;; Add tags if provided
   (when tags
     (dolist (tag tags)
-      (%tools-tool-add-tag tool tag)))
+      (tool-add-tag tool tag)))
   (push tool (builder-tools builder))
   builder)
 
@@ -350,23 +244,6 @@ Returns:
   (setf (builder-active-tags builder) tags)
   (setf (builder-tag-filter-mode builder) mode)
   builder)
-
-(defgeneric with-preset (builder preset &key security-level)
-  (:documentation "Add tools from a preset.
-
-Parameters:
-  BUILDER        - Kernel builder
-  PRESET         - Preset name: :standard :safe :full :file-only :http-only :utility-only
-  SECURITY-LEVEL - Security level: :permissive :standard :strict
-
-Returns:
-  The builder (for chaining)"))
-
-(defmethod with-preset ((builder kernel-builder) preset &key (security-level :standard))
-  "Add tools from a preset."
-  (let ((tools (%tools-quick-setup-tools :preset preset
-                                                  :security-level security-level)))
-    (with-tools builder tools)))
 
 ;;; --- Service and Filter Management ---
 
@@ -448,7 +325,7 @@ Returns:
 (defmethod build-kernel ((builder kernel-builder))
   "Build Kernel from builder."
   (let* ((registry (or (builder-tool-registry builder)
-                       (make-default-tool-registry)))
+                       (make-tool-registry)))
          (kernel (make-kernel
                   :service (builder-service builder)
                   :config (builder-config builder)
@@ -459,7 +336,7 @@ Returns:
                   :context (builder-context builder))))
     ;; Register tools to registry
     (dolist (tool (nreverse (builder-tools builder)))
-      (%tools-register-tool registry tool))
+      (register-tool registry tool))
     kernel))
 
 ;;; ============================================================
@@ -475,7 +352,7 @@ Parameters:
 
 Returns:
   Tool instance, or NIL if not found"
-  (%tools-find-tool (kernel-tool-registry kernel) tool-name))
+  (find-tool (kernel-tool-registry kernel) tool-name))
 
 (defun kernel-find-tool-by-name (kernel name-string)
   "Find a tool by name string.
@@ -513,10 +390,10 @@ Signals:
     (unless tool
       (error "Tool ~A not found in kernel" tool-name))
     (multiple-value-bind (validated-args errors)
-        (%tools-validate-arguments tool args)
+        (validate-arguments tool args)
       (when errors
         (error "Validation errors: ~{~A~^, ~}" errors))
-      (apply (%tools-tool-handler tool) validated-args))))
+      (apply (tool-handler tool) validated-args))))
 
 ;;; ============================================================
 ;;; Query API
@@ -539,9 +416,9 @@ Returns:
          (registry (kernel-tool-registry kernel)))
     (when registry
       (if filter-tags
-          (%tools-get-tools-schema-by-tags registry filter-tags :mode filter-mode)
-          (mapcar #'%tools-tool-to-json-schema
-                  (%tools-list-tools registry))))))
+          (get-tools-schema-by-tags registry filter-tags :mode filter-mode)
+          (mapcar #'tool-to-json-schema
+                  (list-tools registry))))))
 
 (defun kernel-invalidate-tools-cache (kernel)
   "Invalidate the tools cache.
@@ -555,7 +432,7 @@ Returns:
     (setf (kernel-tools-cache kernel) nil)
     ;; Also invalidate registry cache
     (when (kernel-tool-registry kernel)
-      (%tools-invalidate-cache (kernel-tool-registry kernel)))))
+      (invalidate-cache (kernel-tool-registry kernel)))))
 
 (defgeneric kernel-list-tools (kernel &key tags)
   (:documentation "List all registered tools.
@@ -574,13 +451,13 @@ Returns:
          (registry (kernel-tool-registry kernel)))
     (when registry
       (let ((tools (if filter-tags
-                       (%tools-list-tools-by-tags registry filter-tags :mode filter-mode)
-                       (%tools-list-tools registry))))
+                       (list-tools-by-tags registry filter-tags :mode filter-mode)
+                       (list-tools registry))))
         (mapcar (lambda (tool)
-                  (list :name (%tools-tool-name tool)
-                        :description (%tools-tool-description tool)
-                        :tags (%tools-tool-tags tool)
-                        :category (%tools-tool-category tool)))
+                  (list :name (tool-name tool)
+                        :description (tool-description tool)
+                        :tags (tool-tags tool)
+                        :category (tool-category tool)))
                 tools)))))
 
 ;;; ============================================================
@@ -620,7 +497,7 @@ Parameters:
 Returns:
   The kernel (for chaining)"
   (bt:with-lock-held ((kernel-lock kernel))
-    (%tools-register-tool (kernel-tool-registry kernel) tool)
+    (register-tool (kernel-tool-registry kernel) tool)
     (setf (kernel-tools-cache kernel) nil))
   kernel)
 
@@ -635,7 +512,7 @@ Returns:
   The kernel (for chaining)"
   (bt:with-lock-held ((kernel-lock kernel))
     (dolist (tool tools)
-      (%tools-register-tool (kernel-tool-registry kernel) tool))
+      (register-tool (kernel-tool-registry kernel) tool))
     (setf (kernel-tools-cache kernel) nil))
   kernel)
 
@@ -673,7 +550,7 @@ Returns:
     (error "~A is not a plugin" plugin-sym))
   (dolist (tool-sym (plugin-tool-symbols plugin-sym))
     (when (tool-function-p tool-sym)
-      (let ((tool (%tools-make-tool
+      (let ((tool (make-tool
                    :name (tool-name tool-sym)
                    :description (or (tool-description tool-sym) "")
                    :handler (let ((sym tool-sym))
@@ -698,7 +575,7 @@ Parameters:
 Returns:
   The kernel (for chaining)"
   (bt:with-lock-held ((kernel-lock kernel))
-    (%tools-unregister-tool (kernel-tool-registry kernel) tool-name)
+    (unregister-tool (kernel-tool-registry kernel) tool-name)
     (setf (kernel-tools-cache kernel) nil))
   kernel)
 
@@ -797,7 +674,7 @@ Returns:
   Tool count"
   (let ((registry (kernel-tool-registry kernel)))
     (if registry
-        (%tools-registry-tool-count registry)
+        (registry-tool-count registry)
         0)))
 
 (defun kernel-has-tool-p (kernel tool-name)
@@ -821,7 +698,7 @@ Returns:
   Tag list"
   (let ((registry (kernel-tool-registry kernel)))
     (when registry
-      (%tools-list-all-tags registry))))
+      (list-all-tags registry))))
 
 (defmethod print-object ((kernel kernel) stream)
   "Print kernel in a readable format."
