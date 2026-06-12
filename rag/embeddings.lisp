@@ -189,31 +189,5 @@
   (let ((embedding-model (or model (get-default-embedding-model))))
     (embed-batch embedding-model texts)))
 
-(defun cosine-similarity (vec1 vec2)
-  "计算余弦相似度
-
-  参数：
-    VEC1 - 向量 1
-    VEC2 - 向量 2
-
-  返回：
-    相似度（0-1）"
-  (let ((dot-product (loop for v1 across vec1
-                          for v2 across vec2
-                          sum (* v1 v2)))
-        (norm1 (sqrt (loop for v across vec1 sum (* v v))))
-        (norm2 (sqrt (loop for v across vec2 sum (* v v)))))
-    (/ dot-product (* norm1 norm2))))
-
-(defun euclidean-distance (vec1 vec2)
-  "计算欧几里得距离
-
-  参数：
-    VEC1 - 向量 1
-    VEC2 - 向量 2
-
-  返回：
-    距离"
-  (sqrt (loop for v1 across vec1
-               for v2 across vec2
-               sum (expt (- v1 v2) 2))))
+;; cosine-similarity / euclidean-distance 定义在 utils.lisp，
+;; 接受 list 或 vector；此处不要重复定义（vector-only 版本会覆盖它们）。

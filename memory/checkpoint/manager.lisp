@@ -247,12 +247,17 @@ Returns:
                          :checkpoint-id head-id)))))
 
 (defmethod checkpointer-get-lineage ((manager checkpoint-manager) config)
-  "Get checkpoint lineage (ancestor chain)"
+  "Get checkpoint lineage (ancestor chain).
+   Starts from CONFIG's checkpoint-id, or the latest checkpoint when unspecified."
   (let* ((thread-id (config-thread-id config))
-         (checkpoint-id (config-checkpoint-id config))
+         (checkpoint-id (or (config-checkpoint-id config)
+                            (let ((head (checkpointer-load
+                                         manager
+                                         (make-checkpoint-config :thread-id thread-id))))
+                              (when head (checkpoint-id head)))))
          (lineage '()))
 
-    ;; Start from the specified checkpoint
+    ;; Walk the parent chain from the starting checkpoint
     (loop with current-id = checkpoint-id
           while current-id
           do (let ((cp (checkpointer-load
@@ -260,9 +265,11 @@ Returns:
                        (make-checkpoint-config
                         :thread-id thread-id
                         :checkpoint-id current-id))))
-               (when cp
-                 (push cp lineage)
-                 (setf current-id (checkpoint-parent-id cp)))))
+               (if cp
+                   (progn
+                     (push cp lineage)
+                     (setf current-id (checkpoint-parent-id cp)))
+                   (setf current-id nil))))
 
     lineage))
 

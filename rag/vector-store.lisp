@@ -61,12 +61,12 @@
 
   示例：
     (vector-store-add-document store "文本内容" embedding-vector)"
-  (let ((id (cl-agent.core:generate-uuid))
-        (document (make-document
-                  :id id
-                  :content content
-                  :embedding embedding
-                  :metadata metadata)))
+  (let* ((id (cl-agent.core:generate-uuid))
+         (document (make-document
+                    :id id
+                    :content content
+                    :embedding embedding
+                    :metadata metadata)))
     (setf (vector-store-documents store)
           (append (vector-store-documents store)
                   (list document)))

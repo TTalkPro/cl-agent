@@ -168,12 +168,12 @@
     ;; 为每个块创建文档
     (dolist (chunk chunks)
       (let* ((embedding (pop embeddings))
-             (chunk-metadata (when metadata
-                               (let ((table (make-hash-table)))
+             (chunk-metadata (let ((table (make-hash-table :test #'equal)))
+                               (when metadata
                                  (maphash (lambda (k v)
                                             (setf (gethash k table) v))
-                                          metadata)
-                                        table))))
+                                          metadata))
+                               table)))
         (setf (gethash "chunk-id" chunk-metadata)
               (cl-agent.core:generate-uuid))
         (setf (gethash "parent-id" chunk-metadata) doc-id)
