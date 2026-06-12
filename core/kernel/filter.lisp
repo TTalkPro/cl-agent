@@ -173,6 +173,8 @@ Note:
   规范化的过滤器"
   (cond
     ((filter-p filter) filter)
+    ((functionp filter)                              ; 裸函数 (context next-fn)
+     (list :fn filter :type :pre-invocation))
     ((and (listp filter) (getf filter :fn)) filter)  ; 已经是 plist
     (t (error "Invalid filter: ~A. Use make-filter to create filters." filter))))
 

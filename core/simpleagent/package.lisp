@@ -2,27 +2,49 @@
 ;;;; CL-Agent SimpleAgent - Package Definition
 ;;;;
 ;;;; Overview:
-;;;;   Package for simple agent implementations.
+;;;;   Package for the SimpleAgent runtime (part of cl-agent-core).
+;;;;   Contains the base agent protocol, shared utilities and KernelAgent.
+;;;;   ProcessAgent lives in cl-agent-extra (cl-agent.extra.agent).
 
 (defpackage #:cl-agent.simpleagent
   (:use #:common-lisp
         #:cl-agent.core
         #:cl-agent.kernel)
-  (:import-from #:cl-agent.process
-                #:make-event-bus
-                #:make-event-queue
-                #:make-human-loop-manager
-                #:event-bus-subscribe
-                #:event-queue-push
-                #:event-queue-pop
-                #:event-matches-p
-                #:make-event
-                #:process-event
-                #:event-type
-                #:event-name
-                #:event-data)
   (:nicknames #:cla.simpleagent #:simpleagent)
   (:export
+   ;; ==================== Base Agent Protocol ====================
+   #:agent-p
+   #:agent-id
+   #:agent-name
+   #:base-agent
+   #:agent-created-at
+   #:agent-metadata
+
+   ;; ==================== Agent Events ====================
+   #:agent-event
+   #:make-agent-event
+   #:make-agent-event-of-type
+   #:agent-event-type
+   #:agent-event-agent
+   #:agent-event-data
+   #:agent-event-timestamp
+   #:register-agent-handler
+   #:fire-agent-event
+
+   ;; ==================== Agent Settings ====================
+   #:merge-settings
+   #:default-agent-settings
+
+   ;; ==================== Thread-Safe Message Queue ====================
+   #:message-queue
+   #:make-message-queue
+   #:queue-enqueue
+   #:queue-dequeue
+   #:queue-peek
+   #:queue-empty-p
+   #:queue-length
+   #:queue-clear
+
    ;; ==================== Kernel Agent ====================
    #:kernel-agent
    #:make-kernel-agent
@@ -31,6 +53,7 @@
    #:agent-history
    #:agent-system-prompt
    #:agent-settings
+   #:agent-callbacks
 
    ;; Kernel Agent API
    #:agent-chat
@@ -38,55 +61,12 @@
    #:agent-reset
    #:agent-get-history
    #:agent-set-system-prompt
+   #:agent-add-plugin
+   #:agent-add-filter
 
-   ;; ==================== Process Agent ====================
-   #:process-agent
-   #:make-process-agent
-   #:agent-state
-   #:agent-thread
-
-   ;; Process Agent Lifecycle
-   #:agent-start
-   #:agent-stop
-   #:agent-pause
-   #:agent-resume
-   #:agent-running-p
-   #:agent-paused-p
-
-   ;; Process Agent Communication
-   #:agent-send
-   #:agent-receive
-   #:agent-queue-message
-
-   ;; Event Injection (C# Process Framework style)
-   #:agent-inject-event
-   #:agent-subscribe-event
-   #:agent-unsubscribe-event
-   #:agent-event-bus
-   #:agent-event-queue
-
-   ;; Human-in-the-Loop
-   #:agent-human-loop
-   #:agent-request-input
-   #:agent-submit-input
-   #:agent-wait-for-approval
-   #:agent-wait-for-confirmation
-   #:agent-get-pending-inputs
-
-   ;; Process Runtime (Step-based workflows)
-   #:agent-process-runtime
-   #:agent-start-process
-   #:agent-get-process-state
-
-   ;; ==================== Agent Events ====================
-   #:agent-event
+   ;; Kernel Agent Callbacks
    #:agent-on-message
    #:agent-on-tool-call
    #:agent-on-tool-result
    #:agent-on-response
-   #:agent-on-error
-
-   ;; ==================== Common ====================
-   #:agent-p
-   #:agent-id
-   #:agent-name))
+   #:agent-on-error))

@@ -14,21 +14,7 @@
    #:make-standard-id-generator
 
    ;; === 时间戳提供者协议 ===
-   #:make-standard-timestamp-provider
-
-   ;; === 状态协议 ===
-   #:state-p
-   #:make-state
-   #:state-get
-   #:state-set
-   #:state-update
-   #:state-merge
-   #:state-copy
-   #:state-to-plist
-
-   ;; === 执行器协议 ===
-   #:run-workflow
-   #:run-workflow-stream))
+   #:make-standard-timestamp-provider))
 
 (in-package :cl-agent.core.protocols)
 
@@ -55,7 +41,7 @@
     - 保证全局唯一性
     - 适合分布式系统"
   (lambda ()
-    (make-v4-uuid)))
+    (princ-to-string (make-v4-uuid))))
 
 ;;; ============================================================
 ;;; 时间戳提供者协议
@@ -81,9 +67,3 @@
     - 时区无关，适合分布式系统"
   (lambda ()
     (timestamp-to-unix (now))))
-
-;;; ============================================================
-;;; 状态和执行器协议占位符
-;;; ============================================================
-;;; 完整实现在 graph/state.lisp 和 graph/executor.lisp 中
-;;; 这里只导出符号以保持接口一致性

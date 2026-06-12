@@ -131,6 +131,7 @@
    #:kernel-register-tool
    #:kernel-register-tools
    #:kernel-unregister-tool
+   #:kernel-add-plugin
    #:kernel-set-active-tags
    #:kernel-clear-active-tags
 

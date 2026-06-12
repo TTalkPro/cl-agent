@@ -120,6 +120,14 @@
   "Quick setup tools with preset."
   (call-tools-function "QUICK-SETUP-TOOLS" :preset preset :security-level security-level))
 
+(defun %tools-make-tool (&rest initargs)
+  "Create a cl-agent.tools:tool instance (reflectively).
+   Returns NIL if the tools package is not available."
+  (when (tools-package-available-p)
+    (let ((tool-class (find-symbol "TOOL" :cl-agent.tools)))
+      (when tool-class
+        (apply #'make-instance tool-class initargs)))))
+
 ;;; ============================================================
 ;;; Kernel Class
 ;;; ============================================================
@@ -188,7 +196,7 @@ Supports tag-based tool filtering."))
 ;;; Constructor
 ;;; ============================================================
 
-(defun make-kernel (&key service config tool-registry active-tags
+(defun make-kernel (&key service config tool-registry plugins active-tags
                          tag-filter-mode filters context)
   "Create a Kernel instance.
 
@@ -196,6 +204,8 @@ Parameters:
   SERVICE         - Service plist or LLM provider
   CONFIG          - Configuration plist
   TOOL-REGISTRY   - Tool registry for direct tool management
+  PLUGINS         - List of plugin symbols (declare-plugin/defplugin);
+                    their tools are registered into the tool registry
   ACTIVE-TAGS     - Active tags for filtering (nil = no filter)
   TAG-FILTER-MODE - :any or :all (default :any)
   FILTERS         - Filter function list
@@ -219,6 +229,9 @@ Returns:
     (unless (kernel-tool-registry kernel)
       (setf (kernel-tool-registry kernel)
             (make-default-tool-registry)))
+    ;; Register plugin tools into the registry
+    (dolist (plugin plugins)
+      (kernel-add-plugin kernel plugin))
     kernel))
 
 ;;; ============================================================
@@ -638,6 +651,55 @@ Returns:
     (dolist (tool tools)
       (%tools-register-tool (kernel-tool-registry kernel) tool))
     (setf (kernel-tools-cache kernel) nil))
+  kernel)
+
+(defun %plugin-param-type (type)
+  "Normalize symbol-plist param type keywords to tools type keywords."
+  (case type
+    (:int :integer)
+    (:float :number)
+    (:bool :boolean)
+    (otherwise type)))
+
+(defun %plugin-params-to-tool-parameters (parameters)
+  "Convert symbol-plist param specs to tools parameter format.
+
+  Input:  ((name type description &key required-p default) ...)
+  Output: ((name :type TYPE :description DESC :required BOOL [:default V]) ...)"
+  (loop for spec in parameters
+        collect (destructuring-bind (pname ptype pdesc &key required-p default) spec
+                  (append (list pname
+                                :type (%plugin-param-type ptype)
+                                :description pdesc
+                                :required required-p)
+                          (when default (list :default default))))))
+
+(defun kernel-add-plugin (kernel plugin-sym)
+  "Register all tools of a symbol-plist plugin into the kernel's tool registry.
+
+Parameters:
+  KERNEL     - Kernel instance
+  PLUGIN-SYM - Plugin symbol (declared via declare-plugin/defplugin)
+
+Returns:
+  The kernel (for chaining)"
+  (unless (plugin-p plugin-sym)
+    (error "~A is not a plugin" plugin-sym))
+  (dolist (tool-sym (plugin-tool-symbols plugin-sym))
+    (when (tool-function-p tool-sym)
+      (let ((tool (%tools-make-tool
+                   :name (tool-name tool-sym)
+                   :description (or (tool-description tool-sym) "")
+                   :handler (let ((sym tool-sym))
+                              (lambda (&rest args) (apply sym args)))
+                   :parameters (%plugin-params-to-tool-parameters
+                                (tool-parameters tool-sym))
+                   :category (or (get tool-sym :category) :custom)
+                   ;; :sensitive 元数据转换为 :sensitive 标签（approval filter 依赖）
+                   :tags (append (get tool-sym :tags)
+                                 (when (get tool-sym :sensitive) '(:sensitive))))))
+        (when tool
+          (kernel-register-tool kernel tool)))))
   kernel)
 
 (defun kernel-unregister-tool (kernel tool-name)
