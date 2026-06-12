@@ -341,17 +341,16 @@
 返回：
   提供商特定消息格式（hash-table）"
   (declare (ignore provider))
-  (let ((role (if (and (consp message) (not (keywordp (car message))))
-                  ;; cons 格式: (role . content)
-                  (car message)
-                  ;; plist 格式: (:role role :content content)
-                  (getf message :role)))
-        (content (if (and (consp message) (not (keywordp (car message))))
-                     ;; cons 格式: (role . content)
-                     (cdr message)
-                     ;; plist 格式: (:role role :content content)
-                     (getf message :content)))
-        (msg-hash (make-hash-table :test 'equal)))
+  (let* ((dotted-p (and (consp message) (atom (cdr message))))
+         (role (if dotted-p
+                   ;; cons 格式: (role . content)
+                   (car message)
+                   ;; plist 格式: (:role role :content content)
+                   (getf message :role)))
+         (content (if dotted-p
+                      (cdr message)
+                      (getf message :content)))
+         (msg-hash (make-hash-table :test 'equal)))
     ;; 统一输出为 hash-table 格式
     (setf (gethash "role" msg-hash)
           (if (keywordp role)
@@ -438,11 +437,16 @@
   KEY   - 键（字符串或符号）
 
 返回：
-  关联的值，如果不存在则返回 nil"
+  关联的值，如果不存在则返回 nil
+
+说明：
+  也支持 hash-table（json-parse 的返回格式）"
   (let ((string-key (if (symbolp key)
                         (string-downcase (symbol-name key))
                         key)))
-    (cdr (assoc string-key alist :test #'string-equal))))
+    (if (hash-table-p alist)
+        (gethash string-key alist)
+        (cdr (assoc string-key alist :test #'string-equal)))))
 
 (defun parse-chat-response (response provider)
   "解析聊天响应
@@ -469,13 +473,15 @@
     (ecase (provider-name provider)
       (:anthropic
        (let* ((content-list (alist-get parsed "content"))
-              (first-content (first content-list)))
+              (first-content (when (and content-list (plusp (length content-list)))
+                               (elt content-list 0))))
          `(:content ,(alist-get first-content "text")
            :model ,(alist-get parsed "model")
            :usage ,(alist-get parsed "usage"))))
       (:openai
        (let* ((choices (alist-get parsed "choices"))
-              (first-choice (first choices))
+              (first-choice (when (and choices (plusp (length choices)))
+                              (elt choices 0)))
               (message (alist-get first-choice "message")))
          `(:content ,(alist-get message "content")
            :model ,(alist-get parsed "model")

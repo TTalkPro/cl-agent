@@ -532,8 +532,11 @@
 
 注意：
   这是基于公开定价的粗略估算
-  实际成本可能有所不同"
-  (let ((provider (client-provider-name client))
+  实际成本可能有所不同
+  CLIENT 也可以直接传 provider 实例"
+  (let ((provider (if (typep client 'client)
+                      (client-provider-name client)
+                      (cl-agent.core:provider-name client)))
         (input-price 0.0)
         (output-price 0.0))
     (ecase provider
