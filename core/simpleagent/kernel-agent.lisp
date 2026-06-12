@@ -66,6 +66,12 @@
     :reader agent-memory
     :documentation "ChatMemory store（可选；设置后历史由 memory-filter 自管）")
 
+   (memory-filter
+    :initform nil
+    :accessor agent-memory-filter
+    :documentation "Agent 私有的 memory-filter 实例（请求级挂载，
+不污染共享的 kernel）")
+
    (conversation-id
     :initarg :conversation-id
     :initform nil
@@ -89,24 +95,36 @@
 ;;; Constructor
 ;;; ============================================================
 
+(defun ensure-kernel (kernel-or-service)
+  "把 kernel / LLM provider / service 统一为 Kernel 实例。
+
+接受：
+  - kernel 实例：原样返回
+  - 其他（provider 实例、service）：自动包装 (make-kernel :service ...)"
+  (if (typep kernel-or-service 'cl-agent.kernel:kernel)
+      kernel-or-service
+      (make-kernel :service kernel-or-service)))
+
 (defun make-kernel-agent (kernel &key name system-prompt settings callbacks
                                       memory conversation-id)
   "Create a Kernel Agent.
 
 Parameters:
-  KERNEL          - Kernel instance
+  KERNEL          - Kernel 实例，或 LLM provider / service
+                    （自动包装为 Kernel——创建时可指定/替换）
   NAME            - Agent name (optional)
   SYSTEM-PROMPT   - System prompt (optional)
   SETTINGS        - Settings plist (optional)
   CALLBACKS       - 回调 plist 或 callback-registry (optional)
-  MEMORY          - ChatMemory store (optional)；设置后会向 kernel
-                    注册 memory-filter，对话历史由 store 自管
+  MEMORY          - ChatMemory store（可选，创建时可替换为任意实现
+                    mem-get/mem-add/mem-clear 的对象）。历史由 Agent
+                    私有的 memory-filter 自管，不污染共享 kernel
   CONVERSATION-ID - 会话 ID（可选，默认 agent-id）
 
 Returns:
   New kernel-agent instance"
   (let ((agent (make-instance 'kernel-agent
-                              :kernel kernel
+                              :kernel (ensure-kernel kernel)
                               :name (or name "kernel-agent")
                               :system-prompt system-prompt
                               :settings (merge-settings (default-agent-settings) settings)
@@ -114,9 +132,11 @@ Returns:
                               :memory memory
                               :conversation-id conversation-id
                               :context (make-context))))
-    ;; memory 模式：挂载 memory-filter，conversation-id 写入 context
+    ;; memory 模式：构造 Agent 私有 memory-filter（请求级挂载），
+    ;; conversation-id 写入 context —— kernel 零感知、零污染
     (when memory
-      (kernel-add-filter kernel (cl-agent.kernel:make-memory-filter memory))
+      (setf (agent-memory-filter agent)
+            (cl-agent.kernel:make-memory-filter memory))
       (context-set (agent-context agent) :conversation-id
                    (agent-conversation-id agent)))
     ;; Add system message to history if provided
@@ -165,20 +185,23 @@ Returns:
     (handler-bind
         ((error (lambda (condition)
                   (agent-fire agent :on-error condition))))
-      ;; memory 模式只传 delta（历史由 memory-filter 从 store 展开）；
-      ;; 否则传完整本地历史
+      ;; memory 模式只传 delta（历史由 Agent 私有 memory-filter 从 store 展开）；
+      ;; 否则传完整本地历史。回调经 Agent 自己的 callback registry 触发，
+      ;; 不经 kernel —— kernel 对回调零感知。
       (let* ((messages (if memory-p
                            (list (list :role :user :content user-message))
                            (reverse (agent-history agent))))
-             (result (invoke-kernel
+             (result (run-tool-loop
                       kernel messages
                       :settings (list* :system-prompt (agent-system-prompt agent)
-                                       :on-tool-call (lambda (name args)
-                                                       (agent-fire agent :on-tool-call name args))
-                                       :on-tool-result (lambda (name result)
-                                                         (agent-fire agent :on-tool-result name result))
                                        merged-settings)
-                      :context (agent-context agent))))
+                      :context (agent-context agent)
+                      :filters (when (agent-memory-filter agent)
+                                 (list (agent-memory-filter agent)))
+                      :on-tool-call (lambda (name args)
+                                      (agent-fire agent :on-tool-call name args))
+                      :on-tool-result (lambda (name result)
+                                        (agent-fire agent :on-tool-result name result)))))
         ;; Update local history with assistant response
         (let ((response-text (getf result :text)))
           (push (list :role :assistant :content response-text)
@@ -389,11 +412,3 @@ Parameters:
   AGENT      - Kernel agent
   PLUGIN-SYM - Plugin symbol"
   (kernel-add-plugin (agent-kernel agent) plugin-sym))
-
-(defun agent-add-filter (agent filter)
-  "Add a filter to the agent's kernel.
-
-Parameters:
-  AGENT  - Kernel agent
-  FILTER - Filter instance, function or plist"
-  (kernel-add-filter (agent-kernel agent) filter))

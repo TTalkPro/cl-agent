@@ -60,6 +60,14 @@
    #:callback-count
    #:fire-callbacks
 
+   ;; ==================== 工具调用循环（Agent 运行时）====================
+   #:run-tool-loop
+   #:invoke-kernel
+   #:execute-tool-call
+   #:execute-tool-calls
+   #:quick-chat
+   #:chat-with-tools
+
    ;; ==================== Kernel Agent ====================
    #:kernel-agent
    #:make-kernel-agent
@@ -70,7 +78,9 @@
    #:agent-settings
    #:agent-callbacks
    #:agent-memory
+   #:agent-memory-filter
    #:agent-conversation-id
+   #:ensure-kernel
    #:agent-fire
 
    ;; Kernel Agent API
@@ -80,7 +90,6 @@
    #:agent-get-history
    #:agent-set-system-prompt
    #:agent-add-plugin
-   #:agent-add-filter
 
    ;; Kernel Agent Callbacks
    #:agent-on-message
