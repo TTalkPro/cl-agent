@@ -4,7 +4,7 @@
 (require :asdf)
 
 ;; Add paths
-(dolist (dir '("." "core/" "llm/" "memory/" "tools/" "mock/" "simpleagent/"))
+(dolist (dir '("." "core/" "llm/" "memory/" "extra/" "mock/"))
   (pushnew (truename dir) asdf:*central-registry* :test #'equal))
 
 ;; Load quicklisp if available
@@ -26,11 +26,8 @@
 (format t "Loading cl-agent-llm...~%")
 (asdf:load-system :cl-agent-llm)
 
-(format t "Loading cl-agent-tools...~%")
-(asdf:load-system :cl-agent-tools)
-
-(format t "Loading cl-agent-simpleagent...~%")
-(asdf:load-system :cl-agent-simpleagent)
+(format t "Loading cl-agent-extra...~%")
+(asdf:load-system :cl-agent-extra)
 
 (format t "~%All modules loaded successfully!~%~%")
 

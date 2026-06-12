@@ -1,11 +1,12 @@
 ;;;; cl-agent-core.asd
-;;;; CL-Agent Core - Infrastructure + Kernel Framework
+;;;; CL-Agent Core - Infrastructure + Kernel Framework + SimpleAgent
 ;;;;
-;;;; Version: 5.0.0
+;;;; Version: 6.0.0
 ;;;; Author: David
 ;;;;
 ;;;; Overview:
-;;;;   CL-Agent core module providing infrastructure and complete Kernel framework
+;;;;   CL-Agent core module providing infrastructure, the complete Kernel
+;;;;   framework and the SimpleAgent runtime (KernelAgent).
 ;;;;
 ;;;; Architecture:
 ;;;;   - Core infrastructure (conditions, macros, utils, types)
@@ -18,12 +19,16 @@
 ;;;;     - Builder (fluent construction)
 ;;;;     - Filter Chain (4-type pipeline)
 ;;;;     - 3-Tier Invoke API
+;;;;   - SimpleAgent runtime (KernelAgent chat loop)
+;;;;
+;;;; Note:
+;;;;   The Process framework and ProcessAgent live in cl-agent-extra.
 
 (asdf:defsystem #:cl-agent-core
-  :description "CL-Agent Core - Infrastructure + Kernel Framework (v5.0.0)"
+  :description "CL-Agent Core - Infrastructure + Kernel Framework + SimpleAgent (v6.0.0)"
   :author "David"
   :license "MIT"
-  :version "5.0.0"
+  :version "6.0.0"
 
   :depends-on (#:alexandria
                #:serapeum
@@ -104,21 +109,23 @@
      (:file "chat")))         ; 3-tier Invoke API
 
    ;; ============================================================
-   ;; Process Framework
+   ;; SimpleAgent Runtime
    ;; ============================================================
-   (:module "process"
+   (:module "simpleagent"
     :components
     ((:file "package")
-     (:file "event")          ; Event system + Event Bus
-     (:file "step")           ; Step abstraction
-     (:file "state-machine")  ; Finite state machine
-     (:file "human-loop")     ; Human-in-the-loop support
-     (:file "process")        ; Process definition
-     (:file "runtime")))))    ; Process runtime execution
+     (:file "common")         ; Base agent, events, message queue
+     (:file "kernel-agent"))))) ; KernelAgent chat loop
 
 ;; ============================================================
 ;; Changelog
 ;; ============================================================
+;;
+;; v6.0.0:
+;; - Moved Process framework to cl-agent-extra
+;; - Absorbed SimpleAgent (KernelAgent) into core
+;; - ProcessAgent moved to cl-agent-extra (depends on process framework)
+;; - Removed leftover graph protocol placeholders
 ;;
 ;; v5.0.0:
 ;; - Added types.lisp for core data types (Message, ToolCall, Response)

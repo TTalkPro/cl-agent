@@ -1,46 +1,41 @@
 ;;;; cl-agent.asd
 ;;;; CL-Agent - Unified AI Agent Framework (Meta-System)
 ;;;;
-;;;; Version: 5.0.0 (Semantic Kernel + clj-agent Architecture)
+;;;; Version: 6.0.0 (Semantic Kernel + clj-agent Architecture)
 ;;;; Author: David
 ;;;;
 ;;;; Overview:
 ;;;;   This is the meta-system for CL-Agent, aggregating all subsystems.
-;;;;   Architecture matches clj-agent with 7 ASDF modules.
+;;;;   Architecture follows clj-agent: a fat core (protocols + kernel +
+;;;;   agent runtime) with optional capability modules around it.
 ;;;;
 ;;;; Architecture:
-;;;;   Layer 1 - Core:        cl-agent-core (Infrastructure + Full Kernel Framework)
-;;;;   Layer 2 - LLM:         cl-agent-llm (Provider implementations, implements llm-chat protocol)
-;;;;   Layer 3 - SimpleAgent: cl-agent-simpleagent (KernelAgent, ProcessAgent)
-;;;;   Layer 4 - Memory:      cl-agent-memory (Store + Snapshot + Long-term Memory)
-;;;;   Layer 5 - Tools:       cl-agent-tools (Builtin tools, security, resilience)
-;;;;   Layer 6 - RAG:         cl-agent-rag (Retrieval-Augmented Generation)
-;;;;   Layer 7 - MCP:         cl-agent-mcp (Model Context Protocol)
+;;;;   Layer 1 - Core:   cl-agent-core (Infrastructure + Kernel + SimpleAgent)
+;;;;   Layer 2 - LLM:    cl-agent-llm (Provider implementations, implements llm-chat protocol)
+;;;;   Layer 3 - Memory: cl-agent-memory (Store + Snapshot + Long-term Memory)
+;;;;   Layer 4 - RAG:    cl-agent-rag (Retrieval-Augmented Generation)
+;;;;   Layer 5 - MCP:    cl-agent-mcp (Model Context Protocol)
+;;;;   Layer 6 - Extra:  cl-agent-extra (Process framework, Tools, ProcessAgent)
 ;;;;
 ;;;; Usage:
 ;;;;   (asdf:load-system :cl-agent)
 ;;;;
 ;;;; Loading Individual Subsystems:
-;;;;   (asdf:load-system :cl-agent-core)        ; Infrastructure + Full Kernel
-;;;;   (asdf:load-system :cl-agent-llm)         ; LLM Provider implementations
-;;;;   (asdf:load-system :cl-agent-simpleagent) ; Simple agent implementations
-;;;;   (asdf:load-system :cl-agent-memory)      ; Unified memory management
-;;;;   (asdf:load-system :cl-agent-tools)       ; Tools system with builtins
-;;;;   (asdf:load-system :cl-agent-rag)         ; RAG pipeline
-;;;;   (asdf:load-system :cl-agent-mcp)         ; MCP client/server
+;;;;   (asdf:load-system :cl-agent-core)   ; Infrastructure + Kernel + SimpleAgent
+;;;;   (asdf:load-system :cl-agent-llm)    ; LLM Provider implementations
+;;;;   (asdf:load-system :cl-agent-memory) ; Unified memory management
+;;;;   (asdf:load-system :cl-agent-rag)    ; RAG pipeline
+;;;;   (asdf:load-system :cl-agent-mcp)    ; MCP client/server
+;;;;   (asdf:load-system :cl-agent-extra)  ; Process framework + Tools + ProcessAgent
 ;;;;
-;;;; Major Changes (v5.0.0):
-;;;;   - Restructured to match clj-agent architecture (7 modules)
-;;;;   - Added cl-agent-simpleagent for KernelAgent/ProcessAgent
-;;;;   - cl-agent-tools with tags-based filtering system
-;;;;   - Added cl-agent-mcp for Model Context Protocol
-;;;;   - Enhanced memory module with long-term memory types
-;;;;   - Enhanced RAG module with multiple splitters and Kernel integration
-;;;;   - 3-tier Invoke API in Kernel (invoke-tool, invoke-chat, invoke)
-;;;;   - Builder pattern for Kernel construction
-;;;;   - Service abstraction for LLM integration
+;;;; Major Changes (v6.0.0):
+;;;;   - Core restructured: Process framework moved out, SimpleAgent moved in
+;;;;   - New cl-agent-extra module: process framework + tools + ProcessAgent
+;;;;   - Removed cl-agent-simpleagent and cl-agent-tools as standalone systems
+;;;;   - Removed remaining graph engine leftovers (process is the only workflow story)
 ;;;;
 ;;;; Changelog:
+;;;;   v6.0.0 - Core = infra + kernel + simpleagent; extras split out; graph leftovers removed
 ;;;;   v5.0.0 - clj-agent architecture alignment, 7 modules
 ;;;;   v4.0.0 - Semantic Kernel architecture
 ;;;;   v3.0.0 - Initial modular design
@@ -49,29 +44,26 @@
   :description "Unified AI Agent Framework - Meta System (Semantic Kernel + clj-agent)"
   :author "David"
   :license "MIT"
-  :version "5.0.0"
+  :version "6.0.0"
 
   ;; Meta-system contains no components, only declares dependencies
-  :depends-on (;; Layer 1: Core (Kernel functions and plugins)
+  :depends-on (;; Layer 1: Core (Infrastructure + Kernel + SimpleAgent)
                #:cl-agent-core
 
                ;; Layer 2: LLM (Provider implementations)
                #:cl-agent-llm
 
-               ;; Layer 3: SimpleAgent (Agent implementations)
-               #:cl-agent-simpleagent
-
-               ;; Layer 4: Memory (Unified memory management)
+               ;; Layer 3: Memory (Unified memory management)
                #:cl-agent-memory
 
-               ;; Layer 5: Tools (Builtin tools, security, resilience)
-               #:cl-agent-tools
-
-               ;; Layer 6: RAG (Retrieval-Augmented Generation)
+               ;; Layer 4: RAG (Retrieval-Augmented Generation)
                #:cl-agent-rag
 
-               ;; Layer 7: MCP (Model Context Protocol)
-               #:cl-agent-mcp)
+               ;; Layer 5: MCP (Model Context Protocol)
+               #:cl-agent-mcp
+
+               ;; Layer 6: Extra (Process framework + Tools + ProcessAgent)
+               #:cl-agent-extra)
 
   :in-order-to ((asdf:test-op (asdf:test-op #:cl-agent-test))))
 
@@ -86,6 +78,7 @@
   :version "3.0.0"
 
   :depends-on (#:cl-agent
+               #:cl-agent-mock
                #:fiveam)
 
   :serial t
@@ -123,4 +116,3 @@
 
   :perform (asdf:test-op (op c)
              (uiop:symbol-call :fiveam :run! :cl-agent/tests)))
-

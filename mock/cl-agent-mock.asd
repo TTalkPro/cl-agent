@@ -9,7 +9,7 @@
 
   :depends-on (#:cl-agent-core
                #:cl-agent-llm
-               #:cl-agent-tools)
+               #:cl-agent-extra)
 
   :serial t
   :components ((:file "package")
