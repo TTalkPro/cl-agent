@@ -432,7 +432,7 @@
 ;;; ============================================================
 
 (defun registry-tool-count (registry)
-  "获取注册表中的工具总数
+  "获取注册表中的工具总数（直接注册的工具 + provider 工具）
 
 参数:
   REGISTRY - 注册表实例
@@ -440,7 +440,18 @@
 返回:
   工具数量（整数）"
   (ensure-cache-valid registry)
-  (hash-table-count (registry-tool-cache registry)))
+  (let ((cache (registry-tool-cache registry))
+        (direct (provider-tools registry))
+        (count 0))
+    ;; 直接注册的工具优先
+    (incf count (hash-table-count direct))
+    ;; provider 工具中未被直接工具遮蔽的部分
+    (maphash (lambda (name entry)
+               (declare (ignore entry))
+               (unless (gethash name direct)
+                 (incf count)))
+             cache)
+    count))
 
 (defun registry-provider-count (registry)
   "获取注册表中的提供者数量

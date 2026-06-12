@@ -1,9 +1,9 @@
 ;;;; process-agent.lisp
-;;;; CL-Agent SimpleAgent - Process Agent
+;;;; CL-Agent Extra - Process Agent
 ;;;;
 ;;;; Overview:
 ;;;;   Agent that runs in a background thread with pause/resume support.
-;;;;   Uses message queues for communication and integrates with core/process
+;;;;   Uses message queues for communication and integrates with the process
 ;;;;   framework for event-driven workflows and human-in-the-loop.
 ;;;;
 ;;;; Usage:
@@ -20,7 +20,7 @@
 ;;;;     (agent-resume agent)
 ;;;;     (agent-stop agent))
 
-(in-package #:cl-agent.simpleagent)
+(in-package #:cl-agent.extra.agent)
 
 ;;; ============================================================
 ;;; Agent State
@@ -98,7 +98,7 @@
     :documentation "Event type -> handler alist"))
 
   (:documentation "Agent that runs in background thread with pause/resume.
-Integrates with core/process framework for event-driven workflows."))
+Integrates with the process framework for event-driven workflows."))
 
 ;;; ============================================================
 ;;; Constructor
