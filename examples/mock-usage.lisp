@@ -11,7 +11,7 @@
 
 ;; Set up paths to load from current project directory first
 (let ((root (make-pathname :directory (butlast (pathname-directory *load-truename*)))))
-  (dolist (d '("" "core/" "llm/" "tools/" "mock/"))
+  (dolist (d '("" "core/" "llm/" "extra/" "mock/"))
     (pushnew (merge-pathnames d root) asdf:*central-registry* :test #'equal)))
 
 (ql:quickload :cl-agent-mock :silent t)

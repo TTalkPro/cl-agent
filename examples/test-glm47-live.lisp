@@ -20,14 +20,13 @@
 
 ;; Set up paths to load from current project directory first
 (let ((root (make-pathname :directory (butlast (pathname-directory *load-truename*)))))
-  (dolist (d '("" "core/" "llm/" "tools/" "simpleagent/"))
+  (dolist (d '("" "core/" "llm/" "extra/"))
     (pushnew (merge-pathnames d root) asdf:*central-registry* :test #'equal)))
 
 (format t "~%========================================~%")
-(format t "Loading cl-agent-tools...~%")
-(ql:quickload :cl-agent-tools :silent t)
-(format t "Loading cl-agent-simpleagent...~%")
-(ql:quickload :cl-agent-simpleagent :silent t)
+(format t "Loading cl-agent-extra...~%")
+(ql:quickload :cl-agent-extra :silent t)
+(format t "SimpleAgent now part of cl-agent-core~%")
 (format t "All systems loaded successfully!~%")
 (format t "========================================~%")
 

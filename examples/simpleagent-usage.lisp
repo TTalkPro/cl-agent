@@ -174,54 +174,54 @@
   (format t "~%=== Example 4: Process Agent with Events ===~%")
 
   (let* ((kernel (cl-agent.kernel:make-kernel :provider provider))
-         (agent (cl-agent.simpleagent:make-process-agent kernel
+         (agent (cl-agent.extra.agent:make-process-agent kernel
                   :name "event-agent"
                   :system-prompt "You are an event-aware assistant.")))
 
     ;; Subscribe to events
-    (cl-agent.simpleagent:agent-subscribe-event agent :external
+    (cl-agent.extra.agent:agent-subscribe-event agent :external
       (lambda (event)
         (format t "  [Event Handler] Received external event: ~A - ~A~%"
                 (cl-agent.process:event-name event)
                 (cl-agent.process:event-data event))))
 
-    (cl-agent.simpleagent:agent-subscribe-event agent :notification
+    (cl-agent.extra.agent:agent-subscribe-event agent :notification
       (lambda (event)
         (format t "  [Event Handler] Notification: ~A~%"
                 (cl-agent.process:event-data event))))
 
     ;; Start the agent
     (format t "Starting process agent...~%")
-    (cl-agent.simpleagent:agent-start agent)
+    (cl-agent.extra.agent:agent-start agent)
     (sleep 0.2)  ; Let agent start
 
     ;; Inject events
     (format t "~%Injecting events:~%")
-    (cl-agent.simpleagent:agent-inject-event agent :external "data-ready"
+    (cl-agent.extra.agent:agent-inject-event agent :external "data-ready"
       :data '(:source "sensor-1" :value 42))
     (sleep 0.1)
 
-    (cl-agent.simpleagent:agent-inject-event agent :notification "alert"
+    (cl-agent.extra.agent:agent-inject-event agent :notification "alert"
       :data "Temperature threshold exceeded")
     (sleep 0.1)
 
     ;; Send a message
     (format t "~%Sending message to agent:~%")
-    (cl-agent.simpleagent:agent-send agent "Process the incoming data")
+    (cl-agent.extra.agent:agent-send agent "Process the incoming data")
     (sleep 0.5)
 
     ;; Receive response
-    (let ((response (cl-agent.simpleagent:agent-receive agent :timeout 2)))
+    (let ((response (cl-agent.extra.agent:agent-receive agent :timeout 2)))
       (when response
         (format t "Agent response: ~A~%" response)))
 
     ;; Check agent state
-    (format t "~%Agent state: ~A~%" (cl-agent.simpleagent:agent-state agent))
-    (format t "Agent running: ~A~%" (cl-agent.simpleagent:agent-running-p agent))
+    (format t "~%Agent state: ~A~%" (cl-agent.extra.agent:agent-state agent))
+    (format t "Agent running: ~A~%" (cl-agent.extra.agent:agent-running-p agent))
 
     ;; Stop the agent
     (format t "~%Stopping agent...~%")
-    (cl-agent.simpleagent:agent-stop agent)
+    (cl-agent.extra.agent:agent-stop agent)
     (format t "Agent stopped.~%")))
 
 ;;; ============================================================
@@ -233,19 +233,19 @@
   (format t "~%=== Example 5: Human-in-the-Loop ===~%")
 
   (let* ((kernel (cl-agent.kernel:make-kernel :provider provider))
-         (agent (cl-agent.simpleagent:make-process-agent kernel
+         (agent (cl-agent.extra.agent:make-process-agent kernel
                   :name "hitl-agent"
                   :system-prompt "You are an assistant that requires approval for important actions.")))
 
     ;; Start agent
-    (cl-agent.simpleagent:agent-start agent)
+    (cl-agent.extra.agent:agent-start agent)
     (sleep 0.1)
 
     ;; Simulate a scenario requiring approval
     (format t "Simulating approval workflow...~%")
 
     ;; Create an approval request
-    (let ((request-id (cl-agent.simpleagent:agent-request-input agent
+    (let ((request-id (cl-agent.extra.agent:agent-request-input agent
                         :type :approval
                         :prompt "Deploy to production?"
                         :description "This will update the live system"
@@ -254,14 +254,14 @@
 
       ;; Show pending requests
       (format t "Pending requests: ~A~%"
-              (length (cl-agent.simpleagent:agent-get-pending-inputs agent)))
+              (length (cl-agent.extra.agent:agent-get-pending-inputs agent)))
 
       ;; Simulate user approval (in real usage, this would come from UI)
       (format t "Simulating user approval...~%")
       (bordeaux-threads:make-thread
         (lambda ()
           (sleep 0.3)
-          (cl-agent.simpleagent:agent-submit-input agent request-id
+          (cl-agent.extra.agent:agent-submit-input agent request-id
             :value "approved"
             :approved-p t
             :comment "Looks good!")))
@@ -269,10 +269,10 @@
       ;; Wait for result
       (sleep 0.5)
       (format t "After approval, pending: ~A~%"
-              (length (cl-agent.simpleagent:agent-get-pending-inputs agent))))
+              (length (cl-agent.extra.agent:agent-get-pending-inputs agent))))
 
     ;; Stop agent
-    (cl-agent.simpleagent:agent-stop agent)))
+    (cl-agent.extra.agent:agent-stop agent)))
 
 ;;; ============================================================
 ;;; Example 6: Memory Persistence

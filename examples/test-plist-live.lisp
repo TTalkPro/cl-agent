@@ -9,7 +9,7 @@
 
 ;; Set up paths to load from current project directory first
 (let ((root (make-pathname :directory (butlast (pathname-directory *load-truename*)))))
-  (dolist (d '("" "core/" "llm/" "tools/"))
+  (dolist (d '("" "core/" "llm/" "extra/"))
     (pushnew (merge-pathnames d root) asdf:*central-registry* :test #'equal)))
 
 (ql:quickload :cl-agent-llm :silent t)
@@ -115,7 +115,7 @@
 (format t "~%--- TEST 3: Tool Calling ---~%")
 
 ;; Load tools module for make-simple-tool
-(ql:quickload :cl-agent-tools :silent t)
+(ql:quickload :cl-agent-extra :silent t)
 
 ;; Create tool objects using the handlers defined by deftool
 ;; The deftool macro defines both metadata AND the function

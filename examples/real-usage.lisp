@@ -187,60 +187,6 @@
       (format t "错误: ~A~%" (cl-agent.llm:llm-error-message condition)))))
 
 ;;; ============================================================
-;;; 工作流使用示例
-;;; ============================================================
-
-(defun example-workflow-with-zhipu ()
-  "示例 6: 使用 ZhipuAI 的工作流"
-  (format t "~%=== 示例 6: 使用 ZhipuAI 的工作流 ===~%")
-
-  (handler-case
-      (let* ((provider (cl-agent.llm.providers:make-zhipu-provider))
-             (client (cl-agent.llm:make-llm-client :provider provider))
-
-             ;; 创建工作流
-             (workflow (cl-agent.graph:make-workflow
-                        :name "分析工作流"
-                        :strategy :sequential)))
-
-        ;; 添加节点
-        (cl-agent.graph:workflow-add-node
-         workflow :analyze
-         (lambda (state)
-           (format t "  [步骤1] 分析数据...~%")
-           (cl-agent.graph:state-set state :analyzed t)))
-
-        (cl-agent.graph:workflow-add-node
-         workflow :process
-         (lambda (state)
-           (format t "  [步骤2] 处理数据...~%")
-           (cl-agent.graph:state-set state :processed t)))
-
-        (cl-agent.graph:workflow-add-node
-         workflow :report
-         (lambda (state)
-           (format t "  [步骤3] 生成报告...~%")
-           (cl-agent.graph:state-set state :report "分析完成")))
-
-        ;; 添加边
-        (cl-agent.graph:workflow-add-edge workflow :analyze :process)
-        (cl-agent.graph:workflow-add-edge workflow :process :report)
-
-        ;; 设置入口
-        (cl-agent.graph:workflow-set-entry workflow :analyze)
-
-        ;; 运行工作流
-        (format t "运行工作流:~%")
-        (let ((final-state (cl-agent.graph:workflow-run
-                            workflow
-                            (cl-agent.graph:make-state)
-                            :verbose t)))
-          (format t "~%最终状态: ~A~%" final-state)))
-
-    (cl-agent.llm:missing-api-key-error (condition)
-      (format t "错误: ~A~%" (cl-agent.llm:llm-error-message condition)))))
-
-;;; ============================================================
 ;;; 运行所有示例
 ;;; ============================================================
 
@@ -259,7 +205,6 @@
   (example-zhipu-reasoning-content)
   (example-openai-basic)
   (example-agent-with-zhipu)
-  (example-workflow-with-zhipu)
 
   (format t "~%========================================")
   (format t "~%  所有示例运行完成")

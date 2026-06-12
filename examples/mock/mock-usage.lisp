@@ -102,56 +102,6 @@
         (format t "Agent 响应: ~A~%" response)))))
 
 ;;; ============================================================
-;;; Mock 工作流使用示例
-;;; ============================================================
-
-(defun example-mock-workflow ()
-  "示例 4: 使用 Mock 的工作流"
-  (format t "~%=== 示例 4: 使用 Mock 的工作流 ===~%")
-
-  (let* ((mock-provider (cl-agent.mock:make-quick-mock :smart))
-         (client (cl-agent.llm:make-llm-client :provider mock-provider))
-
-         ;; 创建工作流
-         (workflow (cl-agent.graph:make-workflow
-                    :name "分析工作流"
-                    :strategy :sequential)))
-
-    ;; 添加节点
-    (cl-agent.graph:workflow-add-node
-     workflow :analyze
-     (lambda (state)
-       (format t "  [步骤1] 分析数据...~%")
-       (cl-agent.graph:state-set state :analyzed t)))
-
-    (cl-agent.graph:workflow-add-node
-     workflow :process
-     (lambda (state)
-       (format t "  [步骤2] 处理数据...~%")
-       (cl-agent.graph:state-set state :processed t)))
-
-    (cl-agent.graph:workflow-add-node
-     workflow :report
-     (lambda (state)
-       (format t "  [步骤3] 生成报告...~%")
-       (cl-agent.graph:state-set state :report "分析完成")))
-
-    ;; 添加边
-    (cl-agent.graph:workflow-add-edge workflow :analyze :process)
-    (cl-agent.graph:workflow-add-edge workflow :process :report)
-
-    ;; 设置入口
-    (cl-agent.graph:workflow-set-entry workflow :analyze)
-
-    ;; 运行工作流
-    (format t "运行工作流:~%")
-    (let ((final-state (cl-agent.graph:workflow-run
-                        workflow
-                        (cl-agent.graph:make-state)
-                        :verbose t)))
-      (format t "~%最终状态: ~A~%" final-state))))
-
-;;; ============================================================
 ;;; 运行所有 Mock 示例
 ;;; ============================================================
 
@@ -167,8 +117,7 @@
   (example-mock-quick-chat)
   (example-mock-with-client-macro)
   (example-mock-agent)
-  (example-mock-workflow)
-
+  
   (format t "~%========================================")
   (format t "~%  所有 Mock 示例运行完成")
   (format t "~%========================================~%"))
