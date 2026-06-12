@@ -137,12 +137,12 @@
   (let ((calc (cl-agent.mock:make-calculator-tool)))
 
     ;; 执行计算
-    (let ((result (cl-agent.tools:tool-execute
+    (let ((result (cl-agent.mock::tool-execute
                    calc
                    '(:expression "1+1"))))
     (format t "1+1 = ~A~%" (getf result :result)))
 
-    (let ((result (cl-agent.tools:tool-execute
+    (let ((result (cl-agent.mock::tool-execute
                    calc
                    '(:expression "2*3+4"))))
     (format t "2*3+4 = ~A~%" (getf result :result)))))
@@ -154,7 +154,7 @@
   (let ((search (cl-agent.mock:make-search-tool)))
 
     ;; 执行搜索
-    (let ((result (cl-agent.tools:tool-execute
+    (let ((result (cl-agent.mock::tool-execute
                    search
                    '(:query "Common Lisp 编程"))))
       (format t "搜索结果:~%")
@@ -167,19 +167,19 @@
   (let ((file (cl-agent.mock:make-file-tool)))
 
     ;; 读取文件
-    (let ((result (cl-agent.tools:tool-execute
+    (let ((result (cl-agent.mock::tool-execute
                    file
                    '(:action :read :path "/tmp/test.txt"))))
       (format t "读取文件: ~A~%" (getf result :result)))
 
     ;; 写入文件
-    (let ((result (cl-agent.tools:tool-execute
+    (let ((result (cl-agent.mock::tool-execute
                    file
                    '(:action :write :path "/tmp/test.txt" :content "测试内容"))))
       (format t "写入文件: ~A~%" (getf result :metadata)))
 
     ;; 列出目录
-    (let ((result (cl-agent.tools:tool-execute
+    (let ((result (cl-agent.mock::tool-execute
                    file
                    '(:action :list :path "/tmp"))))
       (format t "目录内容: ~A~%" (getf result :result)))))
@@ -194,8 +194,8 @@
     (format t "工具包包含 ~D 个工具:~%" (length toolkit))
     (dolist (tool toolkit)
       (format t "  - ~A: ~A~%"
-              (cl-agent.tools:tool-name tool)
-              (cl-agent.tools:tool-description tool)))))
+              (cl-agent.mock::tool-name tool)
+              (cl-agent.mock::tool-description tool)))))
 
 ;;; ============================================================
 ;;; 集成示例：Mock LLM + Mock 工具
@@ -213,11 +213,11 @@
 
       ;; 注册工具
       (dolist (tool toolkit)
-        (cl-agent.tools:register-tool
-         (cl-agent.tools:tool-name tool)
-         (cl-agent.tools:tool-description tool)
+        (cl-agent.kernel:register-tool
+         (cl-agent.mock::tool-name tool)
+         (cl-agent.mock::tool-description tool)
          (lambda (input &key context)
-           (cl-agent.tools:tool-execute tool input :context context))))
+           (cl-agent.mock::tool-execute tool input :context context))))
 
       ;; 模拟对话
       (format t "用户: 帮我计算 123 * 456~%")

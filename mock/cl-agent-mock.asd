@@ -8,8 +8,7 @@
   :version "1.0.0"
 
   :depends-on (#:cl-agent-core
-               #:cl-agent-llm
-               #:cl-agent-extra)
+               #:cl-agent-llm)
 
   :serial t
   :components ((:file "package")

@@ -140,7 +140,7 @@
              (client (cl-agent.llm:make-llm-client :provider provider))
 
              ;; 创建简单工具
-             (calculator (cl-agent.tools:make-tool
+             (calculator (cl-agent.kernel:make-tool
                           :calculator
                           "执行数学计算"
                           (lambda (input &key context)
@@ -161,10 +161,10 @@
                                 :required (list "expression")))))
 
         ;; 注册工具
-        (cl-agent.tools:register-tool
+        (cl-agent.kernel:register-tool
          :calculator
-         (cl-agent.tools:tool-description calculator)
-         (cl-agent.tools:tool-execute-fn calculator))
+         (cl-agent.mock::tool-description calculator)
+         (cl-agent.mock::tool-execute-fn calculator))
 
         ;; 创建 Agent
         (let ((agent (cl-agent.agent:make-agent

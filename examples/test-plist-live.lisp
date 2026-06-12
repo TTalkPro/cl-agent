@@ -120,7 +120,7 @@
 ;; Create tool objects using the handlers defined by deftool
 ;; The deftool macro defines both metadata AND the function
 (defparameter *weather-tool*
-  (cl-agent.tools:make-simple-tool
+  (cl-agent.kernel:make-tool
    :get_current_weather
    (cl-agent.kernel:tool-description 'get-current-weather)
    #'get-current-weather  ; Function defined by deftool
@@ -128,7 +128,7 @@
                  (:unit :type :string :description "温度单位" :default "celsius"))))
 
 (defparameter *calc-tool*
-  (cl-agent.tools:make-simple-tool
+  (cl-agent.kernel:make-tool
    :calculate
    (cl-agent.kernel:tool-description 'calculate)
    #'calculate  ; Function defined by deftool

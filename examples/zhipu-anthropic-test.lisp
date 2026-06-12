@@ -49,23 +49,18 @@
   (format t "~%=== Creating Agent with Zhipu ===~%")
 
   ;; 使用智谱原生端点（推荐）
-  (let* ((client (cl-agent.llm:make-client
-                     :provider :zhipu
+  (let* ((provider (cl-agent.llm:make-provider :zhipu
                      :model "glm-4-flash"
                      :api-key (cl-agent.core:get-env "ZHIPU_API_KEY")))
-         (memory (cl-agent.memory:make-agent-memory
-                  :context-store (cl-agent.memory:make-memory-store-backend)
-                  :persistent-store (cl-agent.memory:make-sqlite-store-backend
-                                             :db-path "/tmp/agent-memory.db")
-                  :auto-archive t))
-         (agent (cl-agent.simpleagent:create-agent
-                 :model client
-                 :prompt "You are a helpful assistant."
-                 :checkpointer memory
-                 :name "zhipu-agent")))
+         (kernel (cl-agent.kernel:make-kernel :service provider))
+         ;; ChatMemory：对话历史由 memory-filter 按 conversation-id 自管
+         (agent (cl-agent.simpleagent:make-kernel-agent kernel
+                 :name "zhipu-agent"
+                 :system-prompt "You are a helpful assistant."
+                 :memory (cl-agent.kernel:make-in-memory-chat-store))))
 
     ;; 测试 Agent
-    (let ((result (cl-agent.simpleagent:agent-run agent "你好，请介绍一下自己" :verbose t)))
+    (let ((result (cl-agent.simpleagent:agent-chat agent "你好，请介绍一下自己")))
       (format t "~%Agent response: ~A~%" result))
     agent))
 

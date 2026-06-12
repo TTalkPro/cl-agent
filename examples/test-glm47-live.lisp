@@ -49,7 +49,7 @@
 ;;; ============================================================
 
 (defparameter *weather-tool*
-  (cl-agent.tools:make-simple-tool
+  (cl-agent.kernel:make-tool
    :get_current_weather
    "获取指定城市的当前天气信息"
    (lambda (&key city unit)
@@ -60,7 +60,7 @@
    :tags '(:utility :weather)))
 
 (defparameter *calculate-tool*
-  (cl-agent.tools:make-simple-tool
+  (cl-agent.kernel:make-tool
    :calculate
    "计算数学表达式的结果"
    (lambda (&key expression)
