@@ -19,7 +19,7 @@
 
 (defparameter +chat-options-slots+
   '(model temperature max-tokens top-p top-k stop-sequences
-    frequency-penalty presence-penalty
+    frequency-penalty presence-penalty extra-params
     tool-callbacks tool-names tool-context
     internal-tool-execution-enabled max-tool-iterations)
   "chat-options 全部槽位（合并/拷贝时枚举用）")
@@ -49,6 +49,10 @@
    (presence-penalty
     :initarg :presence-penalty
     :documentation "存在惩罚")
+   (extra-params
+    :initarg :extra-params
+    :documentation "厂商专有参数逃生通道（plist，直接并入请求体，
+对标 Spring AI 各厂商 Options 的扩展字段 / clj-agent :extra-body）")
    (tool-callbacks
     :initarg :tool-callbacks
     :documentation "tool-callback 实例列表（运行时工具）")
@@ -70,14 +74,17 @@
 (defun make-chat-options (&rest initargs
                           &key model temperature max-tokens top-p top-k
                                stop-sequences frequency-penalty presence-penalty
+                               extra-params
                                tool-callbacks tool-names tool-context
                                internal-tool-execution-enabled max-tool-iterations)
   "创建 chat-options。只有显式传入的选项才算\"已设置\"。
 
 示例：
-  (make-chat-options :temperature 0.3 :max-tokens 1024)"
+  (make-chat-options :temperature 0.3 :max-tokens 1024)
+  (make-chat-options :extra-params '(:seed 42 :response-format ...))"
   (declare (ignore model temperature max-tokens top-p top-k
                    stop-sequences frequency-penalty presence-penalty
+                   extra-params
                    tool-callbacks tool-names tool-context
                    internal-tool-execution-enabled max-tool-iterations))
   (apply #'make-instance 'chat-options initargs))
@@ -115,6 +122,10 @@
 
 (defun chat-options-presence-penalty (options)
   (options-slot options 'presence-penalty))
+
+(defun chat-options-extra-params (options)
+  "厂商专有参数 plist（未设置返回 NIL）"
+  (options-slot options 'extra-params))
 
 (defun chat-options-tool-callbacks (options)
   (options-slot options 'tool-callbacks))
