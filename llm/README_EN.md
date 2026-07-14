@@ -289,24 +289,21 @@ Different providers have different tool schema formats, the module handles conve
     (format t "Timeout: ~A~%" e)))
 ```
 
-## Integration with Kernel
+## Integrating with ChatClient
 
 ```lisp
-;; Create Service
-(defvar *service*
-  (make-service-from-client *claude*))
+;; Create a ChatModel in one step (recommended entry point)
+(defvar *model*
+  (cl-agent.llm:create-chat-model :anthropic
+    :model "claude-sonnet-4-20250514"))
 
-;; Or create manually
-(defvar *service*
-  (make-service
-    :provider *claude*
-    :chat-fn (lambda (messages tools settings)
-               (chat *claude* messages
-                     :tools tools
-                     :temperature (getf settings :temperature)))
-    :build-result-msgs-fn #'build-result-messages))
+;; Or adapt an existing provider
+(defvar *model*
+  (cl-agent.chat:make-provider-chat-model
+    (make-anthropic-provider)
+    :default-options (cl-agent.chat:make-chat-options :temperature 0.3)))
 
-;; Use with Kernel
-(defvar *kernel*
-  (make-kernel :service *service*))
+;; Use with ChatClient
+(defvar *client* (cl-agent.client:make-chat-client *model*))
+(cl-agent.client:chat *client* "Hello")
 ```

@@ -20,7 +20,6 @@
 (defpackage #:cl-agent.llm
   (:use #:common-lisp
         #:cl-agent.core)
-  (:import-from #:cl-agent.kernel #:llm-chat)
   (:nicknames #:cla.llm #:llm)
   (:export
    ;; ==================== 客户端 ====================
@@ -238,13 +237,9 @@
    #:with-extra-config
    #:build-provider
 
-   ;; ==================== Service Creation ====================
-   #:create-service
-   #:create-service-from-builder
-   #:make-anthropic-service
-   #:make-openai-service
-   #:make-zhipu-service
-   #:make-mock-service))
+   ;; ==================== ChatModel 桥接 ====================
+   #:create-chat-model
+   #:create-chat-model-from-builder))
 
 ;;; ============================================================
 ;;; LLM 提供商包

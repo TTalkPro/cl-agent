@@ -1,10 +1,10 @@
 ;;;; run-tests.lisp
-;;;; Quick test runner for cross-implementation tests
+;;;; CL-Agent 测试入口：sbcl --non-interactive --load run-tests.lisp
 
 (require :asdf)
 
 ;; Add paths
-(dolist (dir '("." "core/" "llm/" "extra/" "mock/"))
+(dolist (dir '("." "core/" "llm/" "mock/"))
   (pushnew (truename dir) asdf:*central-registry* :test #'equal))
 
 ;; Load quicklisp if available
@@ -12,34 +12,15 @@
   (when (probe-file ql-setup)
     (load ql-setup)))
 
-;; Load fiveam
-(format t "~%Loading fiveam...~%")
-(ql:quickload :fiveam :silent t)
+(format t "~%Loading cl-agent-test...~%")
+;; cl-agent-test 与 cl-agent 定义在同一 asd 文件，先解析主系统
+(asdf:find-system :cl-agent)
+(asdf:load-system :cl-agent-test)
 
-;; Load core modules
-(format t "Loading cl-agent-core...~%")
-(asdf:load-system :cl-agent-core)
-
-(format t "Loading cl-agent-llm...~%")
-(asdf:load-system :cl-agent-llm)
-
-(format t "Loading cl-agent-extra...~%")
-(asdf:load-system :cl-agent-extra)
-
-(format t "~%All modules loaded successfully!~%~%")
-
-;; Load and run tests
-(format t "Loading test files...~%")
-(load "tests/test-cross-impl.lisp")
-(load "tests/process-agent-test.lisp")
-
-(format t "~%Running cross-implementation tests...~%~%")
-(cl-agent.tests.cross-impl:run-cross-impl-tests)
-
-;; Process agent tests (requires API key)
-(format t "~%~%=== Process Agent Tests ===~%")
-(format t "To run process-agent tests with GLM-4.7:~%")
-(format t "  1. Set GLM_API_KEY environment variable~%")
-(format t "  2. Run: (cl-agent.test.process-agent:run-all-tests)~%")
-(format t "  Or for local tests without API:~%")
-(format t "  Run: (cl-agent.test.process-agent:test-event-system-local)~%")
+(format t "~%Running test suite...~%~%")
+(let ((results (uiop:symbol-call :fiveam :run
+                                 (uiop:find-symbol* :cl-agent-suite :cl-agent/tests))))
+  (uiop:symbol-call :fiveam :explain! results)
+  (if (uiop:symbol-call :fiveam :results-status results)
+      (format t "~%All tests passed.~%")
+      (uiop:quit 1)))

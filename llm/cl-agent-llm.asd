@@ -35,6 +35,7 @@
   :version "4.1.0"
 
   :depends-on (#:cl-agent-core
+               #:alexandria
                #:cl-ppcre)
 
   :serial t

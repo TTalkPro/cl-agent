@@ -1,34 +1,26 @@
 ;;;; cl-agent-core.asd
-;;;; CL-Agent Core - Infrastructure + Kernel Framework + SimpleAgent
+;;;; CL-Agent Core - Infrastructure + Chat Model API + ChatClient/Advisor
 ;;;;
-;;;; Version: 6.0.0
+;;;; Version: 8.0.0
 ;;;; Author: David
 ;;;;
 ;;;; Overview:
-;;;;   CL-Agent core module providing infrastructure, the complete Kernel
-;;;;   framework and the SimpleAgent runtime (KernelAgent).
+;;;;   CL-Agent 核心模块，对标 Spring AI 2.0 的分层设计：
 ;;;;
-;;;; Architecture:
-;;;;   - Core infrastructure (conditions, macros, utils, types)
-;;;;   - HTTP client with SSE streaming
-;;;;   - Complete Kernel framework:
-;;;;     - Tool/Plugin system (Symbol Plist pattern)
-;;;;     - Context (state management)
-;;;;     - Service (LLM abstraction)
-;;;;     - Provider protocol (LLM interface)
-;;;;     - Builder (fluent construction)
-;;;;     - Filter Chain (onion, :chat/:tool)
-;;;;     - Invoke primitives (invoke-chat / invoke-tool only)
-;;;;   - SimpleAgent runtime (run-tool-loop + KernelAgent)
-;;;;
-;;;; Note:
-;;;;   The Process framework and ProcessAgent live in cl-agent-extra.
+;;;;   - 基础设施：条件系统、工具函数、HTTP 客户端（SSE 流式）
+;;;;   - LLM Provider SPI：llm-chat 协议 + 统一 llm-response
+;;;;   - cl-agent.chat（对标 org.springframework.ai.chat.*）：
+;;;;     CLOS 消息体系 / Prompt / ChatOptions / ChatResponse /
+;;;;     deftool 工具体系 / ChatModel 协议 / ChatMemory
+;;;;   - cl-agent.client（对标 org.springframework.ai.chat.client.*）：
+;;;;     Advisor 协议与洋葱链 / defadvisor 宏 / 内置 Advisor /
+;;;;     ChatClient + Builder + chat 宏 DSL
 
 (asdf:defsystem #:cl-agent-core
-  :description "CL-Agent Core - Infrastructure + Kernel Framework + SimpleAgent (v6.0.0)"
+  :description "CL-Agent Core - Infrastructure + ChatClient/Advisor (Spring AI style, v8.0.0)"
   :author "David"
   :license "MIT"
-  :version "6.0.0"
+  :version "8.0.0"
 
   :depends-on (#:alexandria
                #:serapeum
@@ -59,15 +51,16 @@
    ;; ============================================================
    (:file "conditions")           ; Condition system
    (:file "macros")               ; Utility macros
-   (:file "types")                ; Core data types (Message, ToolCall, Response)
+   (:file "types")                ; Core data types
    (:file "documentation")        ; Documentation system
    (:file "utils")                ; Utility functions
    (:file "validation")           ; Data validation
-   (:file "dependency-injection") ; DI container
+   (:file "dependency-injection") ; DI container（独立设施，protocols 系统使用）
    (:file "data-convert")         ; Data conversion (plist <-> hash-table)
+   (:file "json-schema")          ; JSON Schema 生成（工具参数规格 → schema）
 
    ;; ============================================================
-   ;; LLM Protocol Layer (in core for dependency management)
+   ;; LLM Provider SPI (in core for dependency management)
    ;; ============================================================
    (:module "llm"
     :components
@@ -94,78 +87,39 @@
      (:file "streaming")))
 
    ;; ============================================================
-   ;; Kernel Framework
+   ;; Chat Model API（对标 Spring AI org.springframework.ai.chat.*）
    ;; ============================================================
-   (:module "kernel"
+   (:module "chat"
     :components
     ((:file "package")
-     (:file "function")       ; Tool function metadata
-     (:file "macros")         ; deftool/defplugin macros
-     (:file "plugin")         ; Plugin metadata
-     (:file "tool-registry")  ; Native tool class + registry (CLOS)
-     (:file "context")        ; Context state management
-     (:file "service")        ; Service abstraction
-     (:file "filter")         ; 4-type filter pipeline
-     (:file "kernel")         ; Kernel class + Builder
-     (:file "chat")           ; Invoke primitives: invoke-chat / invoke-tool
-     (:file "memory-filter"))) ; ChatMemory protocol + Memory Filter
+     (:file "message")            ; CLOS 消息体系 + 中立 plist 互转
+     (:file "options")            ; ChatOptions（合并语义）
+     (:file "prompt")             ; Prompt
+     (:file "response")           ; ChatResponse / Generation / 元数据
+     (:file "tool")               ; deftool / ToolCallback / ToolCallingManager
+     (:file "memory")             ; ChatMemory / Repository 协议
+     (:file "model")))            ; ChatModel 协议 + Provider 适配器
 
    ;; ============================================================
-   ;; SimpleAgent Runtime
+   ;; ChatClient + Advisor（对标 org.springframework.ai.chat.client.*）
    ;; ============================================================
-   (:module "simpleagent"
+   (:module "client"
     :components
     ((:file "package")
-     (:file "common")         ; Base agent, events, message queue
-     (:file "callbacks")      ; Callback registry (CLOS)
-     (:file "loop")           ; run-tool-loop (Agent runtime tool loop)
-     (:file "kernel-agent"))))) ; KernelAgent chat loop
+     (:file "advisor")            ; Advisor 协议 + 洋葱链 + defadvisor
+     (:file "advisors")           ; 内置 Advisor（日志/记忆/护栏）
+     (:file "chat-client")))))    ; ChatClient + Builder + chat 宏
 
 ;; ============================================================
 ;; Changelog
 ;; ============================================================
 ;;
-;; v6.2.0:
-;; - Kernel 瘦身：工具循环 run-tool-loop 下沉到 simpleagent
-;;   （Kernel 只负责 invoke-chat / invoke-tool 两个原语）
-;; - Agent 回调完全独立：kernel 不再接受回调；filter 不再暴露给
-;;   Agent 使用者（agent-add-filter 移除）
-;; - Agent 私有 memory-filter：经 run-chat-chain :extra-filters
-;;   请求级挂载，共享 kernel 零污染；:memory 创建时可替换
-;; - make-kernel-agent 接受 kernel / provider / service（ensure-kernel）
+;; v8.0.0:
+;; - 全面对标 Spring AI 2.0：删除 Kernel/Filter/SimpleAgent 体系，
+;;   新增 cl-agent.chat（消息/Prompt/ChatOptions/ChatResponse/
+;;   deftool 工具体系/ChatModel/ChatMemory）与 cl-agent.client
+;;   （Advisor 协议 + defadvisor + 内置 Advisor + ChatClient + chat 宏）
+;; - Process 框架与 Checkpoint 存储体系随 cl-agent-extra 一并移除
+;; - JSON Schema 工具函数（params->json-schema 等）上移至 cl-agent.core
 ;;
-;; v6.1.0:
-;; - Onion filter pipeline (around/before/after, :chat/:tool phases,
-;;   CLOS chat-request/tool-request, legacy 4-type mapping preserved)
-;; - invoke-kernel now routes every LLM round through the :chat chain
-;;   (delta mode when context carries :conversation-id)
-;; - ChatMemory protocol (mem-get/add/clear) + in-memory/windowed stores
-;;   + memory-filter (CLOS, specializes filter-around)
-;; - CLOS callback registry for agents (multi-callback, priority,
-;;   error isolation, once semantics); KernelAgent fires
-;;   :on-message/:on-tool-call/:on-tool-result/:on-response/:on-error/:on-chunk
-;; - KernelAgent :memory integration (history self-managed by store)
-;;
-;; v6.0.0:
-;; - Moved Process framework to cl-agent-extra
-;; - Absorbed SimpleAgent (KernelAgent) into core
-;; - ProcessAgent moved to cl-agent-extra (depends on process framework)
-;; - Removed leftover graph protocol placeholders
-;;
-;; v5.0.0:
-;; - Added types.lisp for core data types (Message, ToolCall, Response)
-;; - Added kernel/context.lisp for Context state management
-;; - Added kernel/service.lisp for Service abstraction
-;; - Added kernel/provider.lisp for ILLMProvider protocol
-;; - Enhanced filter.lisp with 4-type filter pipeline
-;; - Enhanced kernel.lisp with Builder pattern
-;; - Enhanced chat.lisp with 3-tier Invoke API
-;;
-;; v4.0.0:
-;; - Complete Semantic Kernel architecture
-;; - Symbol Plist pattern for tool metadata
-;; - Filter chain with onion model
-;;
-;; v3.0.0:
-;; - Removed Pregel graph engine
-;; - Added initial Kernel framework
+;; v6.x/v5.x/v4.x/v3.x: 见 git 历史（Semantic Kernel 时期）

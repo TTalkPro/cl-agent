@@ -8,10 +8,10 @@
 ;;;;   CL-Agent 的使用示例和演示代码
 ;;;;
 ;;;; Contains:
-;;;;   - 依赖注入框架示例
-;;;;   - 记忆管理示例（TODO）
-;;;;   - 工具使用示例（TODO）
-;;;;   - 完整 Agent 应用示例（TODO）
+;;;;   - di-usage-examples.lisp     依赖注入容器示例（asd 组件）
+;;;;   - chat-client-usage.lisp     ChatClient 完整用法（独立脚本，
+;;;;                                sbcl --load examples/chat-client-usage.lisp）
+;;;;   - llm-usage.lisp             底层 Provider SPI 用法（独立脚本）
 
 (asdf:defsystem #:cl-agent-examples
   :description "CL-Agent Examples - Usage Examples and Demos"

@@ -51,7 +51,7 @@ Returns:
           (cond
             ((hash-table-p schema) schema)
             ((and (listp schema) (keywordp (first schema)))
-             (cl-agent.kernel:schema-to-hash-table schema))
+             (cl-agent.core:schema-to-hash-table schema))
             (t (let ((empty (make-hash-table :test 'equal)))
                  (setf (gethash "type" empty) "object")
                  (setf (gethash "properties" empty) (make-hash-table :test 'equal))

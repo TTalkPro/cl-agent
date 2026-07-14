@@ -3,7 +3,7 @@
 
 (defpackage :cl-agent.mock
   (:use :common-lisp)
-  (:import-from #:cl-agent.kernel #:llm-chat)
+  (:import-from #:cl-agent.core #:llm-chat)
   (:nicknames :mock)
   (:export
    ;; Mock LLM

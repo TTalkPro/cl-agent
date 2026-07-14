@@ -1,492 +1,208 @@
-# API Reference
+# CL-Agent API Reference
 
 [中文](API_CN.md)
 
-## Table of Contents
+API quick reference by package. Spring AI 2.0 counterparts noted per section.
 
-- [Core](#core)
-  - [Kernel](#kernel)
-  - [Context](#context)
-  - [Filter](#filter)
-  - [Service](#service)
-- [Tools](#tools)
-  - [Tool Class](#tool-class)
-  - [Tool Registry](#tool-registry)
-  - [Tag Filtering](#tag-filtering)
-  - [Presets](#presets)
-  - [Built-in Tools](#built-in-tools)
-- [LLM](#llm)
-  - [Client](#client)
-  - [Providers](#providers)
-- [SimpleAgent](#simpleagent)
-  - [KernelAgent](#kernelagent)
-  - [ProcessAgent](#processagent)
-- [Memory](#memory)
-- [RAG](#rag)
-- [MCP](#mcp)
+## cl-agent.chat — Chat Model API
 
----
+### Messages (`org.springframework.ai.chat.messages`)
 
-## Core
+| Symbol | Description |
+|---|---|
+| `message` | Abstract base; `message-role` / `message-text` / `message-metadata` |
+| `(system-message text)` | System instruction |
+| `(user-message text)` | User input |
+| `(assistant-message text &key tool-calls)` | Model reply; `assistant-tool-calls` |
+| `(tool-response-message responses)` | Tool results; `tool-responses` |
+| `(make-tool-call &key id name arguments)` | Tool call value object |
+| `(make-tool-response &key id name text)` | Tool result value object |
+| `message->neutral` / `messages->neutral` | CLOS → neutral plists (provider SPI boundary) |
+| `neutral->message` / `neutral->messages` | Reverse conversion |
 
-### Kernel
-
-The central coordinator that holds Service, Tool Registry, Filters, and Config.
-
-#### `make-kernel`
+### Prompt / ChatOptions
 
 ```lisp
-(make-kernel &key service tool-registry active-tags tag-filter-mode filters config context) => kernel
+(make-prompt messages &key options system)
+(prompt-copy prompt &key messages options)     ; immutable augmentation
+(prompt-append-messages prompt new-messages)
+(prompt-system-messages p) (prompt-instruction-messages p)
+(prompt-last-user-text p)
+
+(make-chat-options :model "..." :temperature 0.3 :max-tokens 1024
+                   :tool-callbacks (list cb) :tool-names '("get_weather")
+                   :tool-context '(:tenant "acme")
+                   :internal-tool-execution-enabled t   ; default T
+                   :max-tool-iterations 10)             ; default 10
+(merge-chat-options runtime defaults)   ; runtime wins; tools are unioned
 ```
 
-Create a new Kernel instance.
+Options not explicitly passed are "unset" and fall back on merge.
 
-**Parameters:**
-- `service` - LLM service abstraction
-- `tool-registry` - Tool registry
-- `active-tags` - Active tags (for filtering)
-- `tag-filter-mode` - Filter mode (`:any` or `:all`)
-- `filters` - List of filter objects
-- `config` - Configuration plist
-- `context` - Execution context
+### ChatResponse
 
-**Example:**
 ```lisp
-(make-kernel
-  :service my-service
-  :tool-registry registry
-  :active-tags '(:safe :utility)
-  :filters (list logging-filter))
+(chat-response-text r) (chat-response-message r)
+(chat-response-tool-calls r) (chat-response-has-tool-calls-p r)
+(chat-response-finish-reason r)   ; :stop/:tool-call/:max-tokens/...
+(chat-response-usage r) (chat-response-metadata-of r)
+(llm-response->chat-response llm-response)
 ```
 
-#### `create-kernel-builder`
+### Tools (`@Tool` / `ToolCallback` / `ToolCallingManager`)
 
 ```lisp
-(create-kernel-builder) => kernel-builder
+(deftool name (&key args...)
+  "description for the model"
+  (:param name type "description" [:required t] [:default v])*
+  [(:return-direct t)]
+  body...)
+
+(make-tool-callback fn :name "n" :description "d"
+                    :parameters '((p :string "desc" :required-p t)))
+(tool-callback-call callback args-plist &optional tool-context)
+(tool-callback->schema callback)
+(find-tool-callback "get_weather") (register-tool-callback cb)
+(resolve-tool-callbacks specs)     ; instances/symbols/strings
+(arguments->plist raw)             ; hash-table/JSON/plist normalization
+(make-default-tool-calling-manager)
+(execute-tool-calls manager prompt response)
+;; => (values tool-response-message return-direct-p)
 ```
 
-Create a Kernel Builder.
+Conditions: `tool-execution-error`, `tool-not-found-error`.
 
-#### `build-kernel`
+### ChatModel protocol
 
 ```lisp
-(build-kernel builder) => kernel
+(chat-model-call model prompt)              ; prompt: string/messages/prompt
+(chat-model-stream model prompt on-chunk)
+(chat-model-default-options model)
+(make-provider-chat-model provider
+  :default-options options :tool-calling-manager manager)
 ```
 
-Build Kernel from Builder.
+`provider-chat-model` runs the internal tool-execution loop when a response
+carries tool calls and `internal-tool-execution-enabled` is true; exceeding
+`max-tool-iterations` signals `max-tool-iterations-exceeded-error`;
+`:return-direct` tools terminate the loop immediately.
 
-#### Builder Methods
+### ChatMemory
 
 ```lisp
-;; Add service
-(add-service builder provider) => builder
+(memory-add memory conversation-id messages)
+(memory-messages memory conversation-id)
+(memory-clear memory conversation-id)
+(make-message-window-chat-memory :repository repo :max-messages 20)
 
-;; Add single tool
-(with-tool builder tool) => builder
-
-;; Add multiple tools
-(with-tools builder tool-list) => builder
-
-;; Use preset
-(with-preset builder preset &key security-level) => builder
-
-;; Set active tags
-(with-active-tags builder tags &key mode) => builder
-
-;; Add filter
-(add-filter builder filter) => builder
+;; Storage protocol (implement for custom backends)
+(repository-find repo cid) (repository-save repo cid messages)
+(repository-delete repo cid) (repository-conversation-ids repo)
+(make-in-memory-chat-memory-repository)
++default-conversation-id+   ; "default"
 ```
 
-**Example:**
+Window truncation is pairing-safe: system messages are kept and don't count;
+orphaned leading tool messages are dropped.
+
+## cl-agent.client — ChatClient + Advisor
+
+### Advisor protocol
+
 ```lisp
-(build-kernel
-  (with-active-tags
-    (with-preset
-      (add-service
-        (create-kernel-builder)
-        *provider*)
-      :safe
-      :security-level :standard)
-    '(:safe :utility)
-    :mode :any))
+(make-client-request prompt &key context)    ; ChatClientRequest
+(client-request-copy r &key prompt)          ; context is shared
+(make-client-response chat-response &key context)
+(context-get holder key &optional default) (context-set holder key value)
+
+(advise-call advisor request chain)             ; → client-response
+(advise-stream advisor request chain on-chunk)  ; defaults to advise-call
+(advisor-order advisor)                         ; lower = outer
+
+(make-advisor-chain advisors call-terminal :stream-terminal st)
+(chain-next chain request)
+(chain-next-stream chain request on-chunk)
 ```
 
-#### Kernel Query API
+### defadvisor
 
 ```lisp
-;; Find tool
-(kernel-find-tool kernel tool-name) => tool
-
-;; Execute tool
-(kernel-execute-tool kernel tool-name args) => result
-
-;; Get tool schemas (supports Tag filtering)
-(kernel-get-tools kernel &key tags) => list
-
-;; List tool info (supports Tag filtering)
-(kernel-list-tools kernel &key tags) => list
-
-;; Tool count
-(kernel-tool-count kernel) => integer
-
-;; Has tool
-(kernel-has-tool-p kernel tool-name) => boolean
+(defadvisor name (:order N :documentation "...")
+  [(:slots (slot-defs...))]
+  (:call (advisor request chain) body...)
+  [(:stream (advisor request chain on-chunk) body...)])
+;; expands to: defclass + methods + make-name constructor
 ```
 
-#### Kernel Tool Management API
+### Built-in advisors
 
 ```lisp
-;; Register tool
-(kernel-register-tool kernel tool) => kernel
-
-;; Batch register
-(kernel-register-tools kernel tools) => kernel
-
-;; Unregister tool
-(kernel-unregister-tool kernel tool-name) => kernel
-
-;; Set active tags
-(kernel-set-active-tags kernel tags) => kernel
-
-;; Clear active tags
-(kernel-clear-active-tags kernel) => kernel
+(make-simple-logger-advisor :stream s)                     ; order -1000
+(make-safe-guard-advisor :sensitive-words '("...")
+                         :failure-response "...")          ; order -500
+(make-message-chat-memory-advisor :memory m)               ; order 1000
+(make-prompt-chat-memory-advisor :memory m :template "~A") ; order 1000
++conversation-id-key+
 ```
 
-#### 3-Tier Invoke API
+### ChatClient
 
 ```lisp
-;; Tier 1: Tool execution
-(invoke kernel tool-name args &key context) => result
-(invoke-tool kernel context tool-name args) => result
+(make-chat-client model :system s :options o :advisors a :tools ts)
+(chat-client-builder model)
+(default-system builder text) (default-options builder options)
+(default-advisors builder &rest advisors) (default-tools builder &rest tools)
+(build-client builder)
 
-;; Tier 2: Single LLM call
-(invoke-chat kernel messages &key settings) => response
-(invoke-chat-stream kernel messages &key on-token) => nil
+;; fluent request spec
+(client-prompt client &optional user-text)
+(prompt-system spec text &rest format-args)
+(prompt-user spec text &rest format-args)
+(prompt-add-messages spec &rest messages)
+(prompt-with-options spec &rest options-or-kv)
+(prompt-advisors spec &rest advisors) (prompt-tools spec &rest tools)
+(prompt-context spec key value) (prompt-conversation spec cid)
 
-;; Tier 3: Complete tool loop
-(invoke-kernel kernel messages &key settings) => response
-(invoke-chat-with-tools kernel messages &key settings) => response
+;; terminal operations
+(call-content spec) (call-response spec) (call-client-response spec)
+(call-entity spec) (stream-content spec on-chunk)
 ```
 
----
-
-### Context
-
-Execution context tracking variables, messages, history, and trace.
+### chat macro
 
 ```lisp
-(make-context &key messages metadata) => context
-(context-get context key) => value
-(context-set context key value) => value
-(context-add-message context message) => context
-(context-get-messages context) => list
+(chat client
+  [(:system text [format-args...])]
+  [(:user text [format-args...])]
+  [(:messages msg...)] [(:options :temperature 0.7 ...)]
+  [(:advisors adv...)] [(:tools tool...)]
+  [(:context key value)] [(:conversation cid)]
+  [(:call :content | :response | :client-response | :entity)]  ; default :content
+  [(:stream callback)])
+
+(chat client "Hi")   ; shorthand for (:user "Hi")
 ```
 
----
-
-### Filter
-
-Filters intercept execution at 4 points.
+## cl-agent.llm — Providers
 
 ```lisp
-(make-filter &key type name fn priority) => filter
+(create-chat-model :anthropic :model "..." :api-key "..." :options opts)
+;; providers: :anthropic :openai :zhipu :ollama :dashscope :bailian :minimax ...
 ```
 
-**Types:**
-- `:pre-invocation` - Before tool execution
-- `:post-invocation` - After tool execution
-- `:pre-chat` - Before LLM call
-- `:post-chat` - After LLM call
-
----
-
-### Service
-
-LLM abstraction.
+Provider SPI for custom providers:
 
 ```lisp
-(make-service &key chat-fn build-result-msgs-fn provider) => service
-(service-from-provider provider) => service
+(defmethod cl-agent.core:llm-chat ((p my-provider) messages
+                                   &key max-tokens temperature model tools system)
+  ;; messages are neutral plists (:role :user :content "...")
+  ;; return a cl-agent.core:llm-response
+  ...)
 ```
 
----
-
-## Tools
-
-### Tool Class
+## cl-agent.mock — Test Support
 
 ```lisp
-(defclass tool ()
-  ((name :type keyword)
-   (description :type string)
-   (handler :type function)
-   (parameters :type list)
-   (category :type keyword)
-   (tags :type list)
-   (permissions :type list)
-   (metadata)))
-```
-
-#### `make-simple-tool`
-
-```lisp
-(make-simple-tool name description handler &key parameters category tags permissions metadata) => tool
-```
-
-Create a tool instance.
-
-**Parameters:**
-- `name` - Tool name (keyword)
-- `description` - Tool description
-- `handler` - Execution function `(lambda (&key ...) ...)`
-- `parameters` - Parameter definition list
-- `category` - Category (default `:custom`)
-- `tags` - Tag list
-- `permissions` - Permission list
-- `metadata` - Metadata
-
-**Example:**
-```lisp
-(make-simple-tool
-  :greet
-  "Greet user"
-  (lambda (&key name)
-    (format nil "Hello, ~A!" name))
-  :parameters '((:name :type :string :description "User name" :required-p t))
-  :tags '(:utility :safe))
-```
-
-#### Tag Helper Functions
-
-```lisp
-(tool-has-tag-p tool tag) => boolean
-(tool-has-any-tag-p tool tags) => boolean
-(tool-has-all-tags-p tool tags) => boolean
-(tool-add-tag tool tag) => tool
-(tool-remove-tag tool tag) => tool
-(tool-set-tags tool tags) => tool
-```
-
----
-
-### Tool Registry
-
-```lisp
-(make-tool-registry) => registry
-(register-tool registry tool) => tool
-(unregister-tool registry tool-name) => boolean
-(find-tool registry tool-name) => tool
-(list-tools registry &key category) => list
-(registry-tool-count registry) => integer
-```
-
----
-
-### Tag Filtering
-
-```lisp
-;; By single tag
-(list-tools-by-tag registry tag) => list
-
-;; By multiple tags
-(list-tools-by-tags registry tags &key mode) => list
-;; mode: :any (default) or :all
-
-;; Get filtered schemas
-(get-tools-schema-by-tags registry tags &key mode) => list
-
-;; List all tags
-(list-all-tags registry) => list
-
-;; Statistics
-(count-tools-by-tag registry tag) => integer
-```
-
----
-
-### Presets
-
-#### Security Levels
-
-| Level | Keyword | Description |
-|-------|---------|-------------|
-| Permissive | `:permissive` | Least restrictions |
-| Standard | `:standard` | Balanced mode |
-| Strict | `:strict` | Maximum restrictions |
-
-#### Tool Presets
-
-| Preset | Keyword | Description |
-|--------|---------|-------------|
-| Standard | `:standard` | File + HTTP + Utility tools |
-| Safe | `:safe` | Read-only operations |
-| Full | `:full` | All tools (including Shell) |
-| File Only | `:file-only` | File operations only |
-| HTTP Only | `:http-only` | HTTP operations only |
-| Utility Only | `:utility-only` | Utility tools only |
-
-```lisp
-;; Quick setup with preset
-(quick-setup-tools &key preset security-level) => list
-
-;; List available presets
-(list-all-presets) => list
-
-;; Describe preset
-(describe-preset preset) => string
-```
-
----
-
-### Built-in Tools
-
-#### File Tools
-
-```lisp
-(make-read-file-tool) => tool      ; Tags: (:file :io :read :safe)
-(make-write-file-tool) => tool     ; Tags: (:file :io :write)
-(make-delete-file-tool) => tool    ; Tags: (:file :io :write :dangerous)
-(make-list-directory-tool) => tool ; Tags: (:file :io :read :safe)
-(create-file-tools) => list
-```
-
-#### HTTP Tools
-
-```lisp
-(make-http-get-tool) => tool   ; Tags: (:http :network :read :safe)
-(make-http-post-tool) => tool  ; Tags: (:http :network :write)
-(create-http-tools) => list
-```
-
-#### Shell Tools
-
-```lisp
-(make-execute-command-tool) => tool  ; Tags: (:shell :system :dangerous)
-(create-shell-tools) => list
-```
-
-#### Utility Tools
-
-```lisp
-(make-get-timestamp-tool) => tool    ; Tags: (:utility :safe)
-(make-generate-uuid-tool) => tool    ; Tags: (:utility :safe)
-(make-json-parse-tool) => tool       ; Tags: (:utility :safe)
-(make-json-stringify-tool) => tool   ; Tags: (:utility :safe)
-(make-string-replace-tool) => tool   ; Tags: (:utility :safe)
-(make-math-eval-tool) => tool        ; Tags: (:utility :safe)
-(create-utility-tools) => list
-```
-
----
-
-## LLM
-
-### Client
-
-```lisp
-(make-client &key provider model api-key base-url max-tokens temperature) => client
-(chat client messages &key tools temperature max-tokens) => response
-(chat-stream client messages &key on-token on-complete) => nil
-```
-
-### Providers
-
-| Provider | Keyword | Default Model |
-|----------|---------|---------------|
-| Anthropic | `:anthropic` | claude-3-5-sonnet-20241022 |
-| OpenAI | `:openai` | gpt-4o |
-| ZhipuAI | `:zhipu` | glm-4-turbo |
-| Ollama | `:ollama` | llama2 |
-
----
-
-## SimpleAgent
-
-### KernelAgent
-
-```lisp
-(make-kernel-agent kernel &key name system-prompt settings callbacks) => agent
-(agent-chat agent message &key verbose) => response
-```
-
-### ProcessAgent
-
-```lisp
-(make-process-agent kernel) => agent
-(agent-start agent message) => nil
-(agent-pause agent) => nil
-(agent-resume agent) => nil
-(agent-stop agent) => nil
-```
-
----
-
-## Memory
-
-### Store
-
-```lisp
-(make-memory-store-backend) => store
-(make-sqlite-store-backend &key db-path) => store
-(store-put store namespace key value) => value
-(store-get store namespace key) => value
-(store-delete store namespace key) => boolean
-(store-list-keys store namespace) => list
-```
-
-### Checkpoint
-
-```lisp
-(save-checkpoint checkpointer thread-id state) => checkpoint
-(load-checkpoint checkpointer thread-id) => checkpoint
-```
-
-### Agent Memory
-
-```lisp
-(make-agent-memory &key context-store persistent-store default-thread-id) => memory
-(am-add-message memory thread-id role content) => message
-(am-get-messages memory thread-id) => list
-(am-save-checkpoint memory thread-id state) => checkpoint
-(am-load-checkpoint memory checkpoint-id) => checkpoint
-```
-
----
-
-## RAG
-
-### Pipeline
-
-```lisp
-(make-rag-pipeline &key embeddings-model vector-store splitter) => pipeline
-(rag-retrieve pipeline query &key top-k) => list
-(rag-query pipeline question &key top-k) => response
-```
-
-### Vector Store
-
-```lisp
-(make-vector-store) => store
-(vector-store-add-document store content embedding &key metadata) => document
-(vector-store-search store query-embedding &key top-k) => list
-```
-
----
-
-## MCP
-
-### Client
-
-```lisp
-(make-mcp-client &key transport) => client
-(mcp-client-connect client) => nil
-(mcp-client-call-tool client tool-name args) => result
-```
-
-### Server
-
-```lisp
-(make-mcp-server &key transport) => server
-(mcp-server-start server) => nil
-(mcp-register-tool server tool-name fn) => nil
+(cl-agent.mock:make-mock-llm)   ; rule-based responses, no API key
+;; wrap with (make-provider-chat-model (make-mock-llm)) for full-stack demos
 ```

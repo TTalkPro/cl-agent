@@ -369,7 +369,7 @@
                           ((hash-table-p schema-raw) schema-raw)
                           ;; plist schema（来自 params->json-schema）→ 转换为 hash-table
                           ((and (consp schema-raw) (keywordp (first schema-raw)))
-                           (cl-agent.kernel:schema-to-hash-table schema-raw))
+                           (cl-agent.core:schema-to-hash-table schema-raw))
                           ;; 默认空 schema
                           (t (let ((default-schema (make-hash-table :test 'equal)))
                                (setf (gethash "type" default-schema) "object")

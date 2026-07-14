@@ -147,6 +147,11 @@
    #:*default-id-generator*
    #:*default-timestamp-provider*
 
+   ;; === JSON Schema 工具 ===
+   #:type-to-json-type
+   #:params->json-schema
+   #:schema-to-hash-table
+
    ;; === Unified LLM Response Schema ===
    ;; Response class
    #:llm-response

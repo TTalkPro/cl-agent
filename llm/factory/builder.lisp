@@ -158,97 +158,42 @@ Usage:
             (builder-extra-config builder)))))
 
 ;;; ============================================================
-;;; Service Creation
+;;; ChatModel 桥接（对标 Spring AI ChatModel 自动装配）
 ;;; ============================================================
 
-(defun create-service (provider-name &rest args &key model api-key api-url &allow-other-keys)
-  "Create a Kernel service from a provider specification.
+(defun create-chat-model (provider-name &rest args
+                          &key model api-key api-url options &allow-other-keys)
+  "从提供商规格创建 ChatModel（cl-agent-llm 与 cl-agent.chat 的桥梁）。
 
-This is the bridge between cl-agent-llm and cl-agent.kernel.
+参数：
+  PROVIDER-NAME - 提供商关键字（:anthropic、:openai 等）
+  MODEL         - 模型名（可选）
+  API-KEY       - API 密钥（可选，默认取环境变量）
+  API-URL       - API 地址（可选，默认取提供商默认值）
+  OPTIONS       - 默认 chat-options（可选）
+  其余关键字参数透传给提供商工厂。
 
-Parameters:
-  PROVIDER-NAME - Provider name keyword (:anthropic, :openai, etc.)
-  MODEL         - Model name (optional)
-  API-KEY       - API key (optional, uses env var)
-  API-URL       - API URL (optional, uses default)
-  Other keyword args passed to provider factory.
+返回：
+  cl-agent.chat:provider-chat-model 实例
 
-Returns:
-  Service plist suitable for Kernel
-
-Usage:
-  (create-service :anthropic :model \"claude-sonnet-4-20250514\")
-  (create-service :openai :model \"gpt-4o\")"
+用法：
+  (create-chat-model :anthropic :model \"claude-sonnet-4-20250514\")
+  (create-chat-model :openai :model \"gpt-4o\"
+                     :options (cl-agent.chat:make-chat-options :temperature 0.3))"
   (declare (ignore model api-key api-url))
   (let* ((resolved-name (resolve-provider-name provider-name))
-         (provider (apply #'create-provider resolved-name args)))
-    (cl-agent.kernel:service-from-provider provider)))
+         (provider (apply #'create-provider resolved-name
+                          (alexandria:remove-from-plist args :options))))
+    (cl-agent.chat:make-provider-chat-model provider :default-options options)))
 
-(defun create-service-from-builder (builder)
-  "Create a Kernel service from a provider builder.
+(defun create-chat-model-from-builder (builder &key options)
+  "从 provider builder 创建 ChatModel。
 
-Parameters:
+参数：
   BUILDER - Provider builder
+  OPTIONS - 默认 chat-options（可选）
 
-Returns:
-  Service plist"
-  (let ((provider (build-provider builder)))
-    (cl-agent.kernel:service-from-provider provider)))
-
-;;; ============================================================
-;;; Convenience Functions
-;;; ============================================================
-
-(defun make-anthropic-service (&key (model "claude-sonnet-4-20250514") api-key)
-  "Create an Anthropic service.
-
-Parameters:
-  MODEL   - Model name
-  API-KEY - API key (optional, uses env var)
-
-Returns:
-  Service plist"
-  (create-service :anthropic :model model :api-key api-key))
-
-(defun make-openai-service (&key (model "gpt-4o") api-key)
-  "Create an OpenAI service.
-
-Parameters:
-  MODEL   - Model name
-  API-KEY - API key (optional, uses env var)
-
-Returns:
-  Service plist"
-  (create-service :openai :model model :api-key api-key))
-
-(defun make-zhipu-service (&key (model "glm-4-plus") api-key)
-  "Create a ZhipuAI service.
-
-Parameters:
-  MODEL   - Model name
-  API-KEY - API key (optional, uses env var)
-
-Returns:
-  Service plist"
-  (create-service :zhipu :model model :api-key api-key))
-
-(defun make-mock-service (&key responses)
-  "Create a mock service for testing.
-
-Parameters:
-  RESPONSES - List of response plists to return in sequence
-
-Returns:
-  Service plist"
-  (let ((response-queue (copy-list responses))
-        (call-count 0))
-    (cl-agent.kernel:make-service
-     :provider :mock
-     :config (list :responses responses)
-     :chat-fn (lambda (messages tools settings)
-                (declare (ignore messages tools settings))
-                (incf call-count)
-                (if response-queue
-                    (pop response-queue)
-                    (list :content (format nil "Mock response ~A" call-count)
-                          :tool-calls nil))))))
+返回：
+  cl-agent.chat:provider-chat-model 实例"
+  (cl-agent.chat:make-provider-chat-model (build-provider builder)
+                                          :default-options options))

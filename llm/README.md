@@ -289,24 +289,21 @@ Service 层负责将各 Provider 返回的原始响应转换为统一的 `llm-re
     (format t "超时: ~A~%" e)))
 ```
 
-## 与 Kernel 集成
+## 与 ChatClient 集成
 
 ```lisp
-;; 创建 Service
-(defvar *service*
-  (make-service-from-client *claude*))
+;; 一步创建 ChatModel（推荐入口）
+(defvar *model*
+  (cl-agent.llm:create-chat-model :anthropic
+    :model "claude-sonnet-4-20250514"))
 
-;; 或手动创建
-(defvar *service*
-  (make-service
-    :provider *claude*
-    :chat-fn (lambda (messages tools settings)
-               (chat *claude* messages
-                     :tools tools
-                     :temperature (getf settings :temperature)))
-    :build-result-msgs-fn #'build-result-messages))
+;; 或从已有 provider 适配
+(defvar *model*
+  (cl-agent.chat:make-provider-chat-model
+    (make-anthropic-provider)
+    :default-options (cl-agent.chat:make-chat-options :temperature 0.3)))
 
-;; 用于 Kernel
-(defvar *kernel*
-  (make-kernel :service *service*))
+;; 用于 ChatClient
+(defvar *client* (cl-agent.client:make-chat-client *model*))
+(cl-agent.client:chat *client* "你好")
 ```

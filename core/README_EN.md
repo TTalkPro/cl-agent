@@ -1,330 +1,52 @@
-# Core Module
+# CL-Agent Core
 
-[中文](README.md) | English
+[中文](README.md)
 
-Core infrastructure module providing Kernel framework, HTTP client, condition system and utility functions.
+Core module (v8.0.0), layered after Spring AI 2.0.
 
-## Directory Structure
+## Packages
+
+| Package | Counterpart | Contents |
+|---|---|---|
+| `cl-agent.core` | — | Conditions, utilities, HTTP/SSE client, JSON Schema generation, `llm-chat` provider SPI, unified `llm-response` |
+| `cl-agent.chat` | `org.springframework.ai.chat.*` | CLOS message hierarchy, Prompt, ChatOptions, ChatResponse, `deftool` tooling, ChatModel protocol, ChatMemory |
+| `cl-agent.client` | `org.springframework.ai.chat.client.*` | Advisor protocol & onion chain, `defadvisor` macro, built-in advisors, ChatClient + builder + `chat` macro |
+
+## Layout
 
 ```
 core/
-├── package-core.lisp          # Package definition
-├── conditions.lisp            # Condition system
-├── types.lisp                 # Core data types
-├── utils.lisp                 # Utility functions
-├── macros.lisp                # Utility macros
-├── validation.lisp            # Data validation
-├── dependency-injection.lisp  # Dependency injection container
-├── data-convert.lisp          # Data conversion
-├── llm/                       # LLM protocol layer (avoids circular deps)
-│   ├── response.lisp          # Unified response types
-│   └── provider.lisp          # Provider protocol
-├── http/                      # HTTP client module
-│   ├── client.lisp
-│   ├── async.lisp
-│   ├── retry.lisp
-│   └── streaming.lisp
-└── kernel/                    # Kernel framework
-    ├── function.lisp          # Tool metadata
-    ├── plugin.lisp            # Plugin metadata
-    ├── macros.lisp            # deftool/defplugin macros
-    ├── context.lisp           # Context class
-    ├── service.lisp           # Service abstraction
-    ├── filter.lisp            # Filter pipeline
-    ├── kernel.lisp            # Kernel class
-    └── chat.lisp              # Invoke API
+├── package-core.lisp        cl-agent.core package
+├── conditions.lisp / macros.lisp / utils.lisp / types.lisp
+├── json-schema.lisp         params->json-schema / schema-to-hash-table
+├── llm/                     llm-chat SPI + unified llm-response
+├── http/                    HTTP client + SSE streaming + retry
+├── chat/                    Chat Model API
+│   ├── message.lisp         message hierarchy + neutral plist conversion
+│   ├── options.lisp         ChatOptions (unset semantics + merging)
+│   ├── prompt.lisp          Prompt (immutable augmentation)
+│   ├── response.lisp        ChatResponse / Generation / metadata
+│   ├── tool.lisp            deftool / ToolCallback / ToolCallingManager
+│   ├── memory.lisp          ChatMemory / repository protocol
+│   └── model.lisp           ChatModel protocol + provider adapter (tool loop)
+└── client/                  ChatClient + Advisor
+    ├── advisor.lisp         protocol / onion chain / defadvisor
+    ├── advisors.lisp        logger / message memory / prompt memory / guard
+    └── chat-client.lisp     ChatClient / builder / request spec / chat macro
 ```
 
-## Core Concepts
-
-### 1. Condition System
-
-```lisp
-;; Defined condition types
-cl-agent-error        ; Base error
-├── api-error         ; API related errors
-├── llm-error         ; LLM call errors
-├── tool-error        ; Tool execution errors
-├── validation-error  ; Validation errors
-└── config-error      ; Configuration errors
-```
-
-### 2. Core Data Types
-
-```lisp
-;; Message construction
-(make-message :role :user :content "Hello")
-(make-message :role :assistant :content "Hi" :tool-calls [...])
-(make-message :role :tool :content "Result" :tool-call-id "123")
-
-;; ToolCall construction
-(make-tool-call :id "call_123" :name "get-weather" :arguments '(:city "Tokyo"))
-
-;; Response construction (for tool results)
-(make-response :content "..." :tool-calls [...] :metadata {...})
-```
-
-### 2.1 Unified LLM Response Types
-
-All LLM Providers return unified `llm-response` CLOS objects:
-
-```lisp
-;; LLM response object
-(make-llm-response
-  :content "Hello!"
-  :tool-calls nil
-  :usage (make-llm-usage :input-tokens 10 :output-tokens 5)
-  :model "glm-4.7"
-  :finish-reason :stop
-  :message-id "msg_123"
-  :raw-response parsed-hash-table)
-
-;; Access response content
-(llm-response-content response)      ; => "Hello!"
-(llm-response-tool-calls response)   ; => nil or list of tool calls
-(llm-response-model response)        ; => "glm-4.7"
-(llm-response-finish-reason response) ; => :stop, :tool-call, :length, :error
-
-;; Convenience accessors
-(llm-response-has-tool-calls-p response) ; => T/NIL
-(llm-response-has-content-p response)    ; => T/NIL
-(llm-response-input-tokens response)     ; => 10
-(llm-response-output-tokens response)    ; => 5
-(llm-response-total-tokens response)     ; => 15
-(llm-response-first-tool-call response)  ; => first tool call or nil
-
-;; Tool call structure
-;; (:id "call_123" :name :GET_WEATHER :arguments #<hash-table>)
-```
-
-**Unified finish-reason values**:
-- `:stop` - Normal completion
-- `:tool-call` - Tool call required
-- `:length` - Max length reached
-- `:error` - Error occurred
-- `:content-filter` - Content filtered
-
-### 3. Utility Functions
-
-```lisp
-;; Environment variables
-(get-env "API_KEY")
-(get-env "PORT" "8080")  ; With default value
-
-;; UUID generation
-(generate-uuid)  ; => "550e8400-e29b-41d4-a716-446655440000"
-
-;; Timestamp
-(timestamp-now)  ; => "2024-01-15T10:30:00Z"
-
-;; JSON operations
-(json-encode object)
-(json-decode string)
-```
-
-### 4. Utility Macros
-
-```lisp
-;; Conditional binding
-(when-let ((value (get-value)))
-  (process value))
-
-(if-let ((value (get-value)))
-  (process value)
-  (handle-nil))
-
-;; Timing
-(with-timing ("operation")
-  (do-something))
-
-;; Threading macros (Clojure-like)
-(-> value
-    (transform-1)
-    (transform-2 extra-arg)
-    (transform-3))
-```
-
-## Kernel Framework
-
-### Tool Function
-
-Use Symbol Plist to store tool metadata:
-
-```lisp
-;; Declarative definition
-(deftool get-weather "Get weather information"
-  ((city :string "City name" :required-p t)
-   (unit :string "Temperature unit" :default "celsius"))
-  (format nil "~A: 22°C" city))
-
-;; Runtime registration
-(declare-tool 'my-tool
-  :description "Tool description"
-  :parameters '((param1 :string "Parameter 1" :required-p t)))
-
-;; Query metadata
-(tool-function-p 'get-weather)    ; => T
-(tool-description 'get-weather)   ; => "Get weather information"
-(tool-parameters 'get-weather)    ; => (...)
-(tool-schema 'get-weather)        ; => JSON Schema
-```
-
-### Plugin
-
-Logical grouping of tools:
-
-```lisp
-;; Declarative definition
-(defplugin weather-plugin "Weather related tools"
-  get-weather
-  get-forecast)
-
-;; Runtime registration
-(declare-plugin 'my-plugin "Plugin description" '(tool1 tool2))
-
-;; Query
-(plugin-p 'weather-plugin)           ; => T
-(plugin-tool-symbols 'weather-plugin) ; => (GET-WEATHER GET-FORECAST)
-(plugin-get-schemas 'weather-plugin)  ; => All tool schemas
-```
-
-### Context
-
-Execution context:
-
-```lisp
-(let ((ctx (make-context :messages messages)))
-  ;; Variable management
-  (context-set-variable ctx "key" "value")
-  (context-get-variable ctx "key")
-
-  ;; Message management
-  (context-add-message ctx message)
-  (context-messages ctx)
-
-  ;; History and tracing
-  (context-history ctx)
-  (context-trace ctx))
-```
-
-### Service
-
-LLM service abstraction:
-
-```lisp
-(make-service
-  :chat-fn (lambda (messages tools settings)
-             ;; Call LLM
-             ...)
-  :build-result-msgs-fn (lambda (response)
-                          ;; Build result messages
-                          ...)
-  :provider provider-instance)
-```
-
-### Filter
-
-4 types of filters:
-
-```lisp
-;; Filter types
-:pre-invocation   ; Before tool execution
-:post-invocation  ; After tool execution
-:pre-chat         ; Before LLM call
-:post-chat        ; After LLM call
-
-;; Create filter
-(make-filter
-  :type :pre-chat
-  :name "rag-injection"
-  :fn (lambda (ctx next)
-        ;; Pre-processing
-        (inject-rag-context ctx)
-        ;; Call next
-        (let ((result (funcall next ctx)))
-          ;; Post-processing
-          result))
-  :priority 10)
-```
-
-### Kernel
-
-Central coordinator:
-
-```lisp
-;; Create Kernel
-(defvar *kernel*
-  (make-kernel
-    :service *service*
-    :plugins '(plugin1 plugin2)
-    :filters (list filter1 filter2)
-    :config '(:max-iterations 10)))
-
-;; Builder pattern
-(defvar *kernel*
-  (-> (make-kernel)
-      (with-service service)
-      (with-plugins '(plugin1))
-      (with-filter filter)
-      (with-config '(:debug t))
-      (build)))
-
-;; Get tool information
-(kernel-get-tools *kernel*)
-(kernel-get-schema *kernel* "tool-name")
-```
-
-### 3-Tier Invoke API
-
-```lisp
-;; Tier 1: Execute single tool
-(invoke-tool kernel context "get-weather" '(:city "Tokyo"))
-
-;; Tier 2: Single LLM call
-(invoke-chat kernel context messages settings)
-
-;; Tier 3: Complete tool call loop
-(invoke-kernel kernel context messages)
-```
-
-## HTTP Client
-
-```lisp
-;; Basic requests
-(http-get url :headers headers)
-(http-post url :body body :headers headers)
-
-;; Async requests
-(http-async url :method :post
-            :on-success (lambda (response) ...)
-            :on-error (lambda (error) ...))
-
-;; Streaming requests (SSE)
-(http-stream url
-  :on-event (lambda (event) ...)
-  :on-error (lambda (error) ...))
-
-;; With retry
-(with-retry (:attempts 3 :backoff :exponential)
-  (http-get url))
-```
-
-## Dependency Injection
-
-```lisp
-;; Create container
-(defvar *container* (make-di-container))
-
-;; Register service
-(di-register *container* :llm-client
-  (lambda () (make-client :provider :anthropic)))
-
-;; Resolve service
-(di-resolve *container* :llm-client)
-
-;; Scopes
-(di-scoped *container* :request
-  (lambda ()
-    ;; Request-scoped service
-    ...))
-```
+## Design Notes
+
+- **Neutral plist boundary**: CLOS messages never cross the provider SPI;
+  `messages->neutral` / `neutral->messages` convert at the
+  `provider-chat-model` adapter, providers only see `(:role ... :content ...)`.
+- **Option merging**: unbound slots mean "unset"; `merge-chat-options`
+  implements runtime > client defaults > model defaults, tool lists are unioned.
+- **Internal tool execution**: as in Spring AI, the tool loop lives inside the
+  ChatModel (`internal-tool-execution-enabled` defaults to true); the
+  ChatClient/advisors only see the final response.
+- **Advisor onion chain**: lower `order` = outer position; `advise-stream`
+  defaults to delegating to `advise-call`, so non-streaming advisors don't
+  need to know about the streaming path.
+
+See the [API reference](../docs/API.md).

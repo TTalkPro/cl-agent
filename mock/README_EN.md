@@ -123,62 +123,38 @@ mock/
 (mock-tool-call-count *mock-weather*)  ; => 2
 ```
 
-## Integration with Tests
+## Using in Tests
 
 ```lisp
-;; Use in tests
-(deftest test-agent-with-mock
-  (let* ((mock-llm (make-mock-llm :mode :sequence
-                                  :responses '("Let me check"
-                                               "Beijing is sunny today")))
-         (kernel (make-kernel :service (make-service :provider mock-llm)))
-         (agent (make-kernel-agent kernel)))
+;; Adapt the mock LLM into a ChatModel
+(deftest test-client-with-mock
+  (let* ((mock-llm (cl-agent.mock:make-mock-llm))
+         (model (cl-agent.chat:make-provider-chat-model mock-llm))
+         (client (cl-agent.client:make-chat-client model)))
+    (is (stringp (cl-agent.client:chat client "Hello")))))
 
-    ;; Test Agent behavior
-    (let ((response (agent-chat agent "Beijing weather")))
-      (is (search "sunny" response)))))
-
-;; Verify tool calls
-(deftest test-tool-calls
-  (let* ((mock-tool (make-mock-tool "search" :response "Result"))
-         (kernel (make-kernel ...)))
-
-    (agent-chat agent "Search for Lisp")
-
-    ;; Verify tool was called
-    (is (mock-tool-called-with mock-tool '(:query "Lisp")))))
+;; For precise response sequencing, specialize llm-chat directly
+;; (see seq-provider in tests/suite.lisp): each call pops a canned
+;; llm-response, letting you assert tool-loop rounds and the exact
+;; messages sent to the model.
 ```
 
-## Usage Examples
+## Examples
 
-### Complete Test Scenario
+### Full test scenario (tool loop)
 
 ```lisp
-(deftest test-weather-agent
-  ;; Setup Mock
-  (let* ((mock-llm (make-mock-llm))
-         (mock-weather (make-mock-tool "get-weather"
-                         :response "Beijing: sunny, 25°C")))
-
-    ;; Configure LLM response sequence
-    (mock-llm-set-responses *mock-llm*
-      '(;; First call: decide to use tool
-        (:tool-calls ((:id "1" :name "get-weather" :arguments (:city "Beijing"))))
-        ;; Second call: generate final reply
-        "Based on the query, Beijing is sunny today with 25°C."))
-
-    ;; Create Agent
-    (let ((agent (make-kernel-agent
-                   (make-kernel
-                     :service (make-service :provider mock-llm)
-                     :plugins (list mock-weather)))))
-
-      ;; Execute test
-      (let ((response (agent-chat agent "What's the weather in Beijing?")))
-        ;; Verify response
-        (is (search "25°C" response))
-        ;; Verify tool call
-        (is (mock-tool-called-with mock-weather '(:city "Beijing")))))))
+(deftest test-weather-tools
+  ;; First round returns a tool call, second the final text
+  (let* ((provider (make-seq-provider
+                    (tool-call-response "get_weather" '(("city" . "Beijing")))
+                    (text-response "Sunny in Beijing, 25°C")))
+         (model (cl-agent.chat:make-provider-chat-model provider))
+         (client (cl-agent.client:make-chat-client model)))
+    (is (search "25°C"
+                (cl-agent.client:chat client
+                  (:user "Weather in Beijing?")
+                  (:tools 'get-weather))))))
 ```
 
 ### Streaming Response Simulation

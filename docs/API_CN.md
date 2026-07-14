@@ -1,492 +1,250 @@
-# API 参考
+# CL-Agent API 参考
 
 [English](API.md)
 
-## 目录
+按包组织的 API 速查。与 Spring AI 2.0 的对应关系标注在各节标题中。
 
-- [Core](#core)
-  - [Kernel](#kernel)
-  - [Context](#context)
-  - [Filter](#filter)
-  - [Service](#service)
-- [Tools](#tools)
-  - [Tool 类](#tool-类)
-  - [Tool Registry](#tool-registry)
-  - [Tag 过滤](#tag-过滤)
-  - [预设配置](#预设配置)
-  - [内置工具](#内置工具)
-- [LLM](#llm)
-  - [Client](#client)
-  - [Providers](#providers)
-- [SimpleAgent](#simpleagent)
-  - [KernelAgent](#kernelagent)
-  - [ProcessAgent](#processagent)
-- [Memory](#memory)
-- [RAG](#rag)
-- [MCP](#mcp)
+## cl-agent.chat —— Chat Model API
 
----
+### 消息体系（`org.springframework.ai.chat.messages`）
 
-## Core
+| 符号 | 说明 |
+|---|---|
+| `message` | 抽象基类；`message-role` / `message-text` / `message-metadata` |
+| `(system-message text)` | 系统指令消息 |
+| `(user-message text)` | 用户消息 |
+| `(assistant-message text &key tool-calls)` | 模型回复；`assistant-tool-calls` |
+| `(tool-response-message responses)` | 工具结果消息；`tool-responses` |
+| `(make-tool-call &key id name arguments)` | 工具调用值对象 |
+| `(make-tool-response &key id name text)` | 工具结果值对象 |
+| `message->neutral` / `messages->neutral` | CLOS 消息 → 中立 plist（provider SPI 边界） |
+| `neutral->message` / `neutral->messages` | 反向转换 |
 
-### Kernel
-
-Kernel 是中央协调器，持有 Service、Tool Registry、Filters 和 Config。
-
-#### `make-kernel`
+### Prompt / ChatOptions（`chat.prompt`）
 
 ```lisp
-(make-kernel &key service tool-registry active-tags tag-filter-mode filters config context) => kernel
+(make-prompt messages &key options system)   ; messages 可为字符串/消息/列表
+(prompt-messages prompt) (prompt-options prompt)
+(prompt-copy prompt &key messages options)   ; 不可变增强（Advisor 用）
+(prompt-append-messages prompt new-messages)
+(prompt-system-messages prompt) (prompt-instruction-messages prompt)
+(prompt-last-user-text prompt)
 ```
 
-创建新的 Kernel 实例。
-
-**参数：**
-- `service` - LLM 服务抽象
-- `tool-registry` - 工具注册表
-- `active-tags` - 活跃标签（用于过滤）
-- `tag-filter-mode` - 过滤模式（`:any` 或 `:all`）
-- `filters` - 过滤器对象列表
-- `config` - 配置属性列表
-- `context` - 执行上下文
-
-**示例：**
 ```lisp
-(make-kernel
-  :service my-service
-  :tool-registry registry
-  :active-tags '(:safe :utility)
-  :filters (list logging-filter))
+(make-chat-options :model "..." :temperature 0.3 :max-tokens 1024
+                   :top-p 0.9 :top-k 40 :stop-sequences '("END")
+                   :frequency-penalty 0.0 :presence-penalty 0.0
+                   :tool-callbacks (list cb) :tool-names '("get_weather")
+                   :tool-context '(:tenant "acme")
+                   :internal-tool-execution-enabled t   ; 默认 T
+                   :max-tool-iterations 10)             ; 默认 10
+(merge-chat-options runtime defaults)  ; 运行时覆盖默认；工具取并集
+(copy-chat-options options)
+;; 读取器：chat-options-model / -temperature / -max-tokens / ...
 ```
 
-#### `create-kernel-builder`
+未显式传入的选项处于"未设置"状态，合并时回退默认值。
+
+### ChatResponse（`chat.model.ChatResponse`）
 
 ```lisp
-(create-kernel-builder) => kernel-builder
+(chat-response-text response)              ; 首个 generation 文本
+(chat-response-message response)           ; assistant-message
+(chat-response-tool-calls response)
+(chat-response-has-tool-calls-p response)
+(chat-response-finish-reason response)     ; :stop/:tool-call/:max-tokens/...
+(chat-response-usage response)             ; llm-usage
+(chat-response-generations response)
+(chat-response-metadata-of response)       ; id/model/usage/raw
+(llm-response->chat-response llm-response) ; 适配层转换
 ```
 
-创建 Kernel Builder。
-
-#### `build-kernel`
+### 工具体系（`@Tool` / `ToolCallback` / `ToolCallingManager`）
 
 ```lisp
-(build-kernel builder) => kernel
+(deftool 名称 (&key 参数...)
+  "描述（给模型看）"
+  (:param 参数名 类型 "描述" [:required t] [:default 值])*
+  [(:return-direct t)]
+  函数体...)
 ```
 
-从 Builder 构建 Kernel。
-
-#### Builder 方法
+- 同时生成普通函数、tool-callback、全局注册与符号属性绑定
+- 类型关键字：`:string :number :integer :boolean :array :object`
 
 ```lisp
-;; 添加服务
-(add-service builder provider) => builder
-
-;; 添加单个工具
-(with-tool builder tool) => builder
-
-;; 添加多个工具
-(with-tools builder tool-list) => builder
-
-;; 使用预设
-(with-preset builder preset &key security-level) => builder
-
-;; 设置活跃标签
-(with-active-tags builder tags &key mode) => builder
-
-;; 添加过滤器
-(add-filter builder filter) => builder
+(make-tool-callback fn :name "n" :description "d"
+                    :parameters '((p :string "desc" :required-p t))
+                    :return-direct nil)
+(tool-callback-call callback args-plist &optional tool-context)
+(tool-callback->schema callback)          ; provider 工具 schema
+(find-tool-callback "get_weather")        ; 全局注册表查找
+(register-tool-callback cb) (unregister-tool-callback name)
+(resolve-tool-callbacks specs)            ; 实例/符号/字符串 → callback
+(arguments->plist raw)                    ; hash-table/JSON/plist 归一化
+(make-default-tool-calling-manager)
+(execute-tool-calls manager prompt response)
+;; => (values tool-response-message return-direct-p)
 ```
 
-**示例：**
+条件：`tool-execution-error`、`tool-not-found-error`。
+
+### ChatModel 协议（`ChatModel` / `StreamingChatModel`）
+
 ```lisp
-(build-kernel
-  (with-active-tags
-    (with-preset
-      (add-service
-        (create-kernel-builder)
-        *provider*)
-      :safe
-      :security-level :standard)
-    '(:safe :utility)
-    :mode :any))
+(chat-model-call model prompt)             ; prompt 可为字符串/消息列表
+(chat-model-stream model prompt on-chunk)  ; on-chunk: (delta-text)
+(chat-model-default-options model)
+
+(make-provider-chat-model provider
+  :default-options options
+  :tool-calling-manager manager)
 ```
 
-#### Kernel 查询 API
+`provider-chat-model` 的内部工具执行循环：响应携带 tool-calls 且
+`internal-tool-execution-enabled` 为真时自动执行工具并回传模型，
+直到产生文本回复；超过 `max-tool-iterations` 发
+`max-tool-iterations-exceeded-error`；`:return-direct` 工具立即终止循环。
+
+### ChatMemory（`ChatMemory` / `ChatMemoryRepository`）
 
 ```lisp
-;; 查找工具
-(kernel-find-tool kernel tool-name) => tool
+;; 记忆协议
+(memory-add memory conversation-id messages)
+(memory-messages memory conversation-id)
+(memory-clear memory conversation-id)
+(make-message-window-chat-memory :repository repo :max-messages 20)
 
-;; 执行工具
-(kernel-execute-tool kernel tool-name args) => result
+;; 存储协议（自定义后端实现这四个泛型函数）
+(repository-find repo conversation-id)
+(repository-save repo conversation-id messages)
+(repository-delete repo conversation-id)
+(repository-conversation-ids repo)
+(make-in-memory-chat-memory-repository)
 
-;; 获取工具 Schema（支持 Tag 过滤）
-(kernel-get-tools kernel &key tags) => list
-
-;; 列出工具信息（支持 Tag 过滤）
-(kernel-list-tools kernel &key tags) => list
-
-;; 工具数量
-(kernel-tool-count kernel) => integer
-
-;; 是否有工具
-(kernel-has-tool-p kernel tool-name) => boolean
++default-conversation-id+   ; "default"
 ```
 
-#### Kernel 工具管理 API
+窗口裁剪 pairing-safe：system 消息不计入且保留；孤立 tool 消息头连带丢弃。
+
+## cl-agent.client —— ChatClient + Advisor
+
+### Advisor 协议（`CallAdvisor` / `AdvisorChain`）
 
 ```lisp
-;; 注册工具
-(kernel-register-tool kernel tool) => kernel
+;; 载体
+(make-client-request prompt &key context)   ; ChatClientRequest
+(client-request-prompt r) (client-request-context r)
+(client-request-copy r &key prompt)         ; context 共享
+(make-client-response chat-response &key context)
+(client-response-chat-response r) (client-response-context r)
+(context-get holder key &optional default)  ; request/response 通用
+(context-set holder key value)
 
-;; 批量注册
-(kernel-register-tools kernel tools) => kernel
+;; 协议
+(advise-call advisor request chain)          ; → client-response
+(advise-stream advisor request chain on-chunk) ; 默认委托 advise-call
+(advisor-name advisor) (advisor-order advisor) ; order 越小越靠外
 
-;; 注销工具
-(kernel-unregister-tool kernel tool-name) => kernel
-
-;; 设置活跃标签
-(kernel-set-active-tags kernel tags) => kernel
-
-;; 清除活跃标签
-(kernel-clear-active-tags kernel) => kernel
+;; 链
+(make-advisor-chain advisors call-terminal :stream-terminal st)
+(chain-next chain request)
+(chain-next-stream chain request on-chunk)
 ```
 
-#### 3 层 Invoke API
+### defadvisor 宏
 
 ```lisp
-;; Tier 1: 工具执行
-(invoke kernel tool-name args &key context) => result
-(invoke-tool kernel context tool-name args) => result
-
-;; Tier 2: 单次 LLM 调用
-(invoke-chat kernel messages &key settings) => response
-(invoke-chat-stream kernel messages &key on-token) => nil
-
-;; Tier 3: 完整工具循环
-(invoke-kernel kernel messages &key settings) => response
-(invoke-chat-with-tools kernel messages &key settings) => response
+(defadvisor 名称 (:order N :documentation "...")
+  [(:slots (槽定义...))]
+  (:call (advisor request chain) 方法体...)
+  [(:stream (advisor request chain on-chunk) 方法体...)])
+;; 生成：defclass + advise-call [+ advise-stream] + make-名称 构造函数
 ```
 
----
-
-### Context
-
-执行上下文，追踪变量、消息、历史和执行轨迹。
+### 内置 Advisor
 
 ```lisp
-(make-context &key messages metadata) => context
-(context-get context key) => value
-(context-set context key value) => value
-(context-add-message context message) => context
-(context-get-messages context) => list
+(make-simple-logger-advisor :stream s)                    ; order -1000
+(make-safe-guard-advisor :sensitive-words '("...")
+                         :failure-response "...")         ; order -500
+(make-message-chat-memory-advisor :memory m)              ; order 1000
+(make-prompt-chat-memory-advisor :memory m :template "~A"); order 1000
++conversation-id-key+   ; 请求 context 中的会话 ID 键
 ```
 
----
-
-### Filter
-
-过滤器在 4 个点拦截执行。
+### ChatClient（`ChatClient` / `Builder` / `RequestSpec`）
 
 ```lisp
-(make-filter &key type name fn priority) => filter
+;; 构建
+(make-chat-client model :system s :options o :advisors a :tools ts)
+(chat-client-builder model)          ; → builder
+(default-system builder text)        ; 以下均返回 builder
+(default-options builder options)
+(default-advisors builder &rest advisors)
+(default-tools builder &rest tools)
+(build-client builder)               ; → chat-client
+
+;; fluent 请求（每步返回 spec，配合 -> 线程宏）
+(client-prompt client &optional user-text)
+(prompt-system spec text &rest format-args)
+(prompt-user spec text &rest format-args)
+(prompt-add-messages spec &rest messages)
+(prompt-with-options spec &rest options-or-kv)
+(prompt-advisors spec &rest advisors)
+(prompt-tools spec &rest tools)
+(prompt-context spec key value)
+(prompt-conversation spec conversation-id)
+
+;; 终结操作
+(call-content spec)          ; → 文本
+(call-response spec)         ; → chat-response
+(call-client-response spec)  ; → client-response
+(call-entity spec)           ; → JSON 解析结果（hash-table）
+(stream-content spec on-chunk) ; → 最终 chat-response
 ```
 
-**类型：**
-- `:pre-invocation` - 工具执行前
-- `:post-invocation` - 工具执行后
-- `:pre-chat` - LLM 调用前
-- `:post-chat` - LLM 调用后
-
----
-
-### Service
-
-LLM 抽象。
+### chat 宏
 
 ```lisp
-(make-service &key chat-fn build-result-msgs-fn provider) => service
-(service-from-provider provider) => service
+(chat client
+  [(:system 文本 [format 参数...])]
+  [(:user 文本 [format 参数...])]
+  [(:messages 消息...)]
+  [(:options :temperature 0.7 ...)]
+  [(:advisors advisor...)]
+  [(:tools 工具...)]
+  [(:context 键 值)]
+  [(:conversation 会话ID)]
+  [(:call :content | :response | :client-response | :entity)]  ; 默认 :content
+  [(:stream 回调)])
+
+(chat client "你好")   ; 简写 ≡ (chat client (:user "你好"))
 ```
 
----
-
-## Tools
-
-### Tool 类
+## cl-agent.llm —— 提供商层
 
 ```lisp
-(defclass tool ()
-  ((name :type keyword)
-   (description :type string)
-   (handler :type function)
-   (parameters :type list)
-   (category :type keyword)
-   (tags :type list)
-   (permissions :type list)
-   (metadata)))
+(create-chat-model :anthropic :model "..." :api-key "..." :options opts)
+(create-chat-model-from-builder builder :options opts)
+;; 支持：:anthropic :openai :zhipu :ollama :dashscope :bailian :minimax 等
 ```
 
-#### `make-simple-tool`
+Provider SPI（自定义提供商实现）：
 
 ```lisp
-(make-simple-tool name description handler &key parameters category tags permissions metadata) => tool
+(defmethod cl-agent.core:llm-chat ((p my-provider) messages
+                                   &key max-tokens temperature model tools system)
+  ;; messages 为中立 plist：(:role :user :content "...")
+  ;; 返回 cl-agent.core:llm-response 对象
+  ...)
 ```
 
-创建工具实例。
-
-**参数：**
-- `name` - 工具名称（关键字）
-- `description` - 工具描述
-- `handler` - 执行函数 `(lambda (&key ...) ...)`
-- `parameters` - 参数定义列表
-- `category` - 分类（默认 `:custom`）
-- `tags` - 标签列表
-- `permissions` - 权限列表
-- `metadata` - 元数据
-
-**示例：**
-```lisp
-(make-simple-tool
-  :greet
-  "问候用户"
-  (lambda (&key name)
-    (format nil "你好，~A！" name))
-  :parameters '((:name :type :string :description "用户名" :required-p t))
-  :tags '(:utility :safe))
-```
-
-#### Tag 辅助函数
+## cl-agent.mock —— 测试支持
 
 ```lisp
-(tool-has-tag-p tool tag) => boolean
-(tool-has-any-tag-p tool tags) => boolean
-(tool-has-all-tags-p tool tags) => boolean
-(tool-add-tag tool tag) => tool
-(tool-remove-tag tool tag) => tool
-(tool-set-tags tool tags) => tool
-```
-
----
-
-### Tool Registry
-
-```lisp
-(make-tool-registry) => registry
-(register-tool registry tool) => tool
-(unregister-tool registry tool-name) => boolean
-(find-tool registry tool-name) => tool
-(list-tools registry &key category) => list
-(registry-tool-count registry) => integer
-```
-
----
-
-### Tag 过滤
-
-```lisp
-;; 按单个标签
-(list-tools-by-tag registry tag) => list
-
-;; 按多个标签
-(list-tools-by-tags registry tags &key mode) => list
-;; mode: :any (默认) 或 :all
-
-;; 获取过滤后的 Schema
-(get-tools-schema-by-tags registry tags &key mode) => list
-
-;; 列出所有标签
-(list-all-tags registry) => list
-
-;; 统计
-(count-tools-by-tag registry tag) => integer
-```
-
----
-
-### 预设配置
-
-#### 安全级别
-
-| 级别 | 关键字 | 描述 |
-|------|--------|------|
-| 宽松 | `:permissive` | 最少限制 |
-| 标准 | `:standard` | 平衡模式 |
-| 严格 | `:strict` | 最大限制 |
-
-#### 工具预设
-
-| 预设 | 关键字 | 描述 |
-|------|--------|------|
-| 标准 | `:standard` | 文件 + HTTP + 实用工具 |
-| 安全 | `:safe` | 只读操作 |
-| 完整 | `:full` | 全部工具（含 Shell） |
-| 仅文件 | `:file-only` | 仅文件操作 |
-| 仅 HTTP | `:http-only` | 仅 HTTP 操作 |
-| 仅实用工具 | `:utility-only` | 仅实用工具 |
-
-```lisp
-;; 快速获取预设工具
-(quick-setup-tools &key preset security-level) => list
-
-;; 列出可用预设
-(list-all-presets) => list
-
-;; 查看预设描述
-(describe-preset preset) => string
-```
-
----
-
-### 内置工具
-
-#### 文件工具
-
-```lisp
-(make-read-file-tool) => tool      ; 标签: (:file :io :read :safe)
-(make-write-file-tool) => tool     ; 标签: (:file :io :write)
-(make-delete-file-tool) => tool    ; 标签: (:file :io :write :dangerous)
-(make-list-directory-tool) => tool ; 标签: (:file :io :read :safe)
-(create-file-tools) => list
-```
-
-#### HTTP 工具
-
-```lisp
-(make-http-get-tool) => tool   ; 标签: (:http :network :read :safe)
-(make-http-post-tool) => tool  ; 标签: (:http :network :write)
-(create-http-tools) => list
-```
-
-#### Shell 工具
-
-```lisp
-(make-execute-command-tool) => tool  ; 标签: (:shell :system :dangerous)
-(create-shell-tools) => list
-```
-
-#### 实用工具
-
-```lisp
-(make-get-timestamp-tool) => tool    ; 标签: (:utility :safe)
-(make-generate-uuid-tool) => tool    ; 标签: (:utility :safe)
-(make-json-parse-tool) => tool       ; 标签: (:utility :safe)
-(make-json-stringify-tool) => tool   ; 标签: (:utility :safe)
-(make-string-replace-tool) => tool   ; 标签: (:utility :safe)
-(make-math-eval-tool) => tool        ; 标签: (:utility :safe)
-(create-utility-tools) => list
-```
-
----
-
-## LLM
-
-### Client
-
-```lisp
-(make-client &key provider model api-key base-url max-tokens temperature) => client
-(chat client messages &key tools temperature max-tokens) => response
-(chat-stream client messages &key on-token on-complete) => nil
-```
-
-### Providers
-
-| 提供商 | 关键字 | 默认模型 |
-|--------|--------|----------|
-| Anthropic | `:anthropic` | claude-3-5-sonnet-20241022 |
-| OpenAI | `:openai` | gpt-4o |
-| 智谱 AI | `:zhipu` | glm-4-turbo |
-| Ollama | `:ollama` | llama2 |
-
----
-
-## SimpleAgent
-
-### KernelAgent
-
-```lisp
-(make-kernel-agent kernel &key name system-prompt settings callbacks) => agent
-(agent-chat agent message &key verbose) => response
-```
-
-### ProcessAgent
-
-```lisp
-(make-process-agent kernel) => agent
-(agent-start agent message) => nil
-(agent-pause agent) => nil
-(agent-resume agent) => nil
-(agent-stop agent) => nil
-```
-
----
-
-## Memory
-
-### Store
-
-```lisp
-(make-memory-store-backend) => store
-(make-sqlite-store-backend &key db-path) => store
-(store-put store namespace key value) => value
-(store-get store namespace key) => value
-(store-delete store namespace key) => boolean
-(store-list-keys store namespace) => list
-```
-
-### Checkpoint
-
-```lisp
-(save-checkpoint checkpointer thread-id state) => checkpoint
-(load-checkpoint checkpointer thread-id) => checkpoint
-```
-
-### Agent Memory
-
-```lisp
-(make-agent-memory &key context-store persistent-store default-thread-id) => memory
-(am-add-message memory thread-id role content) => message
-(am-get-messages memory thread-id) => list
-(am-save-checkpoint memory thread-id state) => checkpoint
-(am-load-checkpoint memory checkpoint-id) => checkpoint
-```
-
----
-
-## RAG
-
-### Pipeline
-
-```lisp
-(make-rag-pipeline &key embeddings-model vector-store splitter) => pipeline
-(rag-retrieve pipeline query &key top-k) => list
-(rag-query pipeline question &key top-k) => response
-```
-
-### Vector Store
-
-```lisp
-(make-vector-store) => store
-(vector-store-add-document store content embedding &key metadata) => document
-(vector-store-search store query-embedding &key top-k) => list
-```
-
----
-
-## MCP
-
-### Client
-
-```lisp
-(make-mcp-client &key transport) => client
-(mcp-client-connect client) => nil
-(mcp-client-call-tool client tool-name args) => result
-```
-
-### Server
-
-```lisp
-(make-mcp-server &key transport) => server
-(mcp-server-start server) => nil
-(mcp-register-tool server tool-name fn) => nil
+(cl-agent.mock:make-mock-llm)          ; 智能规则响应，无需 API 密钥
+(cl-agent.mock:make-quick-mock :smart)
+;; 配合 (make-provider-chat-model (make-mock-llm)) 即可全链路演示
 ```

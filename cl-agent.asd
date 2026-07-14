@@ -1,56 +1,48 @@
 ;;;; cl-agent.asd
 ;;;; CL-Agent - Unified AI Agent Framework (Meta-System)
 ;;;;
-;;;; Version: 7.0.0 (Semantic Kernel + clj-agent Architecture)
+;;;; Version: 8.0.0 (Spring AI 2.0 Architecture)
 ;;;; Author: David
 ;;;;
 ;;;; Overview:
-;;;;   This is the meta-system for CL-Agent, aggregating all subsystems.
-;;;;   Architecture follows clj-agent: a fat core (protocols + kernel +
-;;;;   agent runtime) with optional capability modules around it.
+;;;;   CL-Agent 元系统，聚合全部子系统。
+;;;;   架构全面对标 Spring AI 2.0：ChatClient + Advisor 为核心编程模型，
+;;;;   ChatModel 协议解耦多提供商实现。
 ;;;;
 ;;;; Architecture:
-;;;;   Layer 1 - Core:   cl-agent-core (Infrastructure + Kernel + SimpleAgent)
-;;;;   Layer 2 - LLM:    cl-agent-llm (Provider implementations, implements llm-chat protocol)
-;;;;   Layer 3 - Extra:  cl-agent-extra (Checkpoint, Process framework, ProcessAgent)
+;;;;   Layer 1 - Core: cl-agent-core
+;;;;     基础设施 + cl-agent.chat（消息/Prompt/ChatOptions/ChatResponse/
+;;;;     deftool 工具体系/ChatModel/ChatMemory）
+;;;;     + cl-agent.client（Advisor + ChatClient + chat 宏 DSL）
+;;;;   Layer 2 - LLM: cl-agent-llm
+;;;;     提供商实现（Anthropic/OpenAI/智谱/Ollama/DashScope/MiniMax...），
+;;;;     实现 core 的 llm-chat SPI，经 provider-chat-model 适配为 ChatModel
 ;;;;
 ;;;; Usage:
 ;;;;   (asdf:load-system :cl-agent)
 ;;;;
-;;;; Loading Individual Subsystems:
-;;;;   (asdf:load-system :cl-agent-core)   ; Infrastructure + Kernel + SimpleAgent
-;;;;   (asdf:load-system :cl-agent-llm)    ; LLM Provider implementations
-;;;;   (asdf:load-system :cl-agent-extra)  ; Checkpoint + Process framework + ProcessAgent
-;;;;
-;;;; Major Changes (v6.0.0):
-;;;;   - Core restructured: Process framework moved out, SimpleAgent moved in
-;;;;   - New cl-agent-extra module: process framework + tools + ProcessAgent
-;;;;   - Removed cl-agent-simpleagent and cl-agent-tools as standalone systems
-;;;;   - Removed remaining graph engine leftovers (process is the only workflow story)
-;;;;
 ;;;; Changelog:
-;;;;   v7.0.0 - 减法：删除 RAG / MCP / tools 子系统（工具注册表内置到 core）；
-;;;;            删除 cl-agent-memory（checkpoint 并入 cl-agent-extra）
-;;;;   v6.0.0 - Core = infra + kernel + simpleagent; extras split out; graph leftovers removed
-;;;;   v5.0.0 - clj-agent architecture alignment, 7 modules
+;;;;   v8.0.0 - Spring AI 2.0 对标重构：删除 Process/Checkpoint/Kernel/
+;;;;            SimpleAgent 体系（cl-agent-extra 移除），新增 ChatClient +
+;;;;            Advisor + ChatModel + ChatMemory + deftool/defadvisor 宏
+;;;;   v7.0.0 - 减法：删除 RAG / MCP / tools 子系统
+;;;;   v6.0.0 - Core = infra + kernel + simpleagent; extras split out
+;;;;   v5.0.0 - clj-agent architecture alignment
 ;;;;   v4.0.0 - Semantic Kernel architecture
 ;;;;   v3.0.0 - Initial modular design
 
 (asdf:defsystem #:cl-agent
-  :description "Unified AI Agent Framework - Meta System (Semantic Kernel + clj-agent)"
+  :description "Unified AI Agent Framework - Meta System (Spring AI 2.0 style)"
   :author "David"
   :license "MIT"
-  :version "7.0.0"
+  :version "8.0.0"
 
   ;; Meta-system contains no components, only declares dependencies
-  :depends-on (;; Layer 1: Core (Infrastructure + Kernel + SimpleAgent)
+  :depends-on (;; Layer 1: Core (Infrastructure + Chat + Client)
                #:cl-agent-core
 
                ;; Layer 2: LLM (Provider implementations)
-               #:cl-agent-llm
-
-               ;; Layer 3: Extra (Checkpoint + Process framework + ProcessAgent)
-               #:cl-agent-extra)
+               #:cl-agent-llm)
 
   :in-order-to ((asdf:test-op (asdf:test-op #:cl-agent-test))))
 
@@ -62,7 +54,7 @@
   :description "CL-Agent Complete Test Suite"
   :author "David"
   :license "MIT"
-  :version "3.0.0"
+  :version "8.0.0"
 
   :depends-on (#:cl-agent
                #:cl-agent-mock
@@ -72,29 +64,22 @@
   :components (;; Test suite setup
                (:file "tests/suite")
 
-               ;; Core tests
+               ;; Core infrastructure tests
                (:file "tests/test-core")
-               (:file "tests/test-kernel-function")
-               (:file "tests/test-kernel-plugin")
-               (:file "tests/test-kernel-core")
-               (:file "tests/test-kernel-filter")
-               (:file "tests/test-kernel-chat")
 
-               ;; ChatMemory + Memory Filter tests
-               ;; (依赖 test-kernel-chat 中的 sequenced mock)
-               (:file "tests/test-memory-filter")
+               ;; Chat Model API tests
+               (:file "tests/test-message")     ; 消息体系 + 中立互转
+               (:file "tests/test-options")     ; ChatOptions 合并语义
+               (:file "tests/test-tool")        ; deftool / ToolCallback / Manager
+               (:file "tests/test-chat-model")  ; ChatModel + 工具执行循环
+               (:file "tests/test-memory")      ; ChatMemory / Repository
 
-               ;; LLM tests
-               (:file "tests/test-llm")
+               ;; ChatClient + Advisor tests
+               (:file "tests/test-advisor")     ; Advisor 协议 / 链 / defadvisor
+               (:file "tests/test-chat-client") ; ChatClient / chat 宏 / 集成
 
-               ;; SimpleAgent tests
-               (:file "tests/test-simpleagent")
-
-               ;; Checkpoint tests
-               (:file "tests/test-checkpoint")
-
-               ;; Integration tests
-               (:file "tests/test-integration-kernel"))
+               ;; LLM provider tests
+               (:file "tests/test-llm"))
 
   :perform (asdf:test-op (op c)
              (uiop:symbol-call :fiveam :run! :cl-agent/tests)))

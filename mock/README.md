@@ -126,59 +126,34 @@ mock/
 ## 与测试集成
 
 ```lisp
-;; 在测试中使用
-(deftest test-agent-with-mock
-  (let* ((mock-llm (make-mock-llm :mode :sequence
-                                  :responses '("让我查一下"
-                                               "北京今天晴天")))
-         (kernel (make-kernel :service (make-service :provider mock-llm)))
-         (agent (make-kernel-agent kernel)))
+;; 在测试中把 Mock LLM 适配为 ChatModel
+(deftest test-client-with-mock
+  (let* ((mock-llm (cl-agent.mock:make-mock-llm))
+         (model (cl-agent.chat:make-provider-chat-model mock-llm))
+         (client (cl-agent.client:make-chat-client model)))
+    (is (stringp (cl-agent.client:chat client "你好")))))
 
-    ;; 测试 Agent 行为
-    (let ((response (agent-chat agent "北京天气")))
-      (is (search "晴天" response)))))
-
-;; 验证工具调用
-(deftest test-tool-calls
-  (let* ((mock-tool (make-mock-tool "search" :response "结果"))
-         (kernel (make-kernel ...)))
-
-    (agent-chat agent "搜索 Lisp")
-
-    ;; 验证工具被调用
-    (is (mock-tool-called-with mock-tool '(:query "Lisp")))))
+;; 需要精确控制响应序列时，直接特化 llm-chat（见 tests/suite.lisp
+;; 的 seq-provider）：每次调用弹出预设的 llm-response，
+;; 可断言工具循环轮数、发给模型的消息等。
 ```
 
 ## 使用示例
 
-### 完整测试场景
+### 完整测试场景（工具循环）
 
 ```lisp
-(deftest test-weather-agent
-  ;; 设置 Mock
-  (let* ((mock-llm (make-mock-llm))
-         (mock-weather (make-mock-tool "get-weather"
-                         :response "北京：晴，25°C")))
-
-    ;; 配置 LLM 响应序列
-    (mock-llm-set-responses *mock-llm*
-      '(;; 第一次调用：决定使用工具
-        (:tool-calls ((:id "1" :name "get-weather" :arguments (:city "北京"))))
-        ;; 第二次调用：生成最终回复
-        "根据查询，北京今天天气晴朗，温度 25°C。"))
-
-    ;; 创建 Agent
-    (let ((agent (make-kernel-agent
-                   (make-kernel
-                     :service (make-service :provider mock-llm)
-                     :plugins (list mock-weather)))))
-
-      ;; 执行测试
-      (let ((response (agent-chat agent "北京天气怎么样？")))
-        ;; 验证响应
-        (is (search "25°C" response))
-        ;; 验证工具调用
-        (is (mock-tool-called-with mock-weather '(:city "北京")))))))
+(deftest test-weather-tools
+  ;; 第一轮返回 tool-call，第二轮返回最终文本
+  (let* ((provider (make-seq-provider
+                    (tool-call-response "get_weather" '(("city" . "北京")))
+                    (text-response "北京今天晴，25°C")))
+         (model (cl-agent.chat:make-provider-chat-model provider))
+         (client (cl-agent.client:make-chat-client model)))
+    (is (search "25°C"
+                (cl-agent.client:chat client
+                  (:user "北京天气怎么样？")
+                  (:tools 'get-weather))))))
 ```
 
 ### 流式响应模拟
