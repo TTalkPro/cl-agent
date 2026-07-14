@@ -72,6 +72,10 @@ Options not explicitly passed are "unset" and fall back on merge.
 ;; error isolation); concurrent only for multi-tool rounds; workers do not
 ;; inherit dynamic bindings — tools receive state via tool-context
 (execute-tool-calls manager prompt response)
+;; manage lifetime with the macro instead of a global holding a pool:
+(with-concurrent-tool-calling-manager (mgr :pool-size 8) ...) ; auto-shutdown
+;; override the manager of auto-registered advisors (no call-site changes):
+;; (let ((cl-agent.client:*tool-calling-manager* mgr)) (chat client ...))
 ;; => tool-execution-result (mirrors ToolExecutionResult)
 (tool-execution-conversation-history result) ; full conversation history
 (tool-execution-return-direct-p result)

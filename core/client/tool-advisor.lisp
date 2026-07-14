@@ -33,10 +33,28 @@
 (defparameter +tool-calling-advisor-order+ 2000
   "tool-calling-advisor 默认排序：记忆类 Advisor（1000）内侧")
 
+(defvar *tool-calling-manager* nil
+  "tool-calling-advisor 未显式传 :manager 时采用的默认 manager。
+
+NIL 表示各 advisor 自建独立的顺序 manager（无共享状态）。
+可用 let 动态绑定覆盖——例如临时切到并行 manager——无需全局
+变量或改造任何调用点（含 ChatClient 自动注册的 advisor）：
+
+  (with-concurrent-tool-calling-manager (mgr :pool-size 8)
+    (let ((*tool-calling-manager* mgr))
+      (chat client (:user \"...\") (:tools ...))))  ; 自动注册的 advisor 即用 mgr
+
+显式 (make-tool-calling-advisor :manager x) 始终优先于本默认。")
+
+(defun default-tool-calling-manager* ()
+  "解析默认 manager：优先动态绑定的 *tool-calling-manager*，
+否则新建一个顺序 manager"
+  (or *tool-calling-manager* (make-default-tool-calling-manager)))
+
 (defclass tool-calling-advisor (advisor)
   ((manager
     :initarg :manager
-    :initform (make-default-tool-calling-manager)
+    :initform (default-tool-calling-manager*)
     :reader tool-advisor-manager
     :documentation "tool-calling-manager 实例")
    (max-iterations

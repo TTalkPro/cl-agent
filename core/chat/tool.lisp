@@ -538,6 +538,21 @@ shutdown-tool-calling-manager 释放。"
       (setf (manager-kernel manager) nil)
       t)))
 
+(defmacro with-concurrent-tool-calling-manager ((var &rest options) &body body)
+  "词法作用域内绑定 VAR 为并行 manager，退出时（含非局部退出）
+自动关闭线程池——避免用全局变量持有线程池。
+
+OPTIONS 透传 make-concurrent-tool-calling-manager（:pool-size / :timeout）。
+
+示例：
+  (with-concurrent-tool-calling-manager (mgr :pool-size 8)
+    (let ((client (make-chat-client model
+                    :advisors (list (make-tool-calling-advisor :manager mgr)))))
+      (chat client ...)))"
+  `(let ((,var (make-concurrent-tool-calling-manager ,@options)))
+     (unwind-protect (progn ,@body)
+       (shutdown-tool-calling-manager ,var))))
+
 (defun %force-tool-future (future tool-call timeout)
   "取 FUTURE 的值（cons: tool-response . direct-p）。
 TIMEOUT 非空且超时时返回超时错误结果（worker 仍在后台跑完，

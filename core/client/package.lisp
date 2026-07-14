@@ -65,6 +65,7 @@
    #:tool-advisor-manager
    #:tool-advisor-max-iterations
    #:+tool-calling-advisor-order+
+   #:*tool-calling-manager*
    ;; 细粒度钩子（对标 doInitializeLoop/doBeforeCall/doAfterCall/doFinalizeLoop）
    #:tool-advisor-initialize-loop
    #:tool-advisor-before-call

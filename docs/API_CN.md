@@ -90,6 +90,11 @@
 ;; 与顺序语义等价（结果按原序、return-direct 取并集、错误隔离），
 ;; 仅多工具时并发；worker 不继承动态绑定，工具靠 tool-context 传参
 (execute-tool-calls manager prompt response)
+;; 生命周期用宏管理，避免全局变量持有线程池：
+(with-concurrent-tool-calling-manager (mgr :pool-size 8)
+  ...)                                        ; 退出时自动 shutdown
+;; 覆盖自动注册 advisor 的默认 manager（无需改调用点）：
+;; (let ((cl-agent.client:*tool-calling-manager* mgr)) (chat client ...))
 ;; => tool-execution-result（对标 ToolExecutionResult）
 (tool-execution-conversation-history result) ; 完整会话历史
 (tool-execution-return-direct-p result)

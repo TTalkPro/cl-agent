@@ -243,6 +243,67 @@
                                (list :id (format nil "id-~A" i)
                                      :name name :arguments ht)))))
 
+(test with-macro-lifecycle
+  "with-concurrent-tool-calling-manager 退出时自动关闭线程池（含非局部退出）"
+  (let ((captured nil))
+    ;; 正常退出
+    (cl-agent.chat:with-concurrent-tool-calling-manager (mgr :pool-size 2)
+      (setf captured mgr)
+      (cl-agent.chat:execute-tool-calls
+       mgr (cl-agent.chat:make-prompt "go")
+       (pt-response "pt_echo" "pt_echo")))
+    ;; 退出后内核已释放
+    (is (null (cl-agent.chat::manager-kernel captured)))
+    ;; 非局部退出（error）也应释放
+    (setf captured nil)
+    (ignore-errors
+     (cl-agent.chat:with-concurrent-tool-calling-manager (mgr)
+       (setf captured mgr)
+       (cl-agent.chat:execute-tool-calls
+        mgr (cl-agent.chat:make-prompt "go")
+        (pt-response "pt_echo" "pt_echo"))
+       (error "非局部退出")))
+    (is (null (cl-agent.chat::manager-kernel captured)))))
+
+(test dynamic-manager-override
+  "*tool-calling-manager* 动态覆盖自动注册 advisor 的默认 manager"
+  (cl-agent.chat:with-concurrent-tool-calling-manager (mgr)
+    (let ((cl-agent.client:*tool-calling-manager* mgr))
+      ;; 自动注册的 advisor（未显式传 :manager）应采用动态绑定的并行 mgr
+      (let ((advisor (cl-agent.client:make-tool-calling-advisor)))
+        (is (eq mgr (cl-agent.client:tool-advisor-manager advisor)))))
+    ;; 显式 :manager 始终优先于动态默认
+    (let ((cl-agent.client:*tool-calling-manager* mgr)
+          (explicit (cl-agent.chat:make-default-tool-calling-manager)))
+      (is (eq explicit
+              (cl-agent.client:tool-advisor-manager
+               (cl-agent.client:make-tool-calling-advisor :manager explicit))))))
+  ;; 未绑定时各 advisor 自建独立顺序 manager
+  (let ((a1 (cl-agent.client:make-tool-calling-advisor))
+        (a2 (cl-agent.client:make-tool-calling-advisor)))
+    (is (not (eq (cl-agent.client:tool-advisor-manager a1)
+                 (cl-agent.client:tool-advisor-manager a2))))
+    (is (typep (cl-agent.client:tool-advisor-manager a1)
+               'cl-agent.chat:default-tool-calling-manager))))
+
+(test dynamic-override-end-to-end
+  "动态覆盖端到端：全程无全局变量，client 自动注册的 advisor 走并行"
+  (let ((provider (make-seq-provider
+                   (pt-multi-tool-llm-response
+                    '("pt_echo" (("text" . "p")))
+                    '("pt_echo" (("text" . "q"))))
+                   (text-response "完成"))))
+    (cl-agent.chat:with-concurrent-tool-calling-manager (mgr :pool-size 2)
+      (let ((cl-agent.client:*tool-calling-manager* mgr)
+            (client (cl-agent.client:make-chat-client
+                     (cl-agent.chat:make-provider-chat-model provider))))
+        (is (string= "完成"
+                     (cl-agent.client:chat client
+                       (:user "并行")
+                       (:tools 'pt-echo))))
+        ;; 确实用了并行 mgr（其内核已被创建）
+        (is-true (cl-agent.chat::manager-kernel mgr))))))
+
 (test parallel-via-advisor
   "并行 manager 经 tool-calling-advisor 驱动完整工具循环"
   (let* ((provider (make-seq-provider

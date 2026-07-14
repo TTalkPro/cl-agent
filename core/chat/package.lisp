@@ -176,6 +176,7 @@
    #:manager-pool-size
    #:manager-timeout
    #:shutdown-tool-calling-manager
+   #:with-concurrent-tool-calling-manager
    #:tool-execution-result
    #:tool-execution-conversation-history
    #:tool-execution-return-direct-p
