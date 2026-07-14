@@ -101,6 +101,7 @@
    #:chat-options-stop-sequences
    #:chat-options-frequency-penalty
    #:chat-options-presence-penalty
+   #:chat-options-extra-params
    #:chat-options-tool-callbacks
    #:chat-options-tool-names
    #:chat-options-tool-context

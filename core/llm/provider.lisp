@@ -21,8 +21,14 @@
 ;;; Core LLM Protocol
 ;;; ============================================================
 
-(defgeneric llm-chat (provider messages &key max-tokens temperature model tools system)
+(defgeneric llm-chat (provider messages &key max-tokens temperature model tools system
+                                             top-p top-k stop
+                                             frequency-penalty presence-penalty
+                                             tool-choice extra-params)
   (:documentation "Send a chat request to an LLM.
+
+所有可选参数遵循\"存在才发送\"（参照 clj-agent build-params）：
+NIL 表示不下发该字段，避免误触发厂商默认值或 400。
 
 Parameters:
   PROVIDER    - Provider instance (implements this generic function)
@@ -32,6 +38,14 @@ Parameters:
   MODEL       - Model name (optional, uses provider default)
   TOOLS       - List of tool schemas (optional)
   SYSTEM      - System prompt (optional)
+  TOP-P       - 核采样参数 (optional)
+  TOP-K       - Top-K 采样（Anthropic 等支持的厂商）(optional)
+  STOP        - 停止序列列表 (optional)
+  FREQUENCY-PENALTY - 频率惩罚 (optional)
+  PRESENCE-PENALTY  - 存在惩罚 (optional)
+  TOOL-CHOICE - :auto / :required / :none 或厂商原生形态 (optional)
+  EXTRA-PARAMS - 厂商专有参数逃生通道（plist，直接并入请求体，
+                 对标 clj-agent 的 :extra-body）(optional)
 
 Returns:
   Response plist:
@@ -46,7 +60,11 @@ Note:
   Kernel uses this protocol to communicate with LLMs without
   knowing specific provider implementations."))
 
-(defgeneric llm-chat-stream (provider messages callback &key max-tokens temperature model tools system)
+(defgeneric llm-chat-stream (provider messages callback
+                             &key max-tokens temperature model tools system
+                                  top-p top-k stop
+                                  frequency-penalty presence-penalty
+                                  tool-choice extra-params)
   (:documentation "Send a streaming chat request to an LLM.
 
 Parameters:
@@ -165,15 +183,17 @@ Returns:
   "Default: assume streaming is not supported."
   nil)
 
-(defmethod llm-chat-stream ((provider t) messages callback &key max-tokens temperature model tools system)
+(defmethod llm-chat-stream ((provider t) messages callback
+                            &rest args
+                            &key max-tokens temperature model tools system
+                                 top-p top-k stop
+                                 frequency-penalty presence-penalty
+                                 tool-choice extra-params)
   "Default streaming implementation: fall back to non-streaming."
-  (declare (ignore callback))
-  (llm-chat provider messages
-            :max-tokens max-tokens
-            :temperature temperature
-            :model model
-            :tools tools
-            :system system))
+  (declare (ignore callback max-tokens temperature model tools system
+                   top-p top-k stop frequency-penalty presence-penalty
+                   tool-choice extra-params))
+  (apply #'llm-chat provider messages args))
 
 ;;; ============================================================
 ;;; Provider Capability Checking
