@@ -79,7 +79,9 @@
                (:file "tests/test-chat-client") ; ChatClient / chat 宏 / 集成
 
                ;; LLM provider tests
-               (:file "tests/test-llm"))
+               (:file "tests/test-llm")
+               (:file "tests/test-providers")  ; 新 provider / registry / 请求参数
+               (:file "tests/test-streaming")) ; SSE 流式处理器
 
   :perform (asdf:test-op (op c)
              (uiop:symbol-call :fiveam :run! :cl-agent/tests)))

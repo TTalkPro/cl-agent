@@ -17,8 +17,9 @@
 - **工具体系**：`deftool` 宏对标 `@Tool` 注解，自动派生 JSON Schema 并注册；
   ToolCallback / ToolCallingManager / `:return-direct` / ToolContext
 - **ChatMemory**：Repository 存储协议 + 滑动窗口记忆（pairing-safe 裁剪）
-- **多提供商**：Anthropic、OpenAI、智谱 GLM、Ollama、DashScope、MiniMax
-  （统一 `llm-chat` SPI + `llm-response`，经 `provider-chat-model` 适配）
+- **多提供商**：Anthropic、OpenAI、智谱 GLM、DeepSeek、Gemini、Mistral、
+  Ollama、DashScope、MiniMax（统一 `llm-chat` SPI + `llm-response`，
+  经 `provider-chat-model` 适配；DeepSeek 支持前缀续写 beta）
 
 ## 架构
 

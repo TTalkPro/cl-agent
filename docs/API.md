@@ -187,7 +187,18 @@ orphaned leading tool messages are dropped.
 
 ```lisp
 (create-chat-model :anthropic :model "..." :api-key "..." :options opts)
-;; providers: :anthropic :openai :zhipu :ollama :dashscope :bailian :minimax ...
+;; providers: :anthropic :openai :zhipu :deepseek :gemini :mistral
+;;            :ollama :dashscope :minimax (aliases google/qwen/bailian/claude/glm...)
+```
+
+DeepSeek prefix completion (beta):
+
+```lisp
+;; The last assistant message is the prefix; the model continues from it
+(cl-agent.llm.providers:deepseek-prefix-chat provider
+  (list (list :role :user :content "Write a line of poetry")
+        (list :role :assistant :content "The spring wind"))
+  :max-tokens 256)
 ```
 
 Provider SPI for custom providers:

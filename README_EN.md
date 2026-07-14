@@ -21,8 +21,9 @@ and fluent builders.
   `:return-direct` / ToolContext
 - **ChatMemory**: repository storage protocol + message-window memory with
   pairing-safe truncation
-- **Multi-provider**: Anthropic, OpenAI, Zhipu GLM, Ollama, DashScope, MiniMax
-  (unified `llm-chat` SPI + `llm-response`, adapted via `provider-chat-model`)
+- **Multi-provider**: Anthropic, OpenAI, Zhipu GLM, DeepSeek, Gemini, Mistral,
+  Ollama, DashScope, MiniMax (unified `llm-chat` SPI + `llm-response`, adapted
+  via `provider-chat-model`; DeepSeek prefix completion supported)
 
 ## Architecture
 

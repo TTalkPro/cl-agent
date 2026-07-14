@@ -71,9 +71,18 @@
      (:file "zhipu")
      (:file "ollama")
      (:file "minimax")
-     (:file "bailian")))       ; 阿里云百炼 DashScope
+     (:file "deepseek")         ; DeepSeek（含前缀续写 beta）
+     (:file "gemini")           ; Google Gemini（OpenAI 兼容端点）
+     (:file "mistral")          ; Mistral AI
+     (:file "dashscope")))     ; 阿里云 DashScope（通义千问）
 
-   ;; 6. Service layer (response normalization)
+   ;; 6. SSE 流式实现（真流式：llm-chat-stream 特化）
+   (:module "stream"
+    :components
+    ((:file "anthropic")       ; Anthropic 格式（anthropic + minimax）
+     (:file "openai")))        ; OpenAI 兼容（openai/zhipu/deepseek/...）
+
+   ;; 7. Service layer (response normalization)
    (:file "service")
 
    ;; 7. Factory (registry, config, builder)

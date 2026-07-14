@@ -51,10 +51,18 @@
   (make-instance 'seq-provider :queue responses))
 
 (defmethod cl-agent.core:llm-chat ((provider seq-provider) messages
-                                   &key max-tokens temperature model tools system)
+                                   &key max-tokens temperature model tools system
+                                        top-p top-k stop
+                                        frequency-penalty presence-penalty
+                                        tool-choice extra-params
+                                   &allow-other-keys)
   (declare (ignore system))
   (push (list :messages messages :tools tools :model model
-              :max-tokens max-tokens :temperature temperature)
+              :max-tokens max-tokens :temperature temperature
+              :top-p top-p :top-k top-k :stop stop
+              :frequency-penalty frequency-penalty
+              :presence-penalty presence-penalty
+              :tool-choice tool-choice :extra-params extra-params)
         (seq-provider-requests provider))
   (let ((next (pop (seq-provider-queue provider))))
     (unless next

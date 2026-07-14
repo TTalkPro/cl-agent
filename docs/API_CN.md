@@ -35,6 +35,7 @@
 (make-chat-options :model "..." :temperature 0.3 :max-tokens 1024
                    :top-p 0.9 :top-k 40 :stop-sequences '("END")
                    :frequency-penalty 0.0 :presence-penalty 0.0
+                   :extra-params '(:seed 42)            ; 厂商专有参数逃生通道
                    :tool-callbacks (list cb) :tool-names '("get_weather")
                    :tool-context '(:tenant "acme")
                    :internal-tool-execution-enabled t   ; 默认 T
@@ -228,7 +229,18 @@
 ```lisp
 (create-chat-model :anthropic :model "..." :api-key "..." :options opts)
 (create-chat-model-from-builder builder :options opts)
-;; 支持：:anthropic :openai :zhipu :ollama :dashscope :bailian :minimax 等
+;; 支持：:anthropic :openai :zhipu :deepseek :gemini :mistral
+;;       :ollama :dashscope :minimax（别名 google/qwen/bailian/claude/glm...）
+```
+
+DeepSeek 前缀续写（beta）：
+
+```lisp
+;; 最后一条 assistant 消息作为前缀，模型从其继续生成（建议搭配 :stop）
+(cl-agent.llm.providers:deepseek-prefix-chat provider
+  (list (list :role :user :content "写一句诗")
+        (list :role :assistant :content "春天的风"))
+  :max-tokens 256)
 ```
 
 Provider SPI（自定义提供商实现）：
