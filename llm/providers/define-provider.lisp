@@ -90,15 +90,40 @@
 ;;; OpenAI 兼容的通用函数
 ;;; ============================================================
 
+(defun tool-choice-to-wire (tool-choice)
+  "把中立 tool-choice 翻译为 OpenAI wire 形态。
+
+关键字 :auto/:required/:none → 字符串；
+其余（字符串 / hash-table 指定工具）原样透传。
+（参照 clj-agent openai-compat/->wire-tool-choice）"
+  (case tool-choice
+    (:auto "auto")
+    (:required "required")
+    (:none "none")
+    (otherwise tool-choice)))
+
 (defun build-openai-compatible-request (provider messages &key
                                                    max-tokens
                                                    temperature
                                                    model
                                                    tools
+                                                   top-p
+                                                   stop
+                                                   frequency-penalty
+                                                   presence-penalty
+                                                   tool-choice
+                                                   extra-params
                                                    (stream nil))
   "构建 OpenAI 兼容的请求体
 
-适用于 OpenAI、智谱 AI 等兼容 API"
+适用于 OpenAI、智谱 AI、DeepSeek、Gemini、Mistral 等兼容 API。
+
+所有可选参数「存在才发送」（NIL 不写入请求体），参照 clj-agent
+build-params：推理类模型对强塞的默认值敏感，且 null 字段会触发
+部分 API 400。
+
+EXTRA-PARAMS 为厂商专有参数逃生通道（plist，键为字符串或关键字），
+直接并入请求体顶层，可覆盖任何字段（对标 clj-agent :extra-body）。"
   (let ((model-name (or model (cl-agent.llm:provider-default-model provider)))
         (body (make-hash-table :test 'equal)))
     ;; 基础字段
@@ -114,13 +139,39 @@
     (when stream
       (setf (gethash "stream" body) t))
 
-    ;; 可选字段
+    ;; 可选字段（存在才发送）
     (when max-tokens
       (setf (gethash "max_tokens" body) max-tokens))
 
     (when tools
       (setf (gethash "tools" body)
             (mapcar #'format-tool-for-openai tools)))
+
+    (when top-p
+      (setf (gethash "top_p" body) top-p))
+
+    (when stop
+      (setf (gethash "stop" body)
+            (if (listp stop) (coerce stop 'vector) stop)))
+
+    (when frequency-penalty
+      (setf (gethash "frequency_penalty" body) frequency-penalty))
+
+    (when presence-penalty
+      (setf (gethash "presence_penalty" body) presence-penalty))
+
+    (when tool-choice
+      (setf (gethash "tool_choice" body) (tool-choice-to-wire tool-choice)))
+
+    ;; 厂商专有参数逃生通道：最后并入，可覆盖任何字段
+    (when extra-params
+      (loop for (key value) on extra-params by #'cddr
+            do (setf (gethash (if (stringp key)
+                                  key
+                                  (substitute #\_ #\-
+                                              (string-downcase (string key))))
+                              body)
+                     value)))
 
     body))
 
@@ -144,7 +195,10 @@
                 (setf (gethash "tool_calls" msg-hash)
                       (convert-tool-calls-for-openai tool-calls)))
               (when tool-call-id
-                (setf (gethash "tool_call_id" msg-hash) tool-call-id)))
+                (setf (gethash "tool_call_id" msg-hash) tool-call-id))
+              ;; DeepSeek 前缀续写（beta）：assistant 消息标记 prefix:true
+              (when (getf msg :prefix)
+                (setf (gethash "prefix" msg-hash) t)))
          collect msg-hash)
    'vector))
 
