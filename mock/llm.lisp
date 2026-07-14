@@ -63,7 +63,9 @@
 ;;; LLM 协议实现
 ;;; ============================================================
 
-(defmethod llm-chat ((provider mock-llm-provider) messages &key max-tokens temperature (model nil) (tools nil) system)
+(defmethod llm-chat ((provider mock-llm-provider) messages
+                     &key max-tokens temperature (model nil) (tools nil) system
+                     &allow-other-keys)
   "发送聊天请求到 Mock LLM
 
 返回：

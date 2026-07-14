@@ -36,6 +36,16 @@ Returns:
   Factory function, or NIL if not found"
   (gethash name *provider-registry*))
 
+(defun unregister-provider (name)
+  "Unregister a provider factory（对标 clj-agent registry/unregister-provider!）.
+
+Parameters:
+  NAME - Provider name keyword
+
+Returns:
+  T if a registration was removed, NIL otherwise"
+  (remhash name *provider-registry*))
+
 (defun list-providers ()
   "List all registered provider names.
 
@@ -82,6 +92,18 @@ Returns:
 (register-provider :minimax
   (lambda (&rest args)
     (apply #'cl-agent.llm.providers:make-minimax-provider args)))
+
+(register-provider :deepseek
+  (lambda (&rest args)
+    (apply #'cl-agent.llm.providers:make-deepseek-provider args)))
+
+(register-provider :gemini
+  (lambda (&rest args)
+    (apply #'cl-agent.llm.providers:make-gemini-provider args)))
+
+(register-provider :mistral
+  (lambda (&rest args)
+    (apply #'cl-agent.llm.providers:make-mistral-provider args)))
 
 ;;; ============================================================
 ;;; Provider Creation
@@ -145,3 +167,6 @@ Returns:
 (register-provider-alias "gpt" :openai)
 (register-provider-alias "glm" :zhipu)
 (register-provider-alias "chatglm" :zhipu)
+(register-provider-alias "google" :gemini)
+(register-provider-alias "qwen" :dashscope)
+(register-provider-alias "bailian" :dashscope)

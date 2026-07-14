@@ -52,8 +52,6 @@
    #:make-ollama-provider
    #:make-zhipu-provider
    #:make-dashscope-provider
-   #:make-bailian-provider
-   #:make-qwen-provider
 
    ;; 提供商访问器（统一接口）
    ;; provider-name 使用 cl-agent.core 的泛型函数
@@ -208,6 +206,7 @@
 
    ;; ==================== Provider Registry ====================
    #:register-provider
+   #:unregister-provider
    #:get-provider-factory
    #:list-providers
    #:provider-registered-p
@@ -255,6 +254,7 @@
    #:make-anthropic-provider
    #:anthropic-provider-api-key
    #:anthropic-provider-version
+   #:build-anthropic-headers
    #:anthropic-model-context-window
    #:anthropic-model-max-output
 
@@ -279,6 +279,21 @@
    #:make-minimax-provider
    #:split-think-block
 
+   ;; ==================== DeepSeek 提供商 ====================
+   #:deepseek-provider
+   #:make-deepseek-provider
+   #:deepseek-prefix-chat
+   #:mark-prefix
+   #:+deepseek-beta-base-url+
+
+   ;; ==================== Gemini 提供商 ====================
+   #:gemini-provider
+   #:make-gemini-provider
+
+   ;; ==================== Mistral 提供商 ====================
+   #:mistral-provider
+   #:make-mistral-provider
+
    ;; ==================== 智谱 AI 提供商 ====================
    #:zhipu-provider
    #:make-zhipu-provider
@@ -286,9 +301,7 @@
    #:response-complete-p
    #:get-suggested-max-tokens
 
-   ;; ==================== 阿里云百炼 DashScope 提供商 ====================
+   ;; ==================== 阿里云 DashScope 提供商 ====================
    #:dashscope-provider
    #:make-dashscope-provider
-   #:make-bailian-provider
-   #:make-qwen-provider
    #:dashscope-list-models))
