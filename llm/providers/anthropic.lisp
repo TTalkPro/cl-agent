@@ -95,7 +95,12 @@
                                    (temperature 0.7)
                                    model
                                    tools
-                                   system)
+                                   system
+                                   top-p
+                                   top-k
+                                   stop
+                                   extra-params
+                                   &allow-other-keys)
   "发送聊天请求到 Anthropic
 
 参数：
@@ -118,7 +123,11 @@
                         :temperature temperature
                         :model model
                         :tools tools
-                        :system system))
+                        :system system
+                        :top-p top-p
+                        :top-k top-k
+                        :stop stop
+                        :extra-params extra-params))
 
          ;; 2. 构建 URL
          (url (cl-agent.llm:build-api-url
@@ -153,7 +162,11 @@
                                                temperature
                                                model
                                                tools
-                                               system)
+                                               system
+                                               top-p
+                                               top-k
+                                               stop
+                                               extra-params)
   "构建 Anthropic API 请求体
 
 参数：
@@ -164,6 +177,10 @@
   MODEL       - 模型名称
   TOOLS       - 工具列表
   SYSTEM      - 系统提示
+  TOP-P       - 核采样（存在才发送）
+  TOP-K       - Top-K 采样（存在才发送）
+  STOP        - 停止序列（wire 字段 stop_sequences，存在才发送）
+  EXTRA-PARAMS - 厂商专有参数 plist（直接并入请求体顶层）
 
 返回：
   请求体 hash-table（JSON 格式）"
@@ -191,6 +208,25 @@
     ;; 添加工具
     (when tools
       (setf (gethash "tools" body) (coerce (convert-tools-to-anthropic tools) 'vector)))
+
+    ;; 采样与停止序列（存在才发送）
+    (when top-p
+      (setf (gethash "top_p" body) top-p))
+    (when top-k
+      (setf (gethash "top_k" body) top-k))
+    (when stop
+      (setf (gethash "stop_sequences" body)
+            (if (listp stop) (coerce stop 'vector) stop)))
+
+    ;; 厂商专有参数逃生通道：最后并入，可覆盖任何字段
+    (when extra-params
+      (loop for (key value) on extra-params by #'cddr
+            do (setf (gethash (if (stringp key)
+                                  key
+                                  (substitute #\_ #\-
+                                              (string-downcase (string key))))
+                              body)
+                     value)))
 
     body))
 
@@ -378,17 +414,14 @@
                                default-schema))))
                   tool-hash)))
 
-(defun build-anthropic-headers (provider)
-  "构建 Anthropic 请求头
+(defgeneric build-anthropic-headers (provider)
+  (:documentation "构建 Anthropic 格式端点的请求头（alist）。
 
-参数：
-  PROVIDER - 提供商实例
+CLOS 扩展点：Anthropic 兼容厂商（如 MiniMax）通过特化本泛型函数
+切换鉴权方案（Bearer 等），复用其余全部请求/响应实现。"))
 
-返回：
-  请求头 alist
-
-说明：
-  - 标准 Anthropic 使用 x-api-key 和 anthropic-version 请求头"
+(defmethod build-anthropic-headers ((provider anthropic-provider))
+  "标准 Anthropic：x-api-key + anthropic-version 请求头"
   (let ((api-key (anthropic-provider-api-key provider))
         (version (anthropic-provider-version provider)))
     `(("Content-Type" . "application/json")

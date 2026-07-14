@@ -94,10 +94,17 @@ provider-auth-headers / provider-finalize-request 实现。"))
                                        (temperature 0.7)
                                        model
                                        tools
-                                       system)
+                                       system
+                                       top-p
+                                       stop
+                                       frequency-penalty
+                                       presence-penalty
+                                       tool-choice
+                                       extra-params
+                                  &allow-other-keys)
   "OpenAI 兼容的共享 llm-chat 实现。
 
-SYSTEM 提示折叠进 messages（OpenAI 风格）；
+SYSTEM 提示折叠进 messages（OpenAI 风格）；可选参数存在才发送；
 返回统一的 llm-response 对象。"
   (let* ((effective-messages (if system
                                  (cons (list :role :system :content system)
@@ -111,7 +118,13 @@ SYSTEM 提示折叠进 messages（OpenAI 风格）；
                          :max-tokens max-tokens
                          :temperature temperature
                          :model model
-                         :tools tools)))
+                         :tools tools
+                         :top-p top-p
+                         :stop stop
+                         :frequency-penalty frequency-penalty
+                         :presence-penalty presence-penalty
+                         :tool-choice tool-choice
+                         :extra-params extra-params)))
          (url (cl-agent.llm:build-api-url
                provider
                (cl-agent.llm:provider-chat-endpoint provider)))

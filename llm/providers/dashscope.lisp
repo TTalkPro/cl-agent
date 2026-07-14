@@ -1,7 +1,7 @@
-;;;; bailian.lisp
-;;;; CL-Agent - 阿里云百炼 DashScope 提供商实现
+;;;; dashscope.lisp
+;;;; CL-Agent - 阿里云 DashScope 提供商实现
 ;;;;
-;;;; 概述：
+;;;; 概述（命名与 clj-agent provider/dashscope.clj 一致）：
 ;;;;   实现阿里云百炼平台 DashScope 原生 API 的 LLM 提供商接口
 ;;;;
 ;;;; 支持的模型：
@@ -75,15 +75,6 @@
                    :stream-endpoint "/api/v1/services/aigc/text-generation/generation"
                    :api-key key
                    :timeout timeout)))
-
-;; 别名函数
-(defun make-bailian-provider (&rest args)
-  "创建阿里云百炼提供商（make-dashscope-provider 的别名）"
-  (apply #'make-dashscope-provider args))
-
-(defun make-qwen-provider (&rest args)
-  "创建通义千问提供商（make-dashscope-provider 的别名）"
-  (apply #'make-dashscope-provider args))
 
 ;;; ============================================================
 ;;; 请求构建
@@ -261,7 +252,8 @@
                                    (temperature 0.7)
                                    model
                                    tools
-                                   system)
+                                   system
+                                   &allow-other-keys)
   "发送聊天请求到 DashScope
 
 参数：
