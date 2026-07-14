@@ -426,32 +426,158 @@
         (find-tool-callback name)
         (error 'tool-not-found-error :tool-name name))))
 
+(defun execute-one-tool-call (manager options tool-context tool-call)
+  "执行单个 tool-call，返回 (values tool-response return-direct-p)。
+
+错误经 process-tool-execution-error 处理（默认转文本回传模型）。
+不依赖任何动态绑定的特殊变量（tool-context 显式传入），
+因而可安全用于并行 manager 的 worker 线程。"
+  (multiple-value-bind (text direct-p)
+      (handler-case
+          (let ((callback (find-callback-for-call options tool-call)))
+            (values (tool-callback-call callback
+                                        (arguments->plist
+                                         (tool-call-arguments tool-call))
+                                        tool-context)
+                    (tool-callback-return-direct-p callback)))
+        (tool-not-found-error (e)
+          (values (process-tool-execution-error manager e tool-call) nil))
+        (tool-execution-error (e)
+          (values (process-tool-execution-error manager e tool-call) nil)))
+    (values (make-tool-response :id (tool-call-id tool-call)
+                                :name (tool-call-name tool-call)
+                                :text text)
+            direct-p)))
+
+(defun build-tool-execution-result (prompt response responses return-direct)
+  "由工具结果列表组装 tool-execution-result（会话历史 = 原消息 +
+assistant(tool-calls) + tool-response 消息）"
+  (make-instance 'tool-execution-result
+                 :conversation-history (append (prompt-messages prompt)
+                                               (list (chat-response-message response)
+                                                     (tool-response-message responses)))
+                 :return-direct return-direct))
+
 (defmethod execute-tool-calls ((manager default-tool-calling-manager) prompt response)
+  "顺序执行全部工具调用（默认实现）"
   (let* ((options (prompt-options prompt))
          (tool-context (chat-options-tool-context options))
          (return-direct nil)
          (responses
            (mapcar
             (lambda (tc)
-              (multiple-value-bind (text direct-p)
-                  (handler-case
-                      (let ((callback (find-callback-for-call options tc)))
-                        (values (tool-callback-call callback
-                                                    (arguments->plist
-                                                     (tool-call-arguments tc))
-                                                    tool-context)
-                                (tool-callback-return-direct-p callback)))
-                    (tool-not-found-error (e)
-                      (values (process-tool-execution-error manager e tc) nil))
-                    (tool-execution-error (e)
-                      (values (process-tool-execution-error manager e tc) nil)))
+              (multiple-value-bind (resp direct-p)
+                  (execute-one-tool-call manager options tool-context tc)
                 (when direct-p (setf return-direct t))
-                (make-tool-response :id (tool-call-id tc)
-                                    :name (tool-call-name tc)
-                                    :text text)))
+                resp))
             (chat-response-tool-calls response))))
-    (make-instance 'tool-execution-result
-                   :conversation-history (append (prompt-messages prompt)
-                                                 (list (chat-response-message response)
-                                                       (tool-response-message responses)))
-                   :return-direct return-direct)))
+    (build-tool-execution-result prompt response responses return-direct)))
+
+;;; ============================================================
+;;; ConcurrentToolCallingManager（并行工具执行）
+;;; ============================================================
+;;; 对标 Spring AI 2.0 DefaultToolCallingManager 的并行执行模式
+;;; （issue #5195）：多个工具调用在线程池上并发执行，适合工具体
+;;; 以 I/O 为主（HTTP / DB / 外部服务）的场景。
+;;;
+;;; 语义与顺序执行完全一致（结果按 tool-call 原序、return-direct
+;;; 取并集、错误经 process-tool-execution-error 隔离），只是并发。
+;;;
+;;; 注意：worker 线程不继承提交线程的动态绑定。工具若依赖调用方
+;;; 用 let 绑定的特殊变量，并行下不可见；请改用 tool-context
+;;; 显式传参（与 Spring 的 ToolContext 同语义）。
+
+(defclass concurrent-tool-calling-manager (default-tool-calling-manager)
+  ((kernel
+    :initform nil
+    :accessor manager-kernel
+    :documentation "lparallel 内核（懒创建，实例私有）")
+   (kernel-lock
+    :initform (bt:make-lock "tool-manager-kernel")
+    :reader manager-kernel-lock)
+   (pool-size
+    :initarg :pool-size
+    :initform 4
+    :reader manager-pool-size
+    :documentation "线程池大小")
+   (timeout
+    :initarg :timeout
+    :initform nil
+    :reader manager-timeout
+    :documentation "单工具执行超时（秒，NIL 不限；超时结果转错误文本）"))
+  (:documentation "并行工具执行 manager（对标 Spring AI 并行 DefaultToolCallingManager）"))
+
+(defun make-concurrent-tool-calling-manager (&key (pool-size 4) timeout)
+  "创建并行工具执行 manager。
+
+参数：
+  POOL-SIZE - 线程池大小（默认 4）
+  TIMEOUT   - 单工具超时秒数（默认 NIL 不限）
+
+线程池在首次执行时懒创建；用完后调用
+shutdown-tool-calling-manager 释放。"
+  (make-instance 'concurrent-tool-calling-manager
+                 :pool-size pool-size
+                 :timeout timeout))
+
+(defun ensure-manager-kernel (manager)
+  "取（或懒创建）manager 的 lparallel 内核（双检锁）"
+  (or (manager-kernel manager)
+      (bt:with-lock-held ((manager-kernel-lock manager))
+        (or (manager-kernel manager)
+            (setf (manager-kernel manager)
+                  (lparallel:make-kernel (manager-pool-size manager)
+                                         :name "tool-exec-pool"))))))
+
+(defun shutdown-tool-calling-manager (manager)
+  "关闭并行 manager 的线程池（幂等）。返回 T 表示有释放。"
+  (bt:with-lock-held ((manager-kernel-lock manager))
+    (when (manager-kernel manager)
+      (let ((lparallel:*kernel* (manager-kernel manager)))
+        (lparallel:end-kernel :wait t))
+      (setf (manager-kernel manager) nil)
+      t)))
+
+(defun %force-tool-future (future tool-call timeout)
+  "取 FUTURE 的值（cons: tool-response . direct-p）。
+TIMEOUT 非空且超时时返回超时错误结果（worker 仍在后台跑完，
+无法安全中断，故为 best-effort）。"
+  (if (null timeout)
+      (lparallel:force future)
+      (let ((deadline (+ (get-internal-real-time)
+                         (round (* timeout internal-time-units-per-second)))))
+        (loop
+          (when (lparallel:fulfilledp future)
+            (return (lparallel:force future)))
+          (when (>= (get-internal-real-time) deadline)
+            (return (cons (make-tool-response
+                           :id (tool-call-id tool-call)
+                           :name (tool-call-name tool-call)
+                           :text (format nil "错误：工具执行超时（~As）" timeout))
+                          nil)))
+          (sleep 0.005)))))
+
+(defmethod execute-tool-calls ((manager concurrent-tool-calling-manager) prompt response)
+  "并行执行全部工具调用。0/1 个工具时退化为顺序执行（无并发收益）。"
+  (let ((tool-calls (chat-response-tool-calls response)))
+    (if (<= (length tool-calls) 1)
+        (call-next-method)                    ; 复用顺序实现
+        (let* ((options (prompt-options prompt))
+               (tool-context (chat-options-tool-context options))
+               (timeout (manager-timeout manager))
+               (lparallel:*kernel* (ensure-manager-kernel manager))
+               ;; 每个工具提交为 future，worker 返回 (response . direct-p)
+               (futures (mapcar
+                         (lambda (tc)
+                           (lparallel:future
+                             (multiple-value-bind (resp direct-p)
+                                 (execute-one-tool-call manager options tool-context tc)
+                               (cons resp direct-p))))
+                         tool-calls))
+               ;; 按原序收集结果
+               (pairs (mapcar (lambda (f tc) (%force-tool-future f tc timeout))
+                              futures tool-calls)))
+          (build-tool-execution-result
+           prompt response
+           (mapcar #'car pairs)
+           (some #'cdr pairs))))))

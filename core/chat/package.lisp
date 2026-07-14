@@ -168,7 +168,14 @@
    #:default-tool-calling-manager
    #:make-default-tool-calling-manager
    #:execute-tool-calls
+   #:execute-one-tool-call
    #:process-tool-execution-error
+   ;; ConcurrentToolCallingManager（并行工具执行）
+   #:concurrent-tool-calling-manager
+   #:make-concurrent-tool-calling-manager
+   #:manager-pool-size
+   #:manager-timeout
+   #:shutdown-tool-calling-manager
    #:tool-execution-result
    #:tool-execution-conversation-history
    #:tool-execution-return-direct-p

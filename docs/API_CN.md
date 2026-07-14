@@ -83,7 +83,12 @@
 (register-tool-callback cb) (unregister-tool-callback name)
 (resolve-tool-callbacks specs)            ; 实例/符号/字符串 → callback
 (arguments->plist raw)                    ; hash-table/JSON/plist 归一化
-(make-default-tool-calling-manager)
+(make-default-tool-calling-manager)          ; 顺序执行
+;; 并行执行（对标 Spring AI 2.0 并行 DefaultToolCallingManager）：
+(make-concurrent-tool-calling-manager :pool-size 4 :timeout nil)
+(shutdown-tool-calling-manager manager)      ; 释放线程池（懒创建）
+;; 与顺序语义等价（结果按原序、return-direct 取并集、错误隔离），
+;; 仅多工具时并发；worker 不继承动态绑定，工具靠 tool-context 传参
 (execute-tool-calls manager prompt response)
 ;; => tool-execution-result（对标 ToolExecutionResult）
 (tool-execution-conversation-history result) ; 完整会话历史

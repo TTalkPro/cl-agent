@@ -64,7 +64,13 @@ Options not explicitly passed are "unset" and fall back on merge.
 (find-tool-callback "get_weather") (register-tool-callback cb)
 (resolve-tool-callbacks specs)     ; instances/symbols/strings
 (arguments->plist raw)             ; hash-table/JSON/plist normalization
-(make-default-tool-calling-manager)
+(make-default-tool-calling-manager)          ; sequential
+;; parallel (mirrors Spring AI 2.0 concurrent DefaultToolCallingManager):
+(make-concurrent-tool-calling-manager :pool-size 4 :timeout nil)
+(shutdown-tool-calling-manager manager)      ; release the (lazy) thread pool
+;; semantics identical to sequential (original order, return-direct union,
+;; error isolation); concurrent only for multi-tool rounds; workers do not
+;; inherit dynamic bindings — tools receive state via tool-context
 (execute-tool-calls manager prompt response)
 ;; => tool-execution-result (mirrors ToolExecutionResult)
 (tool-execution-conversation-history result) ; full conversation history

@@ -19,7 +19,7 @@ and fluent builders.
   `tool-calling-advisor` (2.0 architecture)
 - **Tool calling**: the `deftool` macro mirrors the `@Tool` annotation — JSON Schema
   derived automatically, registered globally; ToolCallback / ToolCallingManager /
-  `:return-direct` / ToolContext
+  `:return-direct` / ToolContext / sequential & parallel ToolCallingManager
 - **ChatMemory**: repository storage protocol + message-window memory with
   pairing-safe truncation
 - **Multi-provider**: Anthropic, OpenAI, Zhipu GLM, DeepSeek, Gemini, Mistral,
