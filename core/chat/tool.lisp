@@ -347,6 +347,28 @@
       (t nil))))
 
 ;;; ============================================================
+;;; ToolExecutionResult
+;;; ============================================================
+
+(defclass tool-execution-result ()
+  ((conversation-history
+    :initarg :conversation-history
+    :initform nil
+    :reader tool-execution-conversation-history
+    :documentation "执行工具后的完整会话消息列表：
+原 prompt 消息 + assistant(tool-calls) 消息 + tool-response 消息")
+   (return-direct
+    :initarg :return-direct
+    :initform nil
+    :reader tool-execution-return-direct-p
+    :documentation "任一工具声明 :return-direct 时为 T"))
+  (:documentation "一轮工具执行的结果（对标 Spring AI ToolExecutionResult）"))
+
+(defun tool-execution-last-message (result)
+  "取会话历史末尾的 tool-response-message（本轮工具结果）"
+  (car (last (tool-execution-conversation-history result))))
+
+;;; ============================================================
 ;;; ToolCallingManager
 ;;; ============================================================
 
@@ -357,21 +379,39 @@
 (defclass default-tool-calling-manager (tool-calling-manager)
   ()
   (:documentation "默认实现：按名解析 callback，执行并收集结果；
-工具抛错时把错误文本作为结果回传模型（Spring AI 同语义）。"))
+工具异常经 process-tool-execution-error 处理（默认转错误文本回传模型）。"))
 
 (defun make-default-tool-calling-manager ()
   (make-instance 'default-tool-calling-manager))
+
+(defgeneric process-tool-execution-error (manager condition tool-call)
+  (:documentation "处理工具执行期的条件（对标 ToolExecutionExceptionProcessor）。
+
+参数：
+  MANAGER   - tool-calling-manager 实例
+  CONDITION - tool-execution-error / tool-not-found-error 条件
+  TOOL-CALL - 引发错误的 tool-call
+
+返回：
+  错误结果文本（回传模型，模型可自纠错）；
+  也可选择直接重新 signal，让错误冒泡给调用方。"))
+
+(defmethod process-tool-execution-error ((manager tool-calling-manager) condition tool-call)
+  "默认：错误文本作为工具结果回传模型（Spring AI 默认语义）"
+  (declare (ignore tool-call))
+  (format nil "错误：~A" condition))
 
 (defgeneric execute-tool-calls (manager prompt response)
   (:documentation "执行 RESPONSE 中的全部工具调用。
 
 参数：
   MANAGER  - tool-calling-manager 实例
-  PROMPT   - 本轮 prompt（从其 options 解析可用工具与 tool-context）
+  PROMPT   - 本轮 prompt（从其 options 解析可用工具与 tool-context；
+             其消息列表作为会话历史前缀）
   RESPONSE - 携带 tool-calls 的 chat-response
 
 返回：
-  (values tool-response-message return-direct-p)"))
+  tool-execution-result（conversation-history + return-direct-p）"))
 
 (defun find-callback-for-call (options tool-call)
   "为一次 tool-call 定位 callback：先查 options 中的运行时工具，
@@ -402,12 +442,16 @@
                                                     tool-context)
                                 (tool-callback-return-direct-p callback)))
                     (tool-not-found-error (e)
-                      (values (format nil "错误：~A" e) nil))
+                      (values (process-tool-execution-error manager e tc) nil))
                     (tool-execution-error (e)
-                      (values (format nil "错误：~A" e) nil)))
+                      (values (process-tool-execution-error manager e tc) nil)))
                 (when direct-p (setf return-direct t))
                 (make-tool-response :id (tool-call-id tc)
                                     :name (tool-call-name tc)
                                     :text text)))
             (chat-response-tool-calls response))))
-    (values (tool-response-message responses) return-direct)))
+    (make-instance 'tool-execution-result
+                   :conversation-history (append (prompt-messages prompt)
+                                                 (list (chat-response-message response)
+                                                       (tool-response-message responses)))
+                   :return-direct return-direct)))

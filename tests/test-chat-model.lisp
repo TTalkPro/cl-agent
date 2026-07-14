@@ -79,36 +79,23 @@
       (is (string= "你是助手" (getf (first messages) :content))))))
 
 ;;; ============================================================
-;;; 内部工具执行循环
+;;; 单次调用语义（2.0：ChatModel 不执行工具）
 ;;; ============================================================
 
-(test model-internal-tool-execution
-  "tool-call 响应触发内部执行并回传，直到最终文本"
-  (let* ((provider (make-seq-provider
-                    (tool-call-response "test_adder" '(("a" . 3) ("b" . 4)))
-                    (lambda (messages)
-                      ;; 第二轮请求应包含 assistant(tool-calls) + tool 结果
-                      (let ((roles (mapcar (lambda (m) (getf m :role)) messages)))
-                        (assert (member :tool roles)))
-                      (let ((tool-msg (find :tool messages
-                                            :key (lambda (m) (getf m :role)))))
-                        (assert (string= "7" (getf tool-msg :content))))
-                      (text-response "3+4=7"))))
-         (model (cl-agent.chat:make-provider-chat-model provider))
-         (response (cl-agent.chat:chat-model-call
-                    model (cl-agent.chat:make-prompt
-                           "3+4=?"
-                           :options (cl-agent.chat:make-chat-options
-                                     :tool-names '("test_adder"))))))
-    (is (string= "3+4=7" (cl-agent.chat:chat-response-text response)))
-    ;; provider 被调用两轮
-    (is (= 2 (length (seq-provider-requests provider))))
-    ;; 两轮都带了工具 schema
-    (is (every (lambda (req) (= 1 (length (getf req :tools))))
-               (seq-provider-requests provider)))))
+(test model-injects-tool-schema
+  "工具引用解析为 schema 下发 provider（但不执行）"
+  (let* ((provider (make-seq-provider (text-response "ok")))
+         (model (cl-agent.chat:make-provider-chat-model provider)))
+    (cl-agent.chat:chat-model-call
+     model (cl-agent.chat:make-prompt
+            "hi" :options (cl-agent.chat:make-chat-options
+                           :tool-names '("test_adder"))))
+    (let ((tools (getf (first (seq-provider-requests provider)) :tools)))
+      (is (= 1 (length tools)))
+      (is (string= "test_adder" (getf (first tools) :name))))))
 
-(test model-tool-execution-disabled
-  "internal-tool-execution-enabled=NIL 时原样返回 tool-call 响应"
+(test model-returns-tool-calls-as-is
+  "携带 tool-calls 的响应原样返回（工具循环属于 tool-calling-advisor）"
   (let* ((provider (make-seq-provider
                     (tool-call-response "test_adder" '(("a" . 1) ("b" . 1)))))
          (model (cl-agent.chat:make-provider-chat-model provider))
@@ -116,40 +103,10 @@
                     model (cl-agent.chat:make-prompt
                            "1+1=?"
                            :options (cl-agent.chat:make-chat-options
-                                     :tool-names '("test_adder")
-                                     :internal-tool-execution-enabled nil)))))
+                                     :tool-names '("test_adder"))))))
     (is-true (cl-agent.chat:chat-response-has-tool-calls-p response))
+    ;; 只调用一轮：ChatModel 不执行工具
     (is (= 1 (length (seq-provider-requests provider))))))
-
-(test model-return-direct-short-circuit
-  "return-direct 工具结果直接作为最终答案，不再回传模型"
-  (let* ((provider (make-seq-provider
-                    (tool-call-response "test_direct_tool" '(("text" . "急停")))))
-         (model (cl-agent.chat:make-provider-chat-model provider))
-         (response (cl-agent.chat:chat-model-call
-                    model (cl-agent.chat:make-prompt
-                           "go"
-                           :options (cl-agent.chat:make-chat-options
-                                     :tool-names '("test_direct_tool"))))))
-    (is (string= "直接结果：急停" (cl-agent.chat:chat-response-text response)))
-    ;; 只调用了一轮
-    (is (= 1 (length (seq-provider-requests provider))))))
-
-(test model-max-tool-iterations
-  "工具循环超过上限报 max-tool-iterations-exceeded-error"
-  (let* ((provider (make-instance
-                    'seq-provider
-                    :queue (loop repeat 10
-                                 collect (tool-call-response
-                                          "test_adder" '(("a" . 1) ("b" . 1))))))
-         (model (cl-agent.chat:make-provider-chat-model provider)))
-    (signals cl-agent.chat:max-tool-iterations-exceeded-error
-      (cl-agent.chat:chat-model-call
-       model (cl-agent.chat:make-prompt
-              "loop"
-              :options (cl-agent.chat:make-chat-options
-                        :tool-names '("test_adder")
-                        :max-tool-iterations 3))))))
 
 ;;; ============================================================
 ;;; 流式

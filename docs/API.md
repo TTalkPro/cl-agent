@@ -31,9 +31,8 @@ API quick reference by package. Spring AI 2.0 counterparts noted per section.
 
 (make-chat-options :model "..." :temperature 0.3 :max-tokens 1024
                    :tool-callbacks (list cb) :tool-names '("get_weather")
-                   :tool-context '(:tenant "acme")
-                   :internal-tool-execution-enabled t   ; default T
-                   :max-tool-iterations 10)             ; default 10
+                   :tool-context '(:tenant "acme"))
+;; tool-loop options moved to tool-calling-advisor (2.0 architecture)
 (merge-chat-options runtime defaults)   ; runtime wins; tools are unioned
 ```
 
@@ -67,7 +66,12 @@ Options not explicitly passed are "unset" and fall back on merge.
 (arguments->plist raw)             ; hash-table/JSON/plist normalization
 (make-default-tool-calling-manager)
 (execute-tool-calls manager prompt response)
-;; => (values tool-response-message return-direct-p)
+;; => tool-execution-result (mirrors ToolExecutionResult)
+(tool-execution-conversation-history result) ; full conversation history
+(tool-execution-return-direct-p result)
+(tool-execution-last-message result)
+;; custom error handling (mirrors ToolExecutionExceptionProcessor):
+;; specialize (process-tool-execution-error manager condition tool-call)
 ```
 
 Conditions: `tool-execution-error`, `tool-not-found-error`.
@@ -78,14 +82,13 @@ Conditions: `tool-execution-error`, `tool-not-found-error`.
 (chat-model-call model prompt)              ; prompt: string/messages/prompt
 (chat-model-stream model prompt on-chunk)
 (chat-model-default-options model)
-(make-provider-chat-model provider
-  :default-options options :tool-calling-manager manager)
+(make-provider-chat-model provider :default-options options)
 ```
 
-`provider-chat-model` runs the internal tool-execution loop when a response
-carries tool calls and `internal-tool-execution-enabled` is true; exceeding
-`max-tool-iterations` signals `max-tool-iterations-exceeded-error`;
-`:return-direct` tools terminate the loop immediately.
+2.0 architecture: the ChatModel makes a **single** model call — it resolves
+tool references and injects schemas but never executes tools. Responses
+carrying tool calls are returned as-is; the loop belongs to
+`cl-agent.client:tool-calling-advisor` (auto-registered by the ChatClient).
 
 ### ChatMemory
 
@@ -143,12 +146,34 @@ orphaned leading tool messages are dropped.
 (make-message-chat-memory-advisor :memory m)               ; order 1000
 (make-prompt-chat-memory-advisor :memory m :template "~A") ; order 1000
 +conversation-id-key+
+
+;; ToolCallingAdvisor (mirrors Spring AI 2.0, auto-registered by ChatClient)
+(make-tool-calling-advisor :manager m :max-iterations 10)  ; order 2000
+;; recursively re-enters the downstream chain until no tool calls remain;
+;; memory advisors (1000) sit outside the loop by default;
+;; advisors with order > 2000 run on every loop iteration
+
+;; fine-grained hooks (mirror doInitializeLoop/doBeforeCall/doAfterCall/doFinalizeLoop)
+;; specialize on a subclass to observe/rewrite at loop checkpoints:
+(tool-advisor-initialize-loop advisor request)          ; once, → request
+(tool-advisor-before-call advisor request iteration)    ; per round, → request
+(tool-advisor-after-call advisor request response iteration) ; per round, → response
+(tool-advisor-finalize-loop advisor request response)   ; once, → response
+
+;; ToolSearch: progressive tool disclosure (mirrors ToolSearchToolCallingAdvisor)
+;; full tool set is never sent; each round exposes the built-in tool_search
+;; plus previously discovered tools only
+(make-chat-client model
+  :advisors (list (make-tool-search-tool-calling-advisor
+                   :match-mode :substring    ; or :regex
+                   :max-results 5)))
 ```
 
 ### ChatClient
 
 ```lisp
-(make-chat-client model :system s :options o :advisors a :tools ts)
+(make-chat-client model :system s :options o :advisors a :tools ts
+                        :auto-tool-advisor t) ; NIL = user-controlled mode
 (chat-client-builder model)
 (default-system builder text) (default-options builder options)
 (default-advisors builder &rest advisors) (default-tools builder &rest tools)

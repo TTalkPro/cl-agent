@@ -93,6 +93,7 @@
    #:make-chat-options
    #:copy-chat-options
    #:merge-chat-options
+   #:chat-options-with-tools
    #:chat-options-model
    #:chat-options-temperature
    #:chat-options-max-tokens
@@ -105,8 +106,6 @@
    #:chat-options-tool-callbacks
    #:chat-options-tool-names
    #:chat-options-tool-context
-   #:chat-options-internal-tool-execution-enabled
-   #:chat-options-max-tool-iterations
 
    ;; ==================== Prompt ====================
    #:prompt
@@ -169,6 +168,11 @@
    #:default-tool-calling-manager
    #:make-default-tool-calling-manager
    #:execute-tool-calls
+   #:process-tool-execution-error
+   #:tool-execution-result
+   #:tool-execution-conversation-history
+   #:tool-execution-return-direct-p
+   #:tool-execution-last-message
    #:arguments->plist
    ;; 条件
    #:tool-execution-error

@@ -14,8 +14,9 @@ and fluent builders.
 - **Advisor onion chain**: `advise-call` / `advise-stream` protocol, ordered chain,
   `defadvisor` defines class + method + constructor in one form; built-in logger,
   message memory, prompt memory, and safe-guard advisors
-- **ChatModel protocol**: `chat-model-call` / `chat-model-stream` with an internal
-  tool-execution loop (mirrors `internalToolExecutionEnabled`)
+- **ChatModel protocol**: `chat-model-call` / `chat-model-stream` (real SSE
+  streaming), single-call semantics — the tool loop lives in
+  `tool-calling-advisor` (2.0 architecture)
 - **Tool calling**: the `deftool` macro mirrors the `@Tool` annotation — JSON Schema
   derived automatically, registered globally; ToolCallback / ToolCallingManager /
   `:return-direct` / ToolContext
@@ -51,6 +52,7 @@ Mapping to Spring AI:
 | `client.prompt().user(u).call().content()` | `(chat client (:user u))` or fluent pipeline |
 | `@Tool` / `@ToolParam` | `deftool` macro |
 | `CallAdvisor` / `AdvisorChain` | `defadvisor` / `advise-call` / `chain-next` |
+| `ToolCallingAdvisor` (2.0) | `tool-calling-advisor` (auto-registered, streaming tool loop) |
 | `MessageChatMemoryAdvisor` | `message-chat-memory-advisor` |
 | `MessageWindowChatMemory` | `message-window-chat-memory` |
 | `ChatModel#call` | `chat-model-call` |

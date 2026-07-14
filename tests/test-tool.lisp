@@ -125,6 +125,15 @@
 ;;; ToolCallingManager
 ;;; ============================================================
 
+(defclass rethrow-tool-manager (cl-agent.chat:default-tool-calling-manager)
+  ()
+  (:documentation "测试用：工具错误直接冒泡而非转文本"))
+
+(defmethod cl-agent.chat:process-tool-execution-error
+    ((manager rethrow-tool-manager) condition tool-call)
+  (declare (ignore tool-call))
+  (error condition))
+
 (defun response-with-calls (&rest name-args-pairs)
   "构造携带多个 tool-call 的 chat-response"
   (cl-agent.chat:make-chat-response
@@ -136,32 +145,38 @@
                                 :id id :name name :arguments args)))
     :finish-reason :tool-call)))
 
+(defun result-first-tool-text (result)
+  "取 tool-execution-result 末尾工具消息的首条结果文本"
+  (cl-agent.chat:tool-response-text
+   (first (cl-agent.chat:tool-responses
+           (cl-agent.chat:tool-execution-last-message result)))))
+
 (test manager-executes-calls
-  "Manager 执行工具并生成 tool-response-message"
+  "Manager 执行工具并返回 tool-execution-result（含完整会话历史）"
   (let* ((manager (cl-agent.chat:make-default-tool-calling-manager))
          (prompt (cl-agent.chat:make-prompt "算一下"
                                             :options (cl-agent.chat:make-chat-options)))
          (response (response-with-calls
-                    (list "test_adder" '(:a 1 :b 2) "id-1"))))
-    (multiple-value-bind (tool-message return-direct-p)
-        (cl-agent.chat:execute-tool-calls manager prompt response)
-      (is-false return-direct-p)
-      (let ((tr (first (cl-agent.chat:tool-responses tool-message))))
-        (is (string= "3" (cl-agent.chat:tool-response-text tr)))
-        (is (string= "id-1" (cl-agent.chat:tool-response-id tr)))))))
+                    (list "test_adder" '(:a 1 :b 2) "id-1")))
+         (result (cl-agent.chat:execute-tool-calls manager prompt response)))
+    (is (typep result 'cl-agent.chat:tool-execution-result))
+    (is-false (cl-agent.chat:tool-execution-return-direct-p result))
+    (is (string= "3" (result-first-tool-text result)))
+    ;; 会话历史 = 原 prompt 消息 + assistant(tool-calls) + tool 消息
+    (let ((history (cl-agent.chat:tool-execution-conversation-history result)))
+      (is (= 3 (length history)))
+      (is (equal '(:user :assistant :tool)
+                 (mapcar #'cl-agent.chat:message-role history))))))
 
 (test manager-return-direct
   ":return-direct 工具触发直接返回标记"
   (let* ((manager (cl-agent.chat:make-default-tool-calling-manager))
          (prompt (cl-agent.chat:make-prompt "test"))
          (response (response-with-calls
-                    (list "test_direct_tool" '(:text "hi") "id-1"))))
-    (multiple-value-bind (tool-message return-direct-p)
-        (cl-agent.chat:execute-tool-calls manager prompt response)
-      (is-true return-direct-p)
-      (is (string= "直接结果：hi"
-                   (cl-agent.chat:tool-response-text
-                    (first (cl-agent.chat:tool-responses tool-message))))))))
+                    (list "test_direct_tool" '(:text "hi") "id-1")))
+         (result (cl-agent.chat:execute-tool-calls manager prompt response)))
+    (is-true (cl-agent.chat:tool-execution-return-direct-p result))
+    (is (string= "直接结果：hi" (result-first-tool-text result)))))
 
 (test manager-tool-context-injection
   "tool-context 只注入给声明了它的工具"
@@ -171,26 +186,18 @@
                   :options (cl-agent.chat:make-chat-options
                             :tool-context '(:tenant "acme"))))
          (response (response-with-calls
-                    (list "test_context_tool" '(:city "东京") "id-1"))))
-    (multiple-value-bind (tool-message return-direct-p)
-        (cl-agent.chat:execute-tool-calls manager prompt response)
-      (declare (ignore return-direct-p))
-      (is (string= "东京/acme"
-                   (cl-agent.chat:tool-response-text
-                    (first (cl-agent.chat:tool-responses tool-message))))))))
+                    (list "test_context_tool" '(:city "东京") "id-1")))
+         (result (cl-agent.chat:execute-tool-calls manager prompt response)))
+    (is (string= "东京/acme" (result-first-tool-text result)))))
 
 (test manager-unknown-tool-error-as-result
   "未知工具不抛错，错误文本作为结果回传（模型可自纠错）"
   (let* ((manager (cl-agent.chat:make-default-tool-calling-manager))
          (prompt (cl-agent.chat:make-prompt "test"))
          (response (response-with-calls
-                    (list "ghost_tool" nil "id-1"))))
-    (multiple-value-bind (tool-message return-direct-p)
-        (cl-agent.chat:execute-tool-calls manager prompt response)
-      (declare (ignore return-direct-p))
-      (is (search "错误"
-                  (cl-agent.chat:tool-response-text
-                   (first (cl-agent.chat:tool-responses tool-message))))))))
+                    (list "ghost_tool" nil "id-1")))
+         (result (cl-agent.chat:execute-tool-calls manager prompt response)))
+    (is (search "错误" (result-first-tool-text result)))))
 
 (test manager-tool-error-as-result
   "工具执行报错时错误文本作为结果回传"
@@ -201,10 +208,14 @@
                   "test"
                   :options (cl-agent.chat:make-chat-options
                             :tool-callbacks (list bomb))))
-         (response (response-with-calls (list "bomb_tool" nil "id-1"))))
-    (multiple-value-bind (tool-message return-direct-p)
-        (cl-agent.chat:execute-tool-calls manager prompt response)
-      (declare (ignore return-direct-p))
-      (is (search "错误"
-                  (cl-agent.chat:tool-response-text
-                   (first (cl-agent.chat:tool-responses tool-message))))))))
+         (response (response-with-calls (list "bomb_tool" nil "id-1")))
+         (result (cl-agent.chat:execute-tool-calls manager prompt response)))
+    (is (search "错误" (result-first-tool-text result)))))
+
+(test manager-custom-error-processor
+  "process-tool-execution-error 可定制（对标 ToolExecutionExceptionProcessor）"
+  (let* ((manager (make-instance 'rethrow-tool-manager))
+         (prompt (cl-agent.chat:make-prompt "test"))
+         (response (response-with-calls (list "ghost_tool" nil "id-1"))))
+    (signals cl-agent.chat:tool-not-found-error
+      (cl-agent.chat:execute-tool-calls manager prompt response))))

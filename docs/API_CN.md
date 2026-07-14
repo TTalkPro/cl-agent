@@ -37,9 +37,8 @@
                    :frequency-penalty 0.0 :presence-penalty 0.0
                    :extra-params '(:seed 42)            ; 厂商专有参数逃生通道
                    :tool-callbacks (list cb) :tool-names '("get_weather")
-                   :tool-context '(:tenant "acme")
-                   :internal-tool-execution-enabled t   ; 默认 T
-                   :max-tool-iterations 10)             ; 默认 10
+                   :tool-context '(:tenant "acme"))
+;; 工具循环选项已上移至 tool-calling-advisor（2.0 架构）
 (merge-chat-options runtime defaults)  ; 运行时覆盖默认；工具取并集
 (copy-chat-options options)
 ;; 读取器：chat-options-model / -temperature / -max-tokens / ...
@@ -86,7 +85,12 @@
 (arguments->plist raw)                    ; hash-table/JSON/plist 归一化
 (make-default-tool-calling-manager)
 (execute-tool-calls manager prompt response)
-;; => (values tool-response-message return-direct-p)
+;; => tool-execution-result（对标 ToolExecutionResult）
+(tool-execution-conversation-history result) ; 完整会话历史
+(tool-execution-return-direct-p result)
+(tool-execution-last-message result)         ; 本轮 tool-response-message
+;; 定制错误处理（对标 ToolExecutionExceptionProcessor）：
+;; 特化 (process-tool-execution-error manager condition tool-call)
 ```
 
 条件：`tool-execution-error`、`tool-not-found-error`。
@@ -98,15 +102,12 @@
 (chat-model-stream model prompt on-chunk)  ; on-chunk: (delta-text)
 (chat-model-default-options model)
 
-(make-provider-chat-model provider
-  :default-options options
-  :tool-calling-manager manager)
+(make-provider-chat-model provider :default-options options)
 ```
 
-`provider-chat-model` 的内部工具执行循环：响应携带 tool-calls 且
-`internal-tool-execution-enabled` 为真时自动执行工具并回传模型，
-直到产生文本回复；超过 `max-tool-iterations` 发
-`max-tool-iterations-exceeded-error`；`:return-direct` 工具立即终止循环。
+2.0 架构：ChatModel 只做**单次**模型调用——解析工具引用并注入
+schema，但不执行工具。携带 tool-calls 的响应原样返回，工具循环由
+`cl-agent.client:tool-calling-advisor` 承担（ChatClient 自动注册）。
 
 ### ChatMemory（`ChatMemory` / `ChatMemoryRepository`）
 
@@ -173,13 +174,34 @@
 (make-message-chat-memory-advisor :memory m)              ; order 1000
 (make-prompt-chat-memory-advisor :memory m :template "~A"); order 1000
 +conversation-id-key+   ; 请求 context 中的会话 ID 键
+
+;; ToolCallingAdvisor（对标 Spring AI 2.0，ChatClient 自动注册）
+(make-tool-calling-advisor :manager m :max-iterations 10) ; order 2000
+;; 递归重入下游链直到无 tool-calls；:return-direct 短路；
+;; 记忆 Advisor（1000）默认在循环外，只记录最终问答；
+;; order > 2000 的 Advisor 每轮工具循环都执行
+
+;; 细粒度钩子（对标 doInitializeLoop/doBeforeCall/doAfterCall/doFinalizeLoop）
+;; 子类特化即可在循环关键节点观察/改写，无需重写 advise-call：
+(tool-advisor-initialize-loop advisor request)          ; 循环前，→ request
+(tool-advisor-before-call advisor request iteration)    ; 每轮调用前，→ request
+(tool-advisor-after-call advisor request response iteration) ; 每轮调用后，→ response
+(tool-advisor-finalize-loop advisor request response)   ; 循环后，→ response
+
+;; ToolSearch：渐进式工具披露（对标 ToolSearchToolCallingAdvisor）
+;; 全量工具不直接发给模型；每轮只注入内置 tool_search + 已检索命中的工具
+(make-chat-client model
+  :advisors (list (make-tool-search-tool-calling-advisor
+                   :match-mode :substring    ; 或 :regex
+                   :max-results 5)))
 ```
 
 ### ChatClient（`ChatClient` / `Builder` / `RequestSpec`）
 
 ```lisp
 ;; 构建
-(make-chat-client model :system s :options o :advisors a :tools ts)
+(make-chat-client model :system s :options o :advisors a :tools ts
+                        :auto-tool-advisor t) ; NIL = user-controlled 模式
 (chat-client-builder model)          ; → builder
 (default-system builder text)        ; 以下均返回 builder
 (default-options builder options)

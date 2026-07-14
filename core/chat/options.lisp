@@ -20,8 +20,7 @@
 (defparameter +chat-options-slots+
   '(model temperature max-tokens top-p top-k stop-sequences
     frequency-penalty presence-penalty extra-params
-    tool-callbacks tool-names tool-context
-    internal-tool-execution-enabled max-tool-iterations)
+    tool-callbacks tool-names tool-context)
   "chat-options 全部槽位（合并/拷贝时枚举用）")
 
 (defclass chat-options ()
@@ -61,22 +60,17 @@
     :documentation "按名引用全局注册表工具的名称列表（字符串/符号）")
    (tool-context
     :initarg :tool-context
-    :documentation "透传给工具执行的上下文 plist")
-   (internal-tool-execution-enabled
-    :initarg :internal-tool-execution-enabled
-    :documentation "是否在 ChatModel 内部自动执行工具调用（默认 T）")
-   (max-tool-iterations
-    :initarg :max-tool-iterations
-    :documentation "内部工具执行循环的最大轮数（默认 10）"))
+    :documentation "透传给工具执行的上下文 plist"))
   (:documentation "可移植的 Chat 调用选项
-（对标 Spring AI ChatOptions + ToolCallingChatOptions）"))
+（对标 Spring AI 2.0 ChatOptions + ToolCallingChatOptions；
+工具执行循环选项已随 2.0 架构上移到
+cl-agent.client:tool-calling-advisor）"))
 
 (defun make-chat-options (&rest initargs
                           &key model temperature max-tokens top-p top-k
                                stop-sequences frequency-penalty presence-penalty
                                extra-params
-                               tool-callbacks tool-names tool-context
-                               internal-tool-execution-enabled max-tool-iterations)
+                               tool-callbacks tool-names tool-context)
   "创建 chat-options。只有显式传入的选项才算\"已设置\"。
 
 示例：
@@ -85,8 +79,7 @@
   (declare (ignore model temperature max-tokens top-p top-k
                    stop-sequences frequency-penalty presence-penalty
                    extra-params
-                   tool-callbacks tool-names tool-context
-                   internal-tool-execution-enabled max-tool-iterations))
+                   tool-callbacks tool-names tool-context))
   (apply #'make-instance 'chat-options initargs))
 
 ;;; ============================================================
@@ -136,14 +129,6 @@
 (defun chat-options-tool-context (options)
   (options-slot options 'tool-context))
 
-(defun chat-options-internal-tool-execution-enabled (options)
-  "内部工具执行开关，未设置时默认 T（Spring AI 同默认）"
-  (options-slot options 'internal-tool-execution-enabled t))
-
-(defun chat-options-max-tool-iterations (options)
-  "工具循环最大轮数，未设置时默认 10"
-  (options-slot options 'max-tool-iterations 10))
-
 ;;; ============================================================
 ;;; 拷贝与合并
 ;;; ============================================================
@@ -175,6 +160,16 @@
                            (options-slot fallback slot)))
                   (otherwise (slot-value primary slot)))))))
     merged))
+
+(defun chat-options-with-tools (options &key tool-callbacks tool-names)
+  "返回把工具槽**替换**为给定值的选项副本（其余槽位保留）。
+
+与 merge-chat-options 的并集语义不同：这里是整体替换，
+供需要收窄工具集的场景使用（如渐进式工具披露）。"
+  (let ((new (copy-chat-options options)))
+    (setf (slot-value new 'tool-callbacks) tool-callbacks
+          (slot-value new 'tool-names) tool-names)
+    new))
 
 (defmethod print-object ((options chat-options) stream)
   (print-unreadable-object (options stream :type t)

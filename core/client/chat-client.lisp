@@ -64,7 +64,14 @@
     :initarg :default-tools
     :initform nil
     :reader client-default-tools
-    :documentation "默认工具引用列表（callback/符号/字符串）"))
+    :documentation "默认工具引用列表（callback/符号/字符串）")
+   (auto-tool-advisor
+    :initarg :auto-tool-advisor
+    :initform t
+    :reader client-auto-tool-advisor-p
+    :documentation "是否自动注册 tool-calling-advisor（默认 T；
+NIL 进入 user-controlled 工具执行模式，对标
+AdvisorParams.toolCallingAdvisorAutoRegister(false)）"))
   (:documentation "面向应用的聊天客户端（对标 ChatClient）"))
 
 (defclass chat-client-builder ()
@@ -111,8 +118,13 @@
                  :default-advisors (builder-advisors builder)
                  :default-tools (builder-tools builder)))
 
-(defun make-chat-client (model &key system options advisors tools)
+(defun make-chat-client (model &key system options advisors tools
+                                    (auto-tool-advisor t))
   "一步创建 chat-client（对标 ChatClient.create(chatModel) 及常用默认值）。
+
+AUTO-TOOL-ADVISOR 为 NIL 时不自动注册 tool-calling-advisor：
+携带 tool-calls 的响应原样返回，由调用方驱动
+cl-agent.chat:execute-tool-calls 循环（user-controlled 模式）。
 
 示例：
   (make-chat-client model
@@ -123,7 +135,8 @@
                  :default-system-text system
                  :default-options options
                  :default-advisors advisors
-                 :default-tools tools))
+                 :default-tools tools
+                 :auto-tool-advisor auto-tool-advisor))
 
 (defmethod print-object ((client chat-client) stream)
   (print-unreadable-object (client stream :type t)
@@ -245,13 +258,23 @@ TEXT 可带 format 控制串。返回 spec。"
           do (context-set request key value))
     request))
 
+(defun spec-effective-advisors (spec)
+  "本次请求的完整 Advisor 列表：默认 + 请求级；
+客户端启用自动注册且链中没有 tool-calling-advisor 时追加默认实例
+（对标 ChatClient 自动注册 ToolCallingAdvisor）"
+  (let ((advisors (append (client-default-advisors (spec-client spec))
+                          (spec-advisors spec))))
+    (if (and (client-auto-tool-advisor-p (spec-client spec))
+             (notany (lambda (a) (typep a 'tool-calling-advisor)) advisors))
+        (append advisors (list (make-tool-calling-advisor)))
+        advisors)))
+
 (defun spec-advisor-chain (spec)
-  "组装本次请求的 Advisor 链（默认 + 请求级），
+  "组装本次请求的 Advisor 链（默认 + 请求级 + 自动注册的工具循环），
 终端为真正的 ChatModel 调用。"
   (let ((model (chat-client-model (spec-client spec))))
     (make-advisor-chain
-     (append (client-default-advisors (spec-client spec))
-             (spec-advisors spec))
+     (spec-effective-advisors spec)
      ;; 同步终端
      (lambda (request)
        (make-client-response

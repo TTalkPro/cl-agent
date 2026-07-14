@@ -59,6 +59,24 @@
    #:make-safe-guard-advisor
    #:+conversation-id-key+
 
+   ;; ==================== ToolCallingAdvisor（2.0 工具循环） ====================
+   #:tool-calling-advisor
+   #:make-tool-calling-advisor
+   #:tool-advisor-manager
+   #:tool-advisor-max-iterations
+   #:+tool-calling-advisor-order+
+   ;; 细粒度钩子（对标 doInitializeLoop/doBeforeCall/doAfterCall/doFinalizeLoop）
+   #:tool-advisor-initialize-loop
+   #:tool-advisor-before-call
+   #:tool-advisor-after-call
+   #:tool-advisor-finalize-loop
+
+   ;; ==================== ToolSearchToolCallingAdvisor（渐进式披露） ====================
+   #:tool-search-tool-calling-advisor
+   #:make-tool-search-tool-calling-advisor
+   #:tool-search-match-mode
+   #:tool-search-max-results
+
    ;; ==================== ChatClient ====================
    #:chat-client
    #:make-chat-client

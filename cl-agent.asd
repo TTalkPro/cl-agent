@@ -77,6 +77,8 @@
                ;; ChatClient + Advisor tests
                (:file "tests/test-advisor")     ; Advisor 协议 / 链 / defadvisor
                (:file "tests/test-chat-client") ; ChatClient / chat 宏 / 集成
+               (:file "tests/test-tool-advisor") ; ToolCallingAdvisor（2.0 工具循环）
+               (:file "tests/test-tool-search")  ; 循环钩子 + 渐进式工具披露
 
                ;; LLM provider tests
                (:file "tests/test-llm")

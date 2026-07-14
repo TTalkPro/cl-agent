@@ -108,6 +108,8 @@
     ((:file "package")
      (:file "advisor")            ; Advisor 协议 + 洋葱链 + defadvisor
      (:file "advisors")           ; 内置 Advisor（日志/记忆/护栏）
+     (:file "tool-advisor")       ; ToolCallingAdvisor（2.0 递归工具循环 + 钩子）
+     (:file "tool-search-advisor") ; ToolSearch（渐进式工具披露）
      (:file "chat-client")))))    ; ChatClient + Builder + chat 宏
 
 ;; ============================================================

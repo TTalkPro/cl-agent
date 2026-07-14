@@ -13,20 +13,12 @@
   (let ((options (cl-agent.chat:make-chat-options)))
     (is (null (cl-agent.chat:chat-options-temperature options)))
     (is (null (cl-agent.chat:chat-options-model options)))
-    ;; 内部工具执行默认开启（Spring AI 同默认）
-    (is-true (cl-agent.chat:chat-options-internal-tool-execution-enabled options))
-    (is (= 10 (cl-agent.chat:chat-options-max-tool-iterations options)))))
+    (is (null (cl-agent.chat:chat-options-tool-callbacks options)))))
 
 (test options-nil-safe
   "NIL options 也能安全读取"
   (is (null (cl-agent.chat:chat-options-temperature nil)))
-  (is-true (cl-agent.chat:chat-options-internal-tool-execution-enabled nil)))
-
-(test options-explicit-nil-vs-unset
-  "显式设 NIL 与未设置可区分（显式关闭内部工具执行）"
-  (let ((options (cl-agent.chat:make-chat-options
-                  :internal-tool-execution-enabled nil)))
-    (is-false (cl-agent.chat:chat-options-internal-tool-execution-enabled options))))
+  (is (null (cl-agent.chat:chat-options-tool-names nil))))
 
 (test options-merge-priority
   "合并：运行时选项覆盖默认选项，未设置的沿用默认"

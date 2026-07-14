@@ -83,6 +83,10 @@ Fluent pipeline style:
 
 Notes:
 
+- Tool execution happens in the auto-registered `tool-calling-advisor`
+  (Spring AI 2.0 architecture); pass `:auto-tool-advisor nil` to
+  `make-chat-client` for user-controlled execution
+
 - The lambda-list must be `&key`-style (LLM tool arguments are named)
 - Tool names become lowercase snake_case: `get-weather` → `"get_weather"`
 - `(:return-direct t)` returns the tool result directly to the caller

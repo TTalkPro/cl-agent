@@ -103,7 +103,8 @@ ChatModel 是对具体 LLM 提供商的统一抽象（对标 Spring AI `ChatMode
 ;; 普通函数照常可调
 (get-weather :city "东京")
 
-;; 对话中启用：模型请求工具时，ChatModel 内部自动执行并回传
+;; 对话中启用：模型请求工具时，自动注册的 tool-calling-advisor
+;; 执行工具并回传模型（2.0 架构，循环在 Advisor 链中）
 (cl-agent.client:chat *client*
   (:user "东京的天气怎么样？")
   (:tools 'get-weather))
@@ -180,6 +181,8 @@ Advisor 是环绕每次调用的洋葱链（对标 Spring AI Advisor API）。
 | `safe-guard-advisor` | 敏感词短路护栏 | -500 |
 | `message-chat-memory-advisor` | 历史作为消息注入 | 1000 |
 | `prompt-chat-memory-advisor` | 历史渲染进系统提示 | 1000 |
+| `tool-calling-advisor` | 工具执行循环（自动注册） | 2000 |
+| `tool-search-tool-calling-advisor` | 渐进式工具披露（大工具集省 token） | 2000 |
 
 ## 8. 流式与结构化输出
 

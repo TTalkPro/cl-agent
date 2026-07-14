@@ -12,8 +12,8 @@
 - **Advisor 洋葱链**：`advise-call` / `advise-stream` 协议、有序链、
   `defadvisor` 一个表达式定义类 + 方法 + 构造函数；
   内置日志、消息记忆、提示词记忆、安全护栏四个 Advisor
-- **ChatModel 协议**：`chat-model-call` / `chat-model-stream`，
-  内部工具执行循环（对标 `internalToolExecutionEnabled`）
+- **ChatModel 协议**：`chat-model-call` / `chat-model-stream`（真 SSE 流式），
+  单次调用语义——工具循环由 `tool-calling-advisor` 承担（2.0 架构）
 - **工具体系**：`deftool` 宏对标 `@Tool` 注解，自动派生 JSON Schema 并注册；
   ToolCallback / ToolCallingManager / `:return-direct` / ToolContext
 - **ChatMemory**：Repository 存储协议 + 滑动窗口记忆（pairing-safe 裁剪）
@@ -46,6 +46,7 @@
 | `client.prompt().user(u).call().content()` | `(chat client (:user u))` 或 fluent 管道 |
 | `@Tool` / `@ToolParam` | `deftool` 宏 |
 | `CallAdvisor` / `AdvisorChain` | `defadvisor` / `advise-call` / `chain-next` |
+| `ToolCallingAdvisor`（2.0） | `tool-calling-advisor`（自动注册，流式工具循环） |
 | `MessageChatMemoryAdvisor` | `message-chat-memory-advisor` |
 | `MessageWindowChatMemory` | `message-window-chat-memory` |
 | `ChatModel#call` | `chat-model-call` |
