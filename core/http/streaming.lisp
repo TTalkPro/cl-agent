@@ -268,28 +268,49 @@ SSE 格式：
                                :keep-alive nil)
             (declare (ignore status response-headers))
 
-            ;; 处理流
+            ;; 处理流：SSE 是行协议，逐行读取即真增量
+            ;; （每个事件随其结束空行立即分发，不等缓冲区填满）。
+            ;; dexador 依响应头可能返回字符流或字节流，
+            ;; 字节流经 flexi-streams 包装为 UTF-8 字符流，
+            ;; 避免多字节字符跨块边界被截断。
             (unwind-protect
-                 (let ((buffer (make-array 4096 :element-type '(unsigned-byte 8))))
-                   (loop for bytes-read = (read-sequence buffer body-stream)
-                         while (and (plusp bytes-read)
-                                    (not (stream-context-stop-p context)))
-                         do
-                         ;; 转换为字符串
-                         (let ((chunk (flexi-streams:octets-to-string
-                                       buffer
-                                       :external-format :utf-8
-                                       :end bytes-read)))
-                           ;; 解析 SSE 事件
-                           (dolist (event (parse-sse-chunk chunk context))
-                             (let ((data (getf event :data)))
-                               ;; 累积数据
-                               (when data
-                                 (setf accumulator
-                                       (concatenate 'string accumulator data)))
-                               ;; 调用回调
-                               (when on-event
-                                 (funcall on-event event)))))))
+                 (let ((char-stream
+                         (if (subtypep (stream-element-type body-stream)
+                                       'character)
+                             body-stream
+                             (flexi-streams:make-flexi-stream
+                              body-stream :external-format :utf-8)))
+                       (current-event nil)
+                       (current-data '()))
+                   (flet ((dispatch ()
+                            (when current-data
+                              (let* ((data (format nil "~{~A~^~%~}"
+                                                   (nreverse current-data)))
+                                     (event (list :event (or current-event
+                                                             "message")
+                                                  :data data)))
+                                (setf accumulator
+                                      (concatenate 'string accumulator data))
+                                (when on-event
+                                  (funcall on-event event))))
+                            (setf current-data '()
+                                  current-event nil)))
+                     (loop for raw-line = (read-line char-stream nil :eof)
+                           until (or (eq raw-line :eof)
+                                     (stream-context-stop-p context))
+                           do (let ((line (string-right-trim '(#\Return)
+                                                             raw-line)))
+                                (if (string= line "")
+                                    ;; 空行 = 事件边界，立即分发
+                                    (dispatch)
+                                    (multiple-value-bind (field value)
+                                        (parse-sse-line line)
+                                      (cond
+                                        ((equal field "data")
+                                         (push value current-data))
+                                        ((equal field "event")
+                                         (setf current-event value))))))
+                           finally (dispatch))))
               ;; 关闭流
               (close body-stream))
 
