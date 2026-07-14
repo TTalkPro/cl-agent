@@ -141,14 +141,31 @@
   (append (chat-options-tool-callbacks options)
           (resolve-tool-callbacks (chat-options-tool-names options))))
 
+(defun options->spi-args (options)
+  "把 chat-options 展开为 llm-chat SPI 的关键字参数 plist
+（存在才下发，与 SPI 的\"存在才发送\"约定一致）"
+  (let ((args nil))
+    (flet ((add (key value)
+             (when value
+               (push value args)
+               (push key args))))
+      (add :model (chat-options-model options))
+      (add :max-tokens (chat-options-max-tokens options))
+      (add :temperature (chat-options-temperature options))
+      (add :top-p (chat-options-top-p options))
+      (add :top-k (chat-options-top-k options))
+      (add :stop (chat-options-stop-sequences options))
+      (add :frequency-penalty (chat-options-frequency-penalty options))
+      (add :presence-penalty (chat-options-presence-penalty options))
+      (add :extra-params (chat-options-extra-params options)))
+    args))
+
 (defun call-provider (model messages options tool-schemas)
   "单次调用底层 provider，返回 chat-response"
-  (let ((llm-response (llm-chat (chat-model-provider model)
-                                (messages->neutral messages)
-                                :tools tool-schemas
-                                :model (chat-options-model options)
-                                :max-tokens (chat-options-max-tokens options)
-                                :temperature (chat-options-temperature options))))
+  (let ((llm-response (apply #'llm-chat (chat-model-provider model)
+                             (messages->neutral messages)
+                             :tools tool-schemas
+                             (options->spi-args options))))
     (llm-response->chat-response llm-response)))
 
 (defmethod chat-model-call ((model provider-chat-model) (prompt prompt))
@@ -204,13 +221,11 @@
           response)
         ;; 纯文本流式
         (let ((llm-response
-                (llm-chat-stream provider
-                                 (messages->neutral (prompt-messages prompt))
-                                 (lambda (chunk)
-                                   (let ((delta (getf chunk :delta)))
-                                     (when (and delta (string/= delta ""))
-                                       (funcall on-chunk delta))))
-                                 :model (chat-options-model options)
-                                 :max-tokens (chat-options-max-tokens options)
-                                 :temperature (chat-options-temperature options))))
+                (apply #'llm-chat-stream provider
+                       (messages->neutral (prompt-messages prompt))
+                       (lambda (chunk)
+                         (let ((delta (getf chunk :delta)))
+                           (when (and delta (string/= delta ""))
+                             (funcall on-chunk delta))))
+                       (options->spi-args options))))
           (llm-response->chat-response llm-response)))))
