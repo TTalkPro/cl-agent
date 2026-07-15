@@ -12,6 +12,9 @@
 ;;;;   - cl-agent.chat（对标 org.springframework.ai.chat.*）：
 ;;;;     CLOS 消息体系 / Prompt / ChatOptions / ChatResponse /
 ;;;;     deftool 工具体系 / ChatModel 协议 / ChatMemory
+;;;;   - cl-agent.kernel（Phase P1：Filter 机制 + Kernel 骨架）：
+;;;;     Filter CLOS / build-chain / defilter / Kernel CLOS /
+;;;;     三链请求/响应载体（不连接 ChatClient，P2 才接入）
 ;;;;   - cl-agent.client（对标 org.springframework.ai.chat.client.*）：
 ;;;;     Advisor 协议与洋葱链 / defadvisor 宏 / 内置 Advisor /
 ;;;;     ChatClient + Builder + chat 宏 DSL
@@ -112,9 +115,20 @@
      (:file "model")))            ; ChatModel 协议 + Provider 适配器
 
    ;; ============================================================
+   ;; Kernel + Filter（clj-agent kernel+filter 架构，全量对齐 Spring AI 2.0）
+   ;; ============================================================
+    (:module "kernel"
+     :components
+     ((:file "package")              ; cl-agent.kernel 包定义
+      (:file "carriers")             ; 三链请求/响应载体
+      (:file "filter")               ; filter CLOS 类 + build-chain + defilter
+      (:file "kernel")               ; kernel CLOS 类 + build-kernel
+      (:file "invoke")))             ; invoke-chat/tool/turn + run-tool-loop
+
+   ;; ============================================================
    ;; ChatClient + Advisor（对标 org.springframework.ai.chat.client.*）
    ;; ============================================================
-   (:module "client"
+    (:module "client"
     :components
     ((:file "package")
      (:file "advisor")            ; Advisor 协议 + 洋葱链 + defadvisor
@@ -127,6 +141,17 @@
 ;; ============================================================
 ;; Changelog
 ;; ============================================================
+;;
+;; v8.2.0 —— Phase P1：Filter 机制 + Kernel 骨架（新增 cl-agent.kernel）：
+;; - filter CLOS 类，四钩子槽（:tool/:chat/:turn/:token-xform）
+;; - build-chain 洋葱折叠函数（reduce → 嵌套闭包），对标 clj-agent
+;; - defilter 宏（对标 defadvisor，简化版）
+;; - kernel CLOS 类（model/tools/filters/settings，无 memory）
+;; - build-kernel 构造函数
+;; - 三链请求/响应载体：tool-request/response、turn-request/result
+;;   （chat 链复用现有 client-request/client-response，零修改现有代码）
+;; - 纯加法，不接入 ChatClient——invoke-chat/invoke-tool/invoke-turn
+;;   是 P2 的事
 ;;
 ;; v8.1.0 —— 全面对齐 Spring AI 2.0 的 Advisor 体系：
 ;; - 新增 structured-output-validation-advisor（对标
