@@ -8,6 +8,7 @@
 ;;;;   - Future 模式的异步请求
 ;;;;   - 批量并行请求
 ;;;;   - 线程池管理
+;;;;   - 动态绑定继承（见下）
 ;;;;
 ;;;; 使用示例：
 ;;;;   ;; 单个异步请求
@@ -19,6 +20,22 @@
 ;;;;   (http-parallel
 ;;;;     (list (make-request :url "https://api1.example.com")
 ;;;;           (make-request :url "https://api2.example.com")))
+;;;;
+;;;; 动态绑定继承：
+;;;;   请求体在哪个线程、什么时候执行都是不确定的——可能在 worker 上，
+;;;;   也可能被 http-future-value 的 force 窃取到调用 force 的那个线程
+;;;;   （lparallel task stealing），而且时间上常常已在提交处的 let 退出
+;;;;   之后。所以未列入继承名单的特殊变量，其可见性不可依赖。
+;;;;
+;;;;   列入 cl-agent.core:*inherited-special-variables* 的变量会在
+;;;;   **提交时刻**于调用方线程快照，并在请求体实际执行处重建：
+;;;;
+;;;;     (with-inherited-specials (*request-id*)
+;;;;       (let ((*request-id* "req-42"))
+;;;;         (setf f (http-get-async url))))   ; let 在此退出
+;;;;     (http-future-value f)                 ; 请求体仍看到 "req-42"
+;;;;
+;;;;   名单与 cl-agent.chat 的并行工具执行共用（同一个变量）。
 
 (in-package #:cl-agent.http)
 
@@ -56,13 +73,17 @@
   *http-thread-pool*)
 
 (defun shutdown-http-thread-pool ()
-  "关闭 HTTP 线程池
+  "关闭 HTTP 线程池（幂等）
 
 说明：
   应在应用退出前调用以清理资源"
+  ;; end-kernel 作用于 lparallel:*kernel*，故必须先把待关闭的池绑上去
+  ;; 再关，最后才清空 *http-thread-pool*——顺序反了会丢失池句柄，
+  ;; 导致 worker 线程永久泄漏且再也无法回收。
   (when *http-thread-pool*
-    (setf *http-thread-pool* nil)
-    (lparallel:end-kernel :wait t)))
+    (let ((lparallel:*kernel* *http-thread-pool*))
+      (lparallel:end-kernel :wait t))
+    (setf *http-thread-pool* nil)))
 
 (defmacro with-http-kernel (&body body)
   "在 HTTP 线程池上下文中执行代码
@@ -198,18 +219,23 @@
                                     :content-type :json)))
     ;; 做其他事情...
     (http-future-value future))"
-  (with-http-kernel
-    (%make-http-future
-     :lparallel-future (lparallel:future
-                         (http-request url
-                                       :method method
-                                       :headers headers
-                                       :body body
-                                       :content-type content-type
-                                       :timeout timeout
-                                       :parse-json parse-json))
-     :url url
-     :method method)))
+  ;; 快照必须在此刻、在调用方线程内完成：future 体的求值可能发生在
+  ;; worker 上，也可能被 http-future-value 的 force 窃取到某个完全
+  ;; 无关的线程，且时间上往往已在调用方的 let 退出之后。
+  (let ((captured (capture-special-bindings)))
+    (with-http-kernel
+      (%make-http-future
+       :lparallel-future (lparallel:future
+                           (with-captured-special-bindings (captured)
+                             (http-request url
+                                           :method method
+                                           :headers headers
+                                           :body body
+                                           :content-type content-type
+                                           :timeout timeout
+                                           :parse-json parse-json)))
+       :url url
+       :method method))))
 
 (defun http-get-async (url &key headers (timeout *default-timeout*) query-params (parse-json t))
   "异步发送 GET 请求
@@ -303,7 +329,8 @@
   ;; 简化形式（仅 URL）
   (http-parallel '(\"https://api1.example.com\"
                    \"https://api2.example.com\"))"
-  (with-http-kernel
+  (let ((captured (capture-special-bindings)))
+   (with-http-kernel
     (let* ((specs (mapcar (lambda (req)
                             (if (stringp req)
                                 (make-http-request-spec :url req)
@@ -312,24 +339,25 @@
            (futures (mapcar (lambda (spec)
                               (cons spec
                                     (lparallel:future
-                                      (handler-case
-                                          (list :ok
-                                                (http-request
-                                                 (http-request-spec-url spec)
-                                                 :method (http-request-spec-method spec)
-                                                 :headers (http-request-spec-headers spec)
-                                                 :body (http-request-spec-body spec)
-                                                 :content-type (http-request-spec-content-type spec)
-                                                 :timeout (http-request-spec-timeout spec)))
-                                        (error (e)
-                                          (list :error e))))))
+                                      (with-captured-special-bindings (captured)
+                                        (handler-case
+                                            (list :ok
+                                                  (http-request
+                                                   (http-request-spec-url spec)
+                                                   :method (http-request-spec-method spec)
+                                                   :headers (http-request-spec-headers spec)
+                                                   :body (http-request-spec-body spec)
+                                                   :content-type (http-request-spec-content-type spec)
+                                                   :timeout (http-request-spec-timeout spec)))
+                                          (error (e)
+                                            (list :error e)))))))
                             specs)))
       ;; 收集结果
       (loop for (spec . future) in futures
             for result = (lparallel:force future)
             when (and fail-fast (eq (first result) :error))
             do (return (list (append result (list :tag (http-request-spec-tag spec)))))
-            collect (append result (list :tag (http-request-spec-tag spec)))))))
+            collect (append result (list :tag (http-request-spec-tag spec))))))))
 
 (defun http-parallel-map (urls fn &key headers (timeout *default-timeout*))
   "并行请求多个 URL 并对结果应用函数

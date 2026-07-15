@@ -24,6 +24,11 @@
   (:use #:common-lisp)
   (:nicknames #:cla.chat)
   (:import-from #:cl-agent.core
+                ;; 动态绑定继承（与 cl-agent.http 共用同一份名单）
+                #:*inherited-special-variables*
+                #:with-inherited-specials
+                #:capture-special-bindings
+                #:with-captured-special-bindings
                 ;; LLM Provider SPI
                 #:llm-chat
                 #:llm-chat-stream
@@ -116,6 +121,8 @@
    #:prompt-system-messages
    #:prompt-instruction-messages
    #:prompt-last-user-text
+   #:prompt-last-user-or-tool-message
+   #:prompt-augment-last-user-message
    #:prompt-append-messages
 
    ;; ==================== ChatResponse ====================
@@ -175,8 +182,11 @@
    #:make-concurrent-tool-calling-manager
    #:manager-pool-size
    #:manager-timeout
+   #:manager-inherit-specials
    #:shutdown-tool-calling-manager
    #:with-concurrent-tool-calling-manager
+   #:*inherited-special-variables*
+   #:with-inherited-specials
    #:tool-execution-result
    #:tool-execution-conversation-history
    #:tool-execution-return-direct-p

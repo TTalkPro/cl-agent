@@ -8,6 +8,7 @@
 ;;;;   - 超时降级
 ;;;;   - 与 tool-calling-advisor 集成
 ;;;;   - kernel 生命周期（shutdown 幂等）
+;;;;   - 动态绑定继承（*inherited-special-variables* / :inherit-specials）
 
 (in-package :cl-agent/tests)
 
@@ -53,6 +54,15 @@
   "永不返回（测超时）"
   (sleep 10)
   "unreachable")
+
+(defvar *pt-request-id* nil
+  "测试用：模拟调用方 let 绑定的环境上下文")
+
+(defvar *pt-unbound-marker*)
+
+(cl-agent.chat:deftool pt-read-ctx (&key)
+  "回读动态变量 *pt-request-id*（测 worker 绑定继承）"
+  (format nil "ctx:~A" *pt-request-id*))
 
 (defun pt-response (&rest names)
   "构造携带多个 tool-call 的 chat-response（无参工具）"
@@ -329,4 +339,100 @@
                               (lambda (m) (eq :tool (getf m :role)))
                               (getf second-req :messages))))
              (is (= 2 (length tool-msgs)))))
+      (cl-agent.chat:shutdown-tool-calling-manager par))))
+
+;;; ============================================================
+;;; 动态绑定继承
+;;; ============================================================
+
+(defun pt-run-ctx (manager)
+  "用 MANAGER 并行跑两个 pt_read_ctx（两个才走并行路径），返回结果文本"
+  (result-texts
+   (cl-agent.chat:execute-tool-calls
+    manager
+    (cl-agent.chat:make-prompt "go")
+    (pt-response "pt_read_ctx" "pt_read_ctx"))))
+
+;; 注：不存在「默认不继承」的端到端测试——未列入名单时的可见性本就
+;; 不确定（lparallel:force 可能把任务窃取回提交线程就地执行，此时
+;; 调用方的 let 绑定可见；被 worker 领走则不可见）。故只断言有保证的
+;; 方向：列入名单 => 必定可见。名单的优先级解析由下面的单元测试覆盖。
+
+(test inherit-specials-resolution-precedence
+  "解析优先级：显式 :inherit-specials 压过 *inherited-special-variables*"
+  (let ((cl-agent.chat:*inherited-special-variables* '(*pt-request-id*)))
+    ;; :default => 取动态默认
+    (is (equal '(*pt-request-id*)
+               (cl-agent.chat::manager-inherited-specials*
+                (cl-agent.chat:make-concurrent-tool-calling-manager))))
+    ;; 显式列表 => 压过动态默认
+    (is (equal '(*pt-unbound-marker*)
+               (cl-agent.chat::manager-inherited-specials*
+                (cl-agent.chat:make-concurrent-tool-calling-manager
+                 :inherit-specials '(*pt-unbound-marker*)))))
+    ;; 显式空列表 => 也压过非空动态默认（而非退回 :default）
+    (is (null (cl-agent.chat::manager-inherited-specials*
+               (cl-agent.chat:make-concurrent-tool-calling-manager
+                :inherit-specials '()))))))
+
+(test capture-special-bindings-snapshot
+  "capture-special-bindings 快照当前绑定，跳过未绑定与常量符号"
+  (let ((*pt-request-id* "req-1"))
+    (let ((captured (cl-agent.core:capture-special-bindings
+                     '(*pt-unbound-marker* t :kw *pt-request-id*))))
+      (is (equal '(*pt-request-id*) (car captured)))
+      (is (equal '("req-1") (cdr captured)))))
+  ;; 空输入不报错
+  (is (equal '(nil) (cl-agent.core:capture-special-bindings '()))))
+
+(test worker-inherits-via-dynamic-list
+  "列入 *inherited-special-variables* 后 worker 看到调用方绑定"
+  (let ((par (cl-agent.chat:make-concurrent-tool-calling-manager)))
+    (unwind-protect
+         (let ((cl-agent.chat:*inherited-special-variables* '(*pt-request-id*))
+               (*pt-request-id* "req-42"))
+           (is (equal '("ctx:req-42" "ctx:req-42") (pt-run-ctx par))))
+      (cl-agent.chat:shutdown-tool-calling-manager par))))
+
+(test worker-inherits-via-macro
+  "with-inherited-specials 提供同等效果且不求值符号"
+  (let ((par (cl-agent.chat:make-concurrent-tool-calling-manager)))
+    (unwind-protect
+         (cl-agent.chat:with-inherited-specials (*pt-request-id*)
+           (let ((*pt-request-id* "req-7"))
+             (is (equal '("ctx:req-7" "ctx:req-7") (pt-run-ctx par)))))
+      (cl-agent.chat:shutdown-tool-calling-manager par))))
+
+(test worker-inherits-via-manager-slot
+  "manager 的 :inherit-specials 生效（且不依赖动态默认）"
+  (let ((par (cl-agent.chat:make-concurrent-tool-calling-manager
+              :inherit-specials '(*pt-request-id*))))
+    (unwind-protect
+         (let ((cl-agent.chat:*inherited-special-variables* '())
+               (*pt-request-id* "req-9"))
+           (is (equal '("ctx:req-9" "ctx:req-9") (pt-run-ctx par))))
+      (cl-agent.chat:shutdown-tool-calling-manager par))))
+
+(test inherit-skips-unbound-and-constants
+  "名单含未绑定符号与常量时不报错，也不影响其他变量的继承"
+  (let ((par (cl-agent.chat:make-concurrent-tool-calling-manager)))
+    (unwind-protect
+         (let ((cl-agent.chat:*inherited-special-variables*
+                 '(*pt-unbound-marker* t :kw *pt-request-id*))
+               (*pt-request-id* "req-1"))
+           (is (equal '("ctx:req-1" "ctx:req-1") (pt-run-ctx par))))
+      (cl-agent.chat:shutdown-tool-calling-manager par))))
+
+(test inherit-tracks-current-binding
+  "继承的是提交时刻的绑定：let 内看到内层值，退出后看到全局值"
+  (let ((par (cl-agent.chat:make-concurrent-tool-calling-manager)))
+    (unwind-protect
+         (let ((cl-agent.chat:*inherited-special-variables* '(*pt-request-id*)))
+           (setf *pt-request-id* "global")
+           (unwind-protect
+                (progn
+                  (let ((*pt-request-id* "inner"))
+                    (is (equal '("ctx:inner" "ctx:inner") (pt-run-ctx par))))
+                  (is (equal '("ctx:global" "ctx:global") (pt-run-ctx par))))
+             (setf *pt-request-id* nil)))
       (cl-agent.chat:shutdown-tool-calling-manager par))))

@@ -121,6 +121,12 @@
    #:do-alist
    #:do-plist
 
+   ;; === 动态绑定继承（跨线程） ===
+   #:*inherited-special-variables*
+   #:with-inherited-specials
+   #:capture-special-bindings
+   #:with-captured-special-bindings
+
    ;; === Logging ===
    #:log-debug
    #:log-info

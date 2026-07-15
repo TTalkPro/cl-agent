@@ -483,9 +483,24 @@ assistant(tool-calls) + tool-response 消息）"
 ;;; 语义与顺序执行完全一致（结果按 tool-call 原序、return-direct
 ;;; 取并集、错误经 process-tool-execution-error 隔离），只是并发。
 ;;;
-;;; 注意：worker 线程不继承提交线程的动态绑定。工具若依赖调用方
-;;; 用 let 绑定的特殊变量，并行下不可见；请改用 tool-context
-;;; 显式传参（与 Spring 的 ToolContext 同语义）。
+;;; 动态绑定：未列入继承名单的特殊变量，其在工具体内的可见性是
+;;; **不确定的**——lparallel:force 遇到尚未被 worker 领走的任务时，
+;;; 会由提交线程就地执行（task stealing），此时工具能看到调用方的
+;;; let 绑定；被 worker 领走时则只能看到全局值。哪种发生取决于调度
+;;; 竞争，同一份代码两次运行可以不同。
+;;;
+;;; 把符号列入 *inherited-special-variables*（或 manager 的
+;;; :inherit-specials）即可消除这种不确定性：值在提交线程快照，在
+;;; 执行处经 progv 重建，无论任务落在 worker 还是被窃取回提交线程，
+;;; 工具看到的都是调用方的绑定。
+;;;
+;;; 工具参数本身仍应走 tool-context 显式传参（与 Spring 的
+;;; ToolContext 同语义）；继承机制是给日志级别、request-id 这类
+;;; 环境上下文用的。
+
+;;; 机制本身（*inherited-special-variables* / with-inherited-specials /
+;;; capture-special-bindings）定义在 cl-agent.core（utils.lisp），
+;;; 与 cl-agent.http 的异步请求共用同一份名单。
 
 (defclass concurrent-tool-calling-manager (default-tool-calling-manager)
   ((kernel
@@ -504,21 +519,39 @@ assistant(tool-calls) + tool-response 消息）"
     :initarg :timeout
     :initform nil
     :reader manager-timeout
-    :documentation "单工具执行超时（秒，NIL 不限；超时结果转错误文本）"))
+    :documentation "单工具执行超时（秒，NIL 不限；超时结果转错误文本）")
+   (inherit-specials
+    :initarg :inherit-specials
+    :initform :default
+    :reader manager-inherit-specials
+    :documentation "worker 继承的特殊变量名列表；:default 表示每次
+提交时读 *inherited-special-variables*（可被调用方 let 覆盖）"))
   (:documentation "并行工具执行 manager（对标 Spring AI 并行 DefaultToolCallingManager）"))
 
-(defun make-concurrent-tool-calling-manager (&key (pool-size 4) timeout)
+(defun manager-inherited-specials* (manager)
+  "解析 MANAGER 实际要继承的特殊变量名：显式 :inherit-specials 优先，
+:default 时取动态绑定的 *inherited-special-variables*。"
+  (let ((declared (manager-inherit-specials manager)))
+    (if (eq declared :default)
+        *inherited-special-variables*
+        declared)))
+
+(defun make-concurrent-tool-calling-manager (&key (pool-size 4) timeout
+                                                  (inherit-specials :default))
   "创建并行工具执行 manager。
 
 参数：
-  POOL-SIZE - 线程池大小（默认 4）
-  TIMEOUT   - 单工具超时秒数（默认 NIL 不限）
+  POOL-SIZE        - 线程池大小（默认 4）
+  TIMEOUT          - 单工具超时秒数（默认 NIL 不限）
+  INHERIT-SPECIALS - worker 继承的特殊变量名列表；默认 :default
+                     表示每次提交时读 *inherited-special-variables*
 
 线程池在首次执行时懒创建；用完后调用
 shutdown-tool-calling-manager 释放。"
   (make-instance 'concurrent-tool-calling-manager
                  :pool-size pool-size
-                 :timeout timeout))
+                 :timeout timeout
+                 :inherit-specials inherit-specials))
 
 (defun ensure-manager-kernel (manager)
   "取（或懒创建）manager 的 lparallel 内核（双检锁）"
@@ -542,7 +575,8 @@ shutdown-tool-calling-manager 释放。"
   "词法作用域内绑定 VAR 为并行 manager，退出时（含非局部退出）
 自动关闭线程池——避免用全局变量持有线程池。
 
-OPTIONS 透传 make-concurrent-tool-calling-manager（:pool-size / :timeout）。
+OPTIONS 透传 make-concurrent-tool-calling-manager
+（:pool-size / :timeout / :inherit-specials）。
 
 示例：
   (with-concurrent-tool-calling-manager (mgr :pool-size 8)
@@ -580,14 +614,19 @@ TIMEOUT 非空且超时时返回超时错误结果（worker 仍在后台跑完�
         (let* ((options (prompt-options prompt))
                (tool-context (chat-options-tool-context options))
                (timeout (manager-timeout manager))
+               ;; 必须在绑定 *kernel* 之前、于提交线程内快照，
+               ;; future 体已在别的线程求值，那里看不到这些绑定
+               (captured (capture-special-bindings
+                          (manager-inherited-specials* manager)))
                (lparallel:*kernel* (ensure-manager-kernel manager))
                ;; 每个工具提交为 future，worker 返回 (response . direct-p)
                (futures (mapcar
                          (lambda (tc)
                            (lparallel:future
-                             (multiple-value-bind (resp direct-p)
-                                 (execute-one-tool-call manager options tool-context tc)
-                               (cons resp direct-p))))
+                             (with-captured-special-bindings (captured)
+                               (multiple-value-bind (resp direct-p)
+                                   (execute-one-tool-call manager options tool-context tc)
+                                 (cons resp direct-p)))))
                          tool-calls))
                ;; 按原序收集结果
                (pairs (mapcar (lambda (f tc) (%force-tool-future f tc timeout))

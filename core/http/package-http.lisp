@@ -19,6 +19,13 @@
 (defpackage #:cl-agent.http
   (:use #:common-lisp)
   (:nicknames #:cla.http #:http)
+  ;; 动态绑定继承机制定义在 cl-agent.core（见 utils.lisp），
+  ;; 与 cl-agent.chat 的并行工具执行共用同一份名单
+  (:import-from #:cl-agent.core
+                #:*inherited-special-variables*
+                #:with-inherited-specials
+                #:capture-special-bindings
+                #:with-captured-special-bindings)
   (:export
    ;; ==================== 同步 API ====================
    ;; 核心请求函数
@@ -47,6 +54,10 @@
    #:http-future-value
    #:http-future-wait
    #:http-future-cancel
+
+   ;; 动态绑定继承（转出 cl-agent.core 的同名符号，非副本）
+   #:*inherited-special-variables*
+   #:with-inherited-specials
 
    ;; ==================== 流式 API ====================
    ;; SSE 流式请求

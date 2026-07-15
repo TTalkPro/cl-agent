@@ -243,49 +243,82 @@
   "管道函数（从左到右）"
   `(compose ,@(reverse functions)))
 
-;;; ============================================================
-;;; 链式调用宏
-;;; ============================================================
-
-(defmacro -> (initial-form &rest forms)
-  "线程首个宏（thread-first）"
-  (loop for form in forms
-        with result = initial-form
-        do (setf result
-                 (if (listp form)
-                     (cons (car form) (cons result (cdr form)))
-                     (list form result)))
-        finally (return result)))
-
-(defmacro ->> (initial-form &rest forms)
-  "线程最后一个宏（thread-last）"
-  (loop for form in forms
-        with result = initial-form
-        do (setf result
-                 (if (listp form)
-                     (append form (list result))
-                     (list form result)))
-        finally (return result)))
+;;; 链式调用宏（-> / ->> / as->）定义在 macros.lisp 的控制流宏一节。
+;;; 此处曾有一份与之逐字相同的 -> / ->> 副本（仅 docstring 微差），
+;;; 因加载顺序在后而一直顶替 macros.lisp 的版本并产生重定义警告，已删除。
 
 ;;; ============================================================
-;;; 日志工具
+;;; 动态绑定继承（跨线程）
 ;;; ============================================================
+;;; 特殊变量的绑定是每线程独立的：新线程只能看到全局值，看不到
+;;; 创建它的线程用 let 建立的绑定。基于线程池的并行代码（工具并行
+;;; 执行、异步 HTTP）因此存在一个隐患——lparallel:force 遇到尚未
+;;; 被 worker 领走的任务时会由调用线程就地执行（task stealing），
+;;; 于是同一个变量在任务体内的可见性取决于调度竞争：被窃取时看到
+;;; 调用方的绑定，被 worker 领走时看到全局值。
+;;;
+;;; 这里提供「提交时快照 + 执行处重建」的机制来消除这种不确定性：
+;;; 提交线程用 capture-special-bindings 拍快照，任务体用
+;;; with-captured-special-bindings（progv）重建，无论任务最终落在
+;;; 哪个线程、何时执行，看到的都是提交时刻的绑定。
 
-(defun log-debug (format-string &rest args)
-  "调试日志"
-  (apply #'format *debug-io* (concatenate 'string "[DEBUG] " format-string "~%") args))
+(defvar *inherited-special-variables* '()
+  "需要跨线程继承的特殊变量名列表（符号列表）。
 
-(defun log-info (format-string &rest args)
-  "信息日志"
-  (apply #'format *standard-output* (concatenate 'string "[INFO] " format-string "~%") args))
+被 cl-agent.chat 的并行工具执行与 cl-agent.http 的异步请求共用：
+列入的变量会在提交线程快照当前值，并在任务实际执行处重新绑定。
 
-(defun log-warn (format-string &rest args)
-  "警告日志"
-  (apply #'format *error-output* (concatenate 'string "[WARN] " format-string "~%") args))
+  (defvar *request-id* nil)
+  (with-inherited-specials (*request-id*)
+    (let ((*request-id* \"req-42\"))
+      ...))   ; 任务体内保证看到 \"req-42\"
 
-(defun log-error (format-string &rest args)
-  "错误日志"
-  (apply #'format *error-output* (concatenate 'string "[ERROR] " format-string "~%") args))
+不在列表中的变量，其在任务体内的可见性不确定（见上方说明），
+不要依赖——需要什么就列什么。
+
+快照的是值引用而非深拷贝：若值是可变对象（哈希表、可变列表），
+多个任务仍共享同一实例，需自行加锁。")
+
+(defmacro with-inherited-specials ((&rest symbols) &body body)
+  "在 BODY 内把 SYMBOLS 追加进 *inherited-special-variables*。
+
+SYMBOLS 不求值，直接写变量名即可：
+
+  (with-inherited-specials (*request-id* *tenant*)
+    (let ((*request-id* \"req-42\")) ...))"
+  `(let ((*inherited-special-variables*
+           (append ',symbols *inherited-special-variables*)))
+     ,@body))
+
+(defun capture-special-bindings (&optional (symbols *inherited-special-variables*))
+  "在当前线程快照 SYMBOLS 的值，返回 (符号列表 . 值列表)，
+供 with-captured-special-bindings 在别处重建。
+
+必须在提交线程调用——在任务体内调用毫无意义（那里已经看不到
+调用方的绑定了）。
+
+跳过未绑定符号与常量：progv 绑定常量是未定义行为；而未绑定符号
+若进了变量列表却没有对应值，会被绑成「无值」状态，反倒遮蔽全局值。"
+  (loop for sym in symbols
+        when (and (symbolp sym) (not (constantp sym)) (boundp sym))
+          collect sym into syms
+          and collect (symbol-value sym) into vals
+        finally (return (cons syms vals))))
+
+(defmacro with-captured-special-bindings ((capture) &body body)
+  "在 CAPTURE（capture-special-bindings 的返回值）的绑定下执行 BODY。
+
+CAPTURE 为空时退化为普通 progn（progv 空列表即无绑定）。"
+  (let ((c (gensym "CAPTURE")))
+    `(let ((,c ,capture))
+       (progv (car ,c) (cdr ,c)
+         ,@body))))
+
+;;; 日志工具（log-debug / log-info / log-warn / log-error）定义在
+;;; macros.lisp 的日志系统一节：带级别过滤、时间戳与 *log-context*。
+;;; 此处曾有一份无级别过滤的简易重复实现，因 macros.lisp 中 as-> 缺一个
+;;; 右括号、导致其后全部定义（含整个日志系统）从未生效而长期顶替使用；
+;;; 括号修复后已删除，以免覆盖真正的实现。
 
 ;;; ============================================================
 ;;; Tool Specification
