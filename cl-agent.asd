@@ -80,6 +80,7 @@
                (:file "tests/test-filter")          ; filter 机制 + build-chain
                (:file "tests/test-kernel-skeleton") ; kernel 骨架 + 载体
                (:file "tests/test-kernel-invoke")   ; invoke 原语 + 工具循环
+               (:file "tests/test-spring-ai-alignment") ; P5 对齐审计
 
                ;; ChatClient + Advisor tests
                (:file "tests/test-advisor")     ; Advisor 协议 / 链 / defadvisor
