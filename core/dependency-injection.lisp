@@ -167,7 +167,7 @@
   ;; 标准化名称
   (let ((binding-name (if (keywordp name)
                         name
-                        (make-keyword (string name)))))
+                        (alexandria:make-keyword (string name)))))
 
     ;; 存储绑定配置
     (setf (gethash binding-name (di-bindings container))
@@ -271,7 +271,7 @@
   ;; 标准化名称
   (let ((binding-name (if (keywordp name)
                           name
-                          (make-keyword (string name)))))
+                          (alexandria:make-keyword (string name)))))
 
     ;; 查找绑定配置
     (let ((binding (gethash binding-name (di-bindings container))))
@@ -460,7 +460,7 @@
   ;; 标准化名称
   (let ((binding-name (if (keywordp name)
                           name
-                          (make-keyword (string name)))))
+                          (alexandria:make-keyword (string name)))))
 
     ;; 从缓存获取实例
     (let ((instance (gethash binding-name (di-singletons container))))
@@ -595,7 +595,7 @@
   (declare (type (or symbol keyword) name))
   (let ((binding-name (if (keywordp name)
                           name
-                          (make-keyword (string name)))))
+                          (alexandria:make-keyword (string name)))))
     (not (null (gethash binding-name (di-bindings container))))))
 
 (defun di-resolve-or-default (container name &key default (params nil))
