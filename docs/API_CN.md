@@ -37,7 +37,7 @@
                    :frequency-penalty 0.0 :presence-penalty 0.0
                    :thinking '(:enabled :budget-tokens 2048)  ; 扩展思考
                    :extra-params '(:seed 42)            ; 厂商专有参数逃生通道
-                   :tool-callbacks (list cb) :tool-names '("get_weather")
+                   :tool-callbacks (list cb) :tool-names '(get-weather)
                    :tool-context '(:tenant "acme"))
 ;; 工具循环选项已上移至 tool-calling-advisor（2.0 架构）
 (merge-chat-options runtime defaults)  ; 运行时覆盖默认；工具取并集
@@ -94,8 +94,14 @@
   函数体...)
 ```
 
-- 同时生成普通函数、tool-callback、全局注册与符号属性绑定
+- 生成普通函数 + tool-callback，callback 挂在**符号属性**上
+- **无全局副作用**：工具的身份就是它的符号，用 `(:tools 'get-weather)` 引用
 - 类型关键字：`:string :number :integer :boolean :array :object`
+
+> 对齐 clj-agent：那边 `deftool` 生成 `defn`、schema 挂 var 元数据，
+> 再用 `(build-kernel {:tools [#'get-weather]})` 显式传入。Clojure 的 var 带
+> 元数据，CL 里对应的载体是符号的属性列表——`#'get-weather` 是裸函数对象，
+> 取不到 schema，**不能**用作工具引用。
 
 ```lisp
 (make-tool-callback fn :name "n" :description "d"
@@ -103,10 +109,15 @@
                     :return-direct nil)
 (tool-callback-call callback args-plist &optional tool-context)
 (tool-callback->schema callback)          ; provider 工具 schema
-(find-tool-callback "get_weather")        ; 全局注册表查找
-(register-tool-callback cb) (unregister-tool-callback name)
+(symbol-tool-callback 'get-weather)       ; 取 deftool 挂在符号上的 callback
 (resolve-tool-callbacks specs)            ; 实例/符号/字符串 → callback
 (arguments->plist raw)                    ; hash-table/JSON/plist 归一化
+
+;; 全局注册表：opt-in 逃生通道，仅用于按*字符串*名解析（配置驱动场景）。
+;; deftool 不写它；默认为空。
+(register-tool-callback (symbol-tool-callback 'get-weather))
+(find-tool-callback "get_weather")        ; 只查全局表，非 deftool 的默认路径
+(unregister-tool-callback "get_weather")
 (make-default-tool-calling-manager)          ; 顺序执行
 ;; 并行执行（对标 Spring AI 2.0 并行 DefaultToolCallingManager）：
 (make-concurrent-tool-calling-manager :pool-size 4 :timeout nil

@@ -15,7 +15,8 @@
   结构化输出校验六个 Advisor（与 Spring AI 2.0 一一对应）
 - **ChatModel 协议**：`chat-model-call` / `chat-model-stream`（真 SSE 流式），
   单次调用语义——工具循环由 `tool-calling-advisor` 承担（2.0 架构）
-- **工具体系**：`deftool` 宏对标 `@Tool` 注解，自动派生 JSON Schema 并注册；
+- **工具体系**：`deftool` 宏对标 `@Tool` 注解，自动派生 JSON Schema；
+  工具身份即符号（无全局副作用），`(:tools 'get-weather)` 引用；
   ToolCallback / ToolCallingManager（顺序/并行）/ `:return-direct` / ToolContext
 - **ChatMemory**：Repository 存储协议 + 滑动窗口记忆（pairing-safe 裁剪）
 - **多提供商**：Anthropic、OpenAI、智谱 GLM、DeepSeek、Gemini、Mistral、

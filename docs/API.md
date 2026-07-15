@@ -31,7 +31,7 @@ API quick reference by package. Spring AI 2.0 counterparts noted per section.
 
 (make-chat-options :model "..." :temperature 0.3 :max-tokens 1024
                    :thinking '(:enabled :budget-tokens 2048)  ; extended thinking
-                   :tool-callbacks (list cb) :tool-names '("get_weather")
+                   :tool-callbacks (list cb) :tool-names '(get-weather)
                    :tool-context '(:tenant "acme"))
 ;; tool-loop options moved to tool-calling-advisor (2.0 architecture)
 (merge-chat-options runtime defaults)   ; runtime wins; tools are unioned
@@ -81,14 +81,29 @@ translates into its own wire format:
   (:param name type "description" [:required t] [:default v])*
   [(:return-direct t)]
   body...)
+;; Generates a plain function plus a tool-callback stored on the SYMBOL.
+;; No global side effect — a tool's identity IS its symbol:
+;;   (chat client (:user "...") (:tools 'get-weather))
+;; Mirrors clj-agent, where deftool emits a defn with the schema in var
+;; metadata and tools are passed explicitly: (build-kernel {:tools [#'foo]}).
+;; A Clojure var carries metadata; the CL equivalent is the symbol plist —
+;; #'get-weather is a bare function object with no schema, so it cannot be
+;; used as a tool reference.
 
 (make-tool-callback fn :name "n" :description "d"
                     :parameters '((p :string "desc" :required-p t)))
 (tool-callback-call callback args-plist &optional tool-context)
 (tool-callback->schema callback)
-(find-tool-callback "get_weather") (register-tool-callback cb)
-(resolve-tool-callbacks specs)     ; instances/symbols/strings
-(arguments->plist raw)             ; hash-table/JSON/plist normalization
+(symbol-tool-callback 'get-weather) ; the callback deftool put on the symbol
+(resolve-tool-callbacks specs)      ; instances/symbols/strings
+(arguments->plist raw)              ; hash-table/JSON/plist normalization
+
+;; Global registry: an opt-in escape hatch, only for resolving tools by
+;; *string* name (config-driven setups). deftool does not write to it; empty
+;; by default.
+(register-tool-callback (symbol-tool-callback 'get-weather))
+(find-tool-callback "get_weather")  ; registry only — not deftool's path
+(unregister-tool-callback "get_weather")
 (make-default-tool-calling-manager)          ; sequential
 ;; parallel (mirrors Spring AI 2.0 concurrent DefaultToolCallingManager):
 (make-concurrent-tool-calling-manager :pool-size 4 :timeout nil
