@@ -59,7 +59,7 @@
     :initarg :default-advisors
     :initform nil
     :reader client-default-advisors
-    :documentation "默认 Advisor 列表")
+    :documentation "默认 Advisor 列表（legacy advisor 路径；kernel 路径用 :filters）")
    (default-tools
     :initarg :default-tools
     :initform nil
@@ -70,8 +70,14 @@
     :initform t
     :reader client-auto-tool-advisor-p
     :documentation "是否自动注册 tool-calling-advisor（默认 T；
-NIL 进入 user-controlled 工具执行模式，对标
-AdvisorParams.toolCallingAdvisorAutoRegister(false)）"))
+NIL 进入 user-controlled 工具执行模式")
+   ;; P5: kernel-backed 路径
+   (kernel
+    :initarg :kernel
+    :initform nil
+    :reader client-kernel
+    :documentation "kernel 实例（非 nil 时使用 kernel+filter 执行路径；
+nil 时走 legacy advisor 链"))
   (:documentation "面向应用的聊天客户端（对标 ChatClient）"))
 
 (defclass chat-client-builder ()
@@ -119,24 +125,54 @@ AdvisorParams.toolCallingAdvisorAutoRegister(false)）"))
                  :default-tools (builder-tools builder)))
 
 (defun make-chat-client (model &key system options advisors tools
-                                    (auto-tool-advisor t))
+                                     (auto-tool-advisor t) kernel)
   "一步创建 chat-client（对标 ChatClient.create(chatModel) 及常用默认值）。
 
-AUTO-TOOL-ADVISOR 为 NIL 时不自动注册 tool-calling-advisor：
-携带 tool-calls 的响应原样返回，由调用方驱动
-cl-agent.chat:execute-tool-calls 循环（user-controlled 模式）。
+  KERNEL 非空时使用 kernel+filter 执行路径（推荐，P5+）：
+  此时 ADVISORS 被忽略，KERNEL 应已配置好 filters/tools。
+
+  KERNEL 为空时走 legacy advisor 链（P4 及之前的行为）。
+
+  AUTO-TOOL-ADVISOR 为 NIL 时不自动注册 tool-calling-advisor。
 
 示例：
-  (make-chat-client model
-    :system \"你是一个助手\"
-    :advisors (list (make-simple-logger-advisor)))"
+  ;; Legacy advisor 路径
+  (make-chat-client model :system \"...\" :advisors (list ...))
+
+  ;; Kernel+filter 路径（推荐）
+  (make-chat-client model :kernel
+    (cl-agent.kernel:build-kernel
+      :model model
+      :filters (list (cl-agent.kernel:memory-filter mem))
+      :tools '(get-weather)))"
   (make-instance 'chat-client
                  :model model
                  :default-system-text system
                  :default-options options
                  :default-advisors advisors
                  :default-tools tools
-                 :auto-tool-advisor auto-tool-advisor))
+                 :auto-tool-advisor auto-tool-advisor
+                 :kernel kernel))
+
+(defun make-kernel-client (model &key filters tools settings)
+  "创建 kernel-backed ChatClient（推荐的新路径）。
+
+  等价于：
+  (make-chat-client model :kernel (build-kernel :model model
+                                                 :filters filters
+                                                 :tools tools
+                                                 :settings settings))
+
+  使用 kernel+filter 三链架构（对标 clj-agent），不再走 advisor 链。"
+  (let ((kernel (cl-agent.kernel:build-kernel
+                 :model model
+                 :filters filters
+                 :tools tools
+                 :settings settings)))
+    (make-instance 'chat-client
+                   :model model
+                   :kernel kernel
+                   :default-tools tools)))
 
 (defmethod print-object ((client chat-client) stream)
   (print-unreadable-object (client stream :type t)
@@ -292,8 +328,38 @@ TEXT 可带 format 控制串。返回 spec。"
 ;;; ============================================================
 
 (defun call-client-response (spec)
-  "执行请求，返回 client-response（含 Advisor 上下文）"
-  (chain-next (spec-advisor-chain spec) (spec-build-request spec)))
+  "执行请求，返回 client-response（含 Advisor 上下文）
+
+  client 有 kernel 时走 kernel+filter 路径（invoke-turn）；
+  否则走 legacy advisor 链。"
+  (let ((client (spec-client spec)))
+    (if (client-kernel client)
+        ;; kernel-backed 路径
+        (let* ((prompt (spec-build-prompt spec))
+               (messages (prompt-messages prompt))
+               (ctx nil))
+          ;; 从 spec context 构建 plist
+          (loop for (key value) on (spec-context spec) by #'cddr
+                do (setf (getf ctx key) value))
+          ;; 添加 conversation-id 从 prompt options
+          (let* ((options (prompt-options prompt))
+                 (tool-ctx (chat-options-tool-context options)))
+            (when tool-ctx
+              (loop for (k v) on tool-ctx by #'cddr
+                    do (setf (getf ctx k) v))))
+          ;; 调用 invoke-turn
+          (let* ((turn-req (cl-agent.kernel:make-turn-request
+                            messages :context ctx))
+                 (result (cl-agent.kernel:invoke-turn
+                          (client-kernel client) turn-req)))
+            (make-client-response
+             (or (cl-agent.kernel:turn-result-response result)
+                 (make-chat-response
+                  (make-generation
+                   (assistant-message "（无响应）") :finish-reason :stop)))
+             :context (make-hash-table :test #'equal))))
+        ;; legacy advisor 路径
+        (chain-next (spec-advisor-chain spec) (spec-build-request spec)))))
 
 (defun call-response (spec)
   "执行请求，返回 chat-response（对标 call().chatResponse()）"

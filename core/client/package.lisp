@@ -109,10 +109,12 @@
    #:structured-output-streaming-unsupported-error
    #:strip-json-fences
 
-   ;; ==================== ChatClient ====================
-   #:chat-client
-   #:make-chat-client
-   #:chat-client-model
+    ;; ==================== ChatClient ====================
+    #:chat-client
+    #:make-chat-client
+    #:make-kernel-client
+    #:chat-client-model
+    #:client-kernel
    ;; Builder
    #:chat-client-builder
    #:default-system
