@@ -96,6 +96,60 @@
   (setf (gethash key (client-response-context holder)) value))
 
 ;;; ============================================================
+;;; Advisor 排序常量
+;;; ============================================================
+;;;
+;;; order 越小越靠外（越先执行），与 Spring AI Ordered 语义一致。
+;;; 默认链布局（由外到内）：
+;;;
+;;;   simple-logger(-1000)
+;;;     → safe-guard(-500)
+;;;       → chat-memory(1000)
+;;;         → tool-calling(2000)          ← 工具循环在此重入下游
+;;;           → structured-output(3000)
+;;;             → ChatModel
+;;;
+;;; 与 Spring AI 2.0 的差异（有意为之，非疏漏）：
+;;;
+;;;   Spring 的实际布局是
+;;;     memory(MIN+200) → toolLoop(MIN+300) → safeGuard(0)/logger(0)
+;;;       → structuredOutput(MAX-2000) → model
+;;;   即护栏与日志位于工具循环*内侧*：好处是每轮工具迭代都重新检查，
+;;;   能拦住工具返回结果里的敏感内容；代价是记忆在护栏*外侧*——
+;;;   敏感输入会先写进记忆才被拦下。
+;;;
+;;;   本实现把护栏放在记忆外侧，优先保证敏感输入不进入记忆。
+;;;   需要 Spring 那种「每轮迭代都过护栏」的语义时，
+;;;   显式传大于 +tool-calling-advisor-order+ 的 :order 即可。
+
+(defconstant +advisor-highest-precedence+ most-negative-fixnum
+  "最靠外的 order（对标 Ordered.HIGHEST_PRECEDENCE）")
+
+(defconstant +advisor-lowest-precedence+ most-positive-fixnum
+  "最靠内的 order（对标 Ordered.LOWEST_PRECEDENCE）")
+
+(defconstant +simple-logger-advisor-order+ -1000
+  "simple-logger-advisor 默认 order：最外层，完整记录进出链的请求与响应")
+
+(defconstant +safe-guard-advisor-order+ -500
+  "safe-guard-advisor 默认 order：记忆外侧，敏感输入不进入记忆
+（Spring 默认为 0，即工具循环内侧——见本节顶部的差异说明）")
+
+(defconstant +chat-memory-advisor-order+ 1000
+  "记忆类 Advisor 默认 order：工具循环外侧，
+只记录最终问答，工具轮次的中间消息不进记忆
+（对标 Advisor.DEFAULT_CHAT_MEMORY_PRECEDENCE_ORDER）")
+
+(defconstant +tool-calling-advisor-order+ 2000
+  "tool-calling-advisor 默认 order：记忆类 Advisor 内侧
+（对标 ToolCallingAdvisor.DEFAULT_ORDER = HIGHEST_PRECEDENCE + 300）")
+
+(defconstant +structured-output-validation-advisor-order+ 3000
+  "structured-output-validation-advisor 默认 order：最内侧，
+紧贴 ChatModel，位于工具循环内部——因此必须跳过带 tool-calls 的响应，
+只校验最终 JSON（对标 Spring 的 LOWEST_PRECEDENCE - 2000）")
+
+;;; ============================================================
 ;;; Advisor 协议
 ;;; ============================================================
 

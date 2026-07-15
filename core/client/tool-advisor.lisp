@@ -30,9 +30,6 @@
 
 (in-package #:cl-agent.client)
 
-(defparameter +tool-calling-advisor-order+ 2000
-  "tool-calling-advisor 默认排序：记忆类 Advisor（1000）内侧")
-
 (defvar *tool-calling-manager* nil
   "tool-calling-advisor 未显式传 :manager 时采用的默认 manager。
 
