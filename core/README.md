@@ -34,8 +34,11 @@ core/
 │   ├── memory.lisp          ChatMemory / Repository 协议
 │   └── model.lisp           ChatModel 协议 + Provider 适配器（工具循环）
 └── client/                  ChatClient + Advisor
-    ├── advisor.lisp         协议 / 洋葱链 / defadvisor
-    ├── advisors.lisp        日志 / 消息记忆 / 提示词记忆 / 护栏
+    ├── advisor.lisp         协议 / 洋葱链 / defadvisor / 排序常量
+    ├── advisors.lisp        日志 / 消息记忆 / 护栏
+    ├── tool-advisor.lisp    ToolCallingAdvisor（递归工具循环 + 钩子）
+    ├── tool-search-advisor.lisp      ToolSearch（渐进式工具披露）
+    ├── structured-output-advisor.lisp StructuredOutputValidation（校验 + 自纠）
     └── chat-client.lisp     ChatClient / Builder / 请求 spec / chat 宏
 ```
 

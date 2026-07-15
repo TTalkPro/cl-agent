@@ -11,7 +11,8 @@
 - **ChatClient**：Builder 模式 + fluent 请求 API + 声明式 `chat` 宏 DSL
 - **Advisor 洋葱链**：`advise-call` / `advise-stream` 协议、有序链、
   `defadvisor` 一个表达式定义类 + 方法 + 构造函数；
-  内置日志、消息记忆、提示词记忆、安全护栏四个 Advisor
+  内置日志、消息记忆、安全护栏、工具循环、渐进式工具披露、
+  结构化输出校验六个 Advisor（与 Spring AI 2.0 一一对应）
 - **ChatModel 协议**：`chat-model-call` / `chat-model-stream`（真 SSE 流式），
   单次调用语义——工具循环由 `tool-calling-advisor` 承担（2.0 架构）
 - **工具体系**：`deftool` 宏对标 `@Tool` 注解，自动派生 JSON Schema 并注册；
@@ -97,6 +98,15 @@
 (cl-agent.client:chat *client*
   (:user "用 JSON 给出东京的信息")
   (:call :entity))
+
+;; 带 JSON Schema 校验：不符合就带着校验错误让模型重新输出（最多 3 次）
+;; —— 对标 Spring AI 2.0 的 StructuredOutputValidationAdvisor
+(cl-agent.client:chat *client*
+  (:user "用 JSON 给出东京的信息")
+  (:call :entity "{\"type\":\"object\",
+                   \"properties\":{\"name\":{\"type\":\"string\"},
+                                  \"population\":{\"type\":\"integer\"}},
+                   \"required\":[\"name\",\"population\"]}"))
 ```
 
 自定义 Advisor：

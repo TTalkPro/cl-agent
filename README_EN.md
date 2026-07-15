@@ -12,8 +12,10 @@ and fluent builders.
 
 - **ChatClient**: builder pattern + fluent request API + declarative `chat` macro DSL
 - **Advisor onion chain**: `advise-call` / `advise-stream` protocol, ordered chain,
-  `defadvisor` defines class + method + constructor in one form; built-in logger,
-  message memory, prompt memory, and safe-guard advisors
+  `defadvisor` defines class + method + constructor in one form; six built-in
+  advisors mapping one-to-one onto Spring AI 2.0: logger, message memory,
+  safe-guard, tool calling, progressive tool disclosure, structured output
+  validation
 - **ChatModel protocol**: `chat-model-call` / `chat-model-stream` (real SSE
   streaming), single-call semantics — the tool loop lives in
   `tool-calling-advisor` (2.0 architecture)
@@ -53,7 +55,10 @@ Mapping to Spring AI:
 | `@Tool` / `@ToolParam` | `deftool` macro |
 | `CallAdvisor` / `AdvisorChain` | `defadvisor` / `advise-call` / `chain-next` |
 | `ToolCallingAdvisor` (2.0) | `tool-calling-advisor` (auto-registered, streaming tool loop) |
+| `ToolSearchToolCallingAdvisor` (2.0) | `tool-search-tool-calling-advisor` |
+| `StructuredOutputValidationAdvisor` (2.0) | `structured-output-validation-advisor` |
 | `MessageChatMemoryAdvisor` | `message-chat-memory-advisor` |
+| `SafeGuardAdvisor` / `SimpleLoggerAdvisor` | `safe-guard-advisor` / `simple-logger-advisor` |
 | `MessageWindowChatMemory` | `message-window-chat-memory` |
 | `ChatModel#call` | `chat-model-call` |
 | `ToolCallingManager` | `tool-calling-manager` |
@@ -103,6 +108,16 @@ Streaming and structured output:
 (cl-agent.client:chat *client*
   (:user "Give me Tokyo's info as JSON")
   (:call :entity))
+
+;; With JSON Schema validation: on a mismatch the validation error is appended
+;; to the user message and the model is re-invoked (up to 3 times) --
+;; mirrors Spring AI 2.0's StructuredOutputValidationAdvisor
+(cl-agent.client:chat *client*
+  (:user "Give me Tokyo's info as JSON")
+  (:call :entity "{\"type\":\"object\",
+                   \"properties\":{\"name\":{\"type\":\"string\"},
+                                  \"population\":{\"type\":\"integer\"}},
+                   \"required\":[\"name\",\"population\"]}"))
 ```
 
 ## Modules

@@ -85,11 +85,23 @@
 (arguments->plist raw)                    ; hash-table/JSON/plist 归一化
 (make-default-tool-calling-manager)          ; 顺序执行
 ;; 并行执行（对标 Spring AI 2.0 并行 DefaultToolCallingManager）：
-(make-concurrent-tool-calling-manager :pool-size 4 :timeout nil)
+(make-concurrent-tool-calling-manager :pool-size 4 :timeout nil
+                                      :inherit-specials :default)
 (shutdown-tool-calling-manager manager)      ; 释放线程池（懒创建）
 ;; 与顺序语义等价（结果按原序、return-direct 取并集、错误隔离），
-;; 仅多工具时并发；worker 不继承动态绑定，工具靠 tool-context 传参
+;; 仅多工具时并发。工具参数走 tool-context；日志级别、request-id 这类
+;; 环境上下文需列入继承名单才可见——未列入的特殊变量可见性不确定：
+;; lparallel 可能让任务在 worker 上跑（看到全局值），也可能被提交线程
+;; 窃取就地执行（看到调用方绑定）。列入名单即可消除不确定性：
 (execute-tool-calls manager prompt response)
+;; 提交时快照，在任务实际执行处经 progv 重建：
+(with-inherited-specials (*request-id*)
+  (let ((*request-id* "req-42")) (chat client ...)))  ; 工具体内保证可见
+*inherited-special-variables*                ; 名单；:inherit-specials 优先
+;; 机制定义在 cl-agent.core，与 cl-agent.http 的异步请求共用同一份名单：
+;; (with-inherited-specials (*request-id*)
+;;   (let ((*request-id* "req-42")) (setf f (http-get-async url))))  ; let 退出
+;; (http-future-value f)                     ; 请求体仍看到 "req-42"
 ;; 生命周期用宏管理，避免全局变量持有线程池：
 (with-concurrent-tool-calling-manager (mgr :pool-size 8)
   ...)                                        ; 退出时自动 shutdown
@@ -178,18 +190,51 @@ schema，但不执行工具。携带 tool-calls 的响应原样返回，工具�
 ### 内置 Advisor
 
 ```lisp
-(make-simple-logger-advisor :stream s)                    ; order -1000
+(make-simple-logger-advisor :stream s
+                            :request-to-string #'my-fmt
+                            :response-to-string #'my-fmt) ; order -1000
 (make-safe-guard-advisor :sensitive-words '("...")
-                         :failure-response "...")         ; order -500
+                         :failure-response "..."
+                         :order -500)                     ; order -500
 (make-message-chat-memory-advisor :memory m)              ; order 1000
-(make-prompt-chat-memory-advisor :memory m :template "~A"); order 1000
 +conversation-id-key+   ; 请求 context 中的会话 ID 键
 
+;; 排序常量（对标 Spring 的 Ordered 语义，order 越小越靠外）
++simple-logger-advisor-order+                 ; -1000
++safe-guard-advisor-order+                    ;  -500
++chat-memory-advisor-order+                   ;  1000
++tool-calling-advisor-order+                  ;  2000
++structured-output-validation-advisor-order+  ;  3000
++advisor-highest-precedence+ / +advisor-lowest-precedence+
+
 ;; ToolCallingAdvisor（对标 Spring AI 2.0，ChatClient 自动注册）
-(make-tool-calling-advisor :manager m :max-iterations 10) ; order 2000
+(make-tool-calling-advisor :manager m :max-iterations 10
+                           :eligibility #'default-tool-execution-eligible-p
+                           :conversation-history-enabled t) ; order 2000
 ;; 递归重入下游链直到无 tool-calls；:return-direct 短路；
 ;; 记忆 Advisor（1000）默认在循环外，只记录最终问答；
 ;; order > 2000 的 Advisor 每轮工具循环都执行
+;;
+;; :conversation-history-enabled NIL —— 下一轮只带 system + 最后一条消息，
+;;   完整历史交给链上的记忆 Advisor 维护（此时必须注册记忆 Advisor）
+;; :eligibility —— (chat-response) → boolean，替换它可实现提供商特定的
+;;   stop-reason 判定（对标 ToolExecutionEligibilityChecker）
+
+;; 循环钩子（子类特化即可，对标 doInitializeLoop 等）
+(tool-advisor-initialize-loop advisor request)
+(tool-advisor-before-call advisor request iteration)
+(tool-advisor-after-call advisor request response iteration)
+(tool-advisor-finalize-loop advisor request response)
+(tool-advisor-next-instructions advisor request response result) ; 决定下一轮消息
+
+;; StructuredOutputValidationAdvisor（对标 Spring AI 2.0）
+(make-structured-output-validation-advisor
+  :json-schema "{\"type\":\"object\",\"required\":[\"city\"]}" ; 字符串/hash-table/plist
+  :max-repeat-attempts 3)                                      ; order 3000
+;; 校验响应 JSON；失败则把校验错误追加到 user 消息末尾让模型重新输出。
+;; 位于工具循环内侧：带 tool-calls 的响应直接放行，只校验最终输出。
+;; 重试用尽返回最后一次响应（不发条件）。流式不支持，会发
+;; structured-output-streaming-unsupported-error。
 
 ;; 细粒度钩子（对标 doInitializeLoop/doBeforeCall/doAfterCall/doFinalizeLoop）
 ;; 子类特化即可在循环关键节点观察/改写，无需重写 advise-call：

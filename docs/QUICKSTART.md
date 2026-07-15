@@ -122,8 +122,27 @@ Custom storage backends implement `repository-find` / `repository-save` /
 ```
 
 Built-ins: `simple-logger-advisor` (-1000), `safe-guard-advisor` (-500),
-`message-chat-memory-advisor` (1000), `prompt-chat-memory-advisor` (1000).
-Lower order = outer position in the onion chain.
+`message-chat-memory-advisor` (1000), `tool-calling-advisor` (2000,
+auto-registered), `tool-search-tool-calling-advisor` (2000),
+`structured-output-validation-advisor` (3000). Each default is available as a
+named constant (e.g. `+chat-memory-advisor-order+`).
+
+Lower order = outer position in the onion chain. Default layout:
+
+```
+logger → safe-guard → memory → tool-calling → structured-output → ChatModel
+```
+
+> **Divergence from Spring AI 2.0**: Spring places `SafeGuardAdvisor` /
+> `SimpleLoggerAdvisor` *inside* the tool loop (order 0), so they re-check on
+> every iteration and can catch sensitive content in tool results — at the cost
+> of memory sitting outside the guard, meaning sensitive input reaches memory
+> before being blocked. This implementation puts the guard outside memory
+> instead, prioritising keeping sensitive input out of memory. Pass
+> `:order (1+ +tool-calling-advisor-order+)` for Spring's semantics.
+>
+> `PromptChatMemoryAdvisor` was removed in Spring AI 2.0; this implementation
+> removed it too.
 
 ## 8. Streaming & Structured Output
 
@@ -135,7 +154,29 @@ Lower order = outer position in the onion chain.
 (cl-agent.client:chat *client*
   (:user "Tokyo info as JSON (name/population)")
   (:call :entity))   ; → hash-table
+
+;; With JSON Schema validation (mirrors StructuredOutputValidationAdvisor):
+;; on a mismatch the validation error is appended to the user message and the
+;; model is re-invoked, up to 3 times by default. Once retries are exhausted the
+;; last response is returned as-is — no condition is signalled.
+(cl-agent.client:chat *client*
+  (:user "Tokyo info as JSON")
+  (:call :entity
+         "{\"type\":\"object\",
+           \"properties\":{\"name\":{\"type\":\"string\"},
+                          \"population\":{\"type\":\"integer\"}},
+           \"required\":[\"name\",\"population\"]}"))
+
+;; Or mount explicitly to control the retry budget
+(cl-agent.client:make-chat-client *model*
+  :advisors (list (cl-agent.client:make-structured-output-validation-advisor
+                   :json-schema schema
+                   :max-repeat-attempts 5)))
 ```
+
+> The structured output validation advisor does not support streaming
+> (validation needs the complete JSON text); using it on a streaming chain
+> signals `structured-output-streaming-unsupported-error`.
 
 ## 9. Tests
 

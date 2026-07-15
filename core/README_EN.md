@@ -30,8 +30,11 @@ core/
 │   ├── memory.lisp          ChatMemory / repository protocol
 │   └── model.lisp           ChatModel protocol + provider adapter (tool loop)
 └── client/                  ChatClient + Advisor
-    ├── advisor.lisp         protocol / onion chain / defadvisor
-    ├── advisors.lisp        logger / message memory / prompt memory / guard
+    ├── advisor.lisp         protocol / onion chain / defadvisor / order constants
+    ├── advisors.lisp        logger / message memory / guard
+    ├── tool-advisor.lisp    ToolCallingAdvisor (recursive tool loop + hooks)
+    ├── tool-search-advisor.lisp      ToolSearch (progressive tool disclosure)
+    ├── structured-output-advisor.lisp StructuredOutputValidation (validate + self-correct)
     └── chat-client.lisp     ChatClient / builder / request spec / chat macro
 ```
 

@@ -66,12 +66,26 @@ Options not explicitly passed are "unset" and fall back on merge.
 (arguments->plist raw)             ; hash-table/JSON/plist normalization
 (make-default-tool-calling-manager)          ; sequential
 ;; parallel (mirrors Spring AI 2.0 concurrent DefaultToolCallingManager):
-(make-concurrent-tool-calling-manager :pool-size 4 :timeout nil)
+(make-concurrent-tool-calling-manager :pool-size 4 :timeout nil
+                                      :inherit-specials :default)
 (shutdown-tool-calling-manager manager)      ; release the (lazy) thread pool
 ;; semantics identical to sequential (original order, return-direct union,
-;; error isolation); concurrent only for multi-tool rounds; workers do not
-;; inherit dynamic bindings — tools receive state via tool-context
+;; error isolation); concurrent only for multi-tool rounds.
+;; Tool arguments/state travel via tool-context. Ambient dynamic bindings
+;; (log level, request id) are visible only if listed for inheritance —
+;; unlisted specials have UNSPECIFIED visibility, since lparallel may run a
+;; task either on a worker (global value) or steal it back onto the caller
+;; (caller's binding). List them to make it deterministic:
 (execute-tool-calls manager prompt response)
+;; snapshot at submit, rebound (progv) wherever the task actually runs:
+(with-inherited-specials (*request-id*)
+  (let ((*request-id* "req-42")) (chat client ...)))  ; tools see "req-42"
+*inherited-special-variables*                ; the list; :inherit-specials wins
+;; Defined in cl-agent.core; the same list also covers cl-agent.http's async
+;; requests, where the future outlives the caller's let:
+;; (with-inherited-specials (*request-id*)
+;;   (let ((*request-id* "req-42")) (setf f (http-get-async url))))  ; let exits
+;; (http-future-value f)                     ; request body still sees "req-42"
 ;; manage lifetime with the macro instead of a global holding a pool:
 (with-concurrent-tool-calling-manager (mgr :pool-size 8) ...) ; auto-shutdown
 ;; override the manager of auto-registered advisors (no call-site changes):
@@ -150,18 +164,54 @@ orphaned leading tool messages are dropped.
 ### Built-in advisors
 
 ```lisp
-(make-simple-logger-advisor :stream s)                     ; order -1000
+(make-simple-logger-advisor :stream s
+                            :request-to-string #'my-fmt
+                            :response-to-string #'my-fmt)  ; order -1000
 (make-safe-guard-advisor :sensitive-words '("...")
-                         :failure-response "...")          ; order -500
+                         :failure-response "..."
+                         :order -500)                      ; order -500
 (make-message-chat-memory-advisor :memory m)               ; order 1000
-(make-prompt-chat-memory-advisor :memory m :template "~A") ; order 1000
 +conversation-id-key+
 
+;; Order constants (mirrors Spring's Ordered semantics; lower = outer)
++simple-logger-advisor-order+                 ; -1000
++safe-guard-advisor-order+                    ;  -500
++chat-memory-advisor-order+                   ;  1000
++tool-calling-advisor-order+                  ;  2000
++structured-output-validation-advisor-order+  ;  3000
++advisor-highest-precedence+ / +advisor-lowest-precedence+
+
 ;; ToolCallingAdvisor (mirrors Spring AI 2.0, auto-registered by ChatClient)
-(make-tool-calling-advisor :manager m :max-iterations 10)  ; order 2000
+(make-tool-calling-advisor :manager m :max-iterations 10
+                           :eligibility #'default-tool-execution-eligible-p
+                           :conversation-history-enabled t) ; order 2000
 ;; recursively re-enters the downstream chain until no tool calls remain;
 ;; memory advisors (1000) sit outside the loop by default;
 ;; advisors with order > 2000 run on every loop iteration
+;;
+;; :conversation-history-enabled nil -- next round carries only the system
+;;   message plus the last message; a ChatMemory advisor must then be
+;;   registered in the chain to preserve the full history
+;; :eligibility -- (chat-response) -> boolean; override for provider-specific
+;;   stop-reason logic (mirrors ToolExecutionEligibilityChecker)
+
+;; Loop hooks (specialise in a subclass; mirrors doInitializeLoop et al.)
+(tool-advisor-initialize-loop advisor request)
+(tool-advisor-before-call advisor request iteration)
+(tool-advisor-after-call advisor request response iteration)
+(tool-advisor-finalize-loop advisor request response)
+(tool-advisor-next-instructions advisor request response result)
+
+;; StructuredOutputValidationAdvisor (mirrors Spring AI 2.0)
+(make-structured-output-validation-advisor
+  :json-schema "{\"type\":\"object\",\"required\":[\"city\"]}" ; string/hash-table/plist
+  :max-repeat-attempts 3)                                      ; order 3000
+;; Validates the response JSON; on failure appends the validation error to the
+;; user message and re-invokes the model. Sits inside the tool loop, so
+;; tool-call responses pass straight through and only the final output is
+;; validated. Returns the last response once retries are exhausted (no
+;; condition signalled). Streaming is unsupported and signals
+;; structured-output-streaming-unsupported-error.
 
 ;; fine-grained hooks (mirror doInitializeLoop/doBeforeCall/doAfterCall/doFinalizeLoop)
 ;; specialize on a subclass to observe/rewrite at loop checkpoints:

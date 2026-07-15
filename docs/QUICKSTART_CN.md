@@ -177,12 +177,26 @@ Advisor 是环绕每次调用的洋葱链（对标 Spring AI Advisor API）。
 
 | Advisor | 作用 | 默认 order |
 |---|---|---|
-| `simple-logger-advisor` | 请求/响应日志 | -1000 |
-| `safe-guard-advisor` | 敏感词短路护栏 | -500 |
-| `message-chat-memory-advisor` | 历史作为消息注入 | 1000 |
-| `prompt-chat-memory-advisor` | 历史渲染进系统提示 | 1000 |
-| `tool-calling-advisor` | 工具执行循环（自动注册） | 2000 |
-| `tool-search-tool-calling-advisor` | 渐进式工具披露（大工具集省 token） | 2000 |
+| `simple-logger-advisor` | 请求/响应日志 | `+simple-logger-advisor-order+`（-1000） |
+| `safe-guard-advisor` | 敏感词短路护栏 | `+safe-guard-advisor-order+`（-500） |
+| `message-chat-memory-advisor` | 历史作为消息注入 | `+chat-memory-advisor-order+`（1000） |
+| `tool-calling-advisor` | 工具执行循环（自动注册） | `+tool-calling-advisor-order+`（2000） |
+| `tool-search-tool-calling-advisor` | 渐进式工具披露（大工具集省 token） | 同上（2000） |
+| `structured-output-validation-advisor` | JSON Schema 校验 + 失败自纠 | `+structured-output-validation-advisor-order+`（3000） |
+
+order 越小越靠外。默认布局（由外到内）：
+
+```
+logger → safe-guard → memory → tool-calling → structured-output → ChatModel
+```
+
+> **与 Spring AI 2.0 的差异**：Spring 把 `SafeGuardAdvisor`/`SimpleLoggerAdvisor`
+> 放在工具循环*内侧*（order 0），好处是每轮迭代都重新检查、能拦住工具结果里的
+> 敏感内容，代价是记忆在护栏外侧——敏感输入会先写进记忆才被拦下。
+> 本实现把护栏放在记忆外侧，优先保证敏感输入不进入记忆。需要 Spring 那种语义时
+> 显式传 `:order (1+ +tool-calling-advisor-order+)` 即可。
+>
+> `PromptChatMemoryAdvisor` 在 Spring AI 2.0 中已被移除，本实现同步移除。
 
 ## 8. 流式与结构化输出
 
@@ -197,7 +211,28 @@ Advisor 是环绕每次调用的洋葱链（对标 Spring AI Advisor API）。
                 (:user "用 JSON 给出东京信息（name/population）")
                 (:call :entity))))
   (gethash "name" entity))
+
+;; 带 JSON Schema 校验（对标 StructuredOutputValidationAdvisor）：
+;; 输出不符合 schema 时，把校验错误追加到 user 消息让模型重新输出，
+;; 默认最多重试 3 次；用尽仍不合格则返回最后一次响应，不发条件。
+(let ((entity (cl-agent.client:chat *client*
+                (:user "用 JSON 给出东京信息")
+                (:call :entity
+                       "{\"type\":\"object\",
+                         \"properties\":{\"name\":{\"type\":\"string\"},
+                                        \"population\":{\"type\":\"integer\"}},
+                         \"required\":[\"name\",\"population\"]}"))))
+  (gethash "population" entity))
+
+;; 或显式挂载，精确控制重试次数
+(cl-agent.client:make-chat-client *model*
+  :advisors (list (cl-agent.client:make-structured-output-validation-advisor
+                   :json-schema schema
+                   :max-repeat-attempts 5)))
 ```
+
+> 结构化输出校验 Advisor 不支持流式（校验需要完整 JSON 文本），
+> 用在流式链上会发 `structured-output-streaming-unsupported-error`。
 
 ## 9. 运行测试
 
