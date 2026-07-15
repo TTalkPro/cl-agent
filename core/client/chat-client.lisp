@@ -257,7 +257,7 @@ TEXT 可带 format 控制串。返回 spec。"
 
 (defun prompt-conversation (spec conversation-id)
   "设置会话 ID（记忆类 Advisor 的会话键）。返回 spec。"
-  (prompt-context spec +conversation-id-key+ conversation-id))
+  (prompt-context spec :conversation-id conversation-id))
 
 ;;; ============================================================
 ;;; Spec → 执行
@@ -294,72 +294,43 @@ TEXT 可带 format 控制串。返回 spec。"
           do (context-set request key value))
     request))
 
-(defun spec-effective-advisors (spec)
-  "本次请求的完整 Advisor 列表：默认 + 请求级；
-客户端启用自动注册且链中没有 tool-calling-advisor 时追加默认实例
-（对标 ChatClient 自动注册 ToolCallingAdvisor）"
-  (let ((advisors (append (client-default-advisors (spec-client spec))
-                          (spec-advisors spec))))
-    (if (and (client-auto-tool-advisor-p (spec-client spec))
-             (notany (lambda (a) (typep a 'tool-calling-advisor)) advisors))
-        (append advisors (list (make-tool-calling-advisor)))
-        advisors)))
-
-(defun spec-advisor-chain (spec)
-  "组装本次请求的 Advisor 链（默认 + 请求级 + 自动注册的工具循环），
-终端为真正的 ChatModel 调用。"
-  (let ((model (chat-client-model (spec-client spec))))
-    (make-advisor-chain
-     (spec-effective-advisors spec)
-     ;; 同步终端
-     (lambda (request)
-       (make-client-response
-        (chat-model-call model (client-request-prompt request))
-        :context (client-request-context request)))
-     ;; 流式终端
-     :stream-terminal
-     (lambda (request on-chunk)
-       (make-client-response
-        (chat-model-stream model (client-request-prompt request) on-chunk)
-        :context (client-request-context request))))))
-
 ;;; ============================================================
-;;; 终结操作（对标 CallResponseSpec）
+;;; Spec → 执行
 ;;; ============================================================
 
 (defun call-client-response (spec)
-  "执行请求，返回 client-response（含 Advisor 上下文）
-
-  client 有 kernel 时走 kernel+filter 路径（invoke-turn）；
-  否则走 legacy advisor 链。"
-  (let ((client (spec-client spec)))
-    (if (client-kernel client)
-        ;; kernel-backed 路径
-        (let* ((prompt (spec-build-prompt spec))
-               (messages (prompt-messages prompt))
-               (ctx nil))
-          ;; 从 spec context 构建 plist
-          (loop for (key value) on (spec-context spec) by #'cddr
-                do (setf (getf ctx key) value))
-          ;; 添加 conversation-id 从 prompt options
-          (let* ((options (prompt-options prompt))
-                 (tool-ctx (chat-options-tool-context options)))
-            (when tool-ctx
-              (loop for (k v) on tool-ctx by #'cddr
-                    do (setf (getf ctx k) v))))
-          ;; 调用 invoke-turn
-          (let* ((turn-req (cl-agent.kernel:make-turn-request
-                            messages :context ctx))
-                 (result (cl-agent.kernel:invoke-turn
-                          (client-kernel client) turn-req)))
-            (make-client-response
-             (or (cl-agent.kernel:turn-result-response result)
-                 (make-chat-response
-                  (make-generation
-                   (assistant-message "（无响应）") :finish-reason :stop)))
-             :context (make-hash-table :test #'equal))))
-        ;; legacy advisor 路径
-        (chain-next (spec-advisor-chain spec) (spec-build-request spec)))))
+  "执行请求，返回 client-response（通过 kernel+filter 路径）"
+  (let* ((client (spec-client spec))
+         (kernel (or (client-kernel client)
+                     ;; 无 kernel 时即时创建（无 filter/tool 的裸 kernel）
+                     (let ((k (cl-agent.kernel:build-kernel
+                               :model (chat-client-model client)
+                               :tools (append (spec-tools spec)
+                                              (client-default-tools client)))))
+                       (setf (slot-value client 'kernel) k)
+                       k)))
+         (prompt (spec-build-prompt spec))
+         (messages (prompt-messages prompt))
+         (ctx nil))
+    ;; 从 spec context 构建 plist
+    (loop for (key value) on (spec-context spec) by #'cddr
+          do (setf (getf ctx key) value))
+    ;; 添加 conversation-id 从 prompt options
+    (let* ((options (prompt-options prompt))
+           (tool-ctx (chat-options-tool-context options)))
+      (when tool-ctx
+        (loop for (k v) on tool-ctx by #'cddr
+              do (setf (getf ctx k) v))))
+    ;; 调用 invoke-turn
+    (let* ((turn-req (cl-agent.kernel:make-turn-request
+                      messages :context ctx))
+           (result (cl-agent.kernel:invoke-turn kernel turn-req)))
+      (make-client-response
+       (or (cl-agent.kernel:turn-result-response result)
+           (make-chat-response
+            (make-generation
+             (assistant-message "（无响应）") :finish-reason :stop)))
+       :context (make-hash-table :test #'equal)))))
 
 (defun call-response (spec)
   "执行请求，返回 chat-response（对标 call().chatResponse()）"
@@ -370,35 +341,39 @@ TEXT 可带 format 控制串。返回 spec。"
   (chat-response-text (call-response spec)))
 
 (defun call-entity (spec &key schema (max-repeat-attempts 3))
-  "执行请求并把响应内容解析为结构化对象
-（对标 call().entity(...)，JSON → hash-table/vector）。
+  "执行请求并把响应内容解析为结构化对象（对标 call().entity(...)）。
 
-自动追加输出格式指令，并容忍 markdown 代码围栏。
+  参数：
+  - SCHEMA              - JSON Schema（可选，给出时仅解析不校验——
+                          校验请通过 kernel 的 validation-turn-filter 实现）
+  - MAX-REPEAT-ATTEMPTS - 保留参数（advisor 退役后不再用于自动校验重试）
 
-参数：
-  SCHEMA              - JSON Schema（字符串 / hash-table /
-                        params->json-schema 的 plist）。给出时自动挂载
-                        structured-output-validation-advisor：
-                        校验响应，不符合就带着校验错误让模型重试。
-  MAX-REPEAT-ATTEMPTS - 校验失败后的最大重试次数（默认 3，仅 SCHEMA 有效时生效）
-
-不传 SCHEMA 时行为与既往一致：只解析，不校验。"
+  不传 SCHEMA 时行为与既往一致：只解析。"
+  (declare (ignore max-repeat-attempts))
   (prompt-add-messages
    spec
    (system-message "请只输出 JSON，不要任何多余说明或 markdown 代码围栏。"))
-  (when schema
-    (prompt-advisors spec (make-structured-output-validation-advisor
-                           :json-schema schema
-                           :max-repeat-attempts max-repeat-attempts)))
-  (json-parse (strip-json-fences (call-content spec))))
+  (let ((text (call-content spec)))
+    ;; 剥离 markdown 围栏后解析
+    (let ((clean (string-trim '(#\Space #\Tab #\Newline #\Return) text)))
+      (when (and (> (length clean) 7)
+                 (string= clean "```json" :end1 7))
+        (setf clean (subseq clean 7))
+        (when (and (> (length clean) 3)
+                   (string= clean "```" :start2 (- (length clean) 3)))
+          (setf clean (subseq clean 0 (- (length clean) 3))))
+        (setf clean (string-trim '(#\Space #\Tab #\Newline #\Return) clean)))
+      (json-parse clean))))
 
 (defun stream-content (spec on-chunk)
   "流式执行请求：每个文本增量回调 (on-chunk delta)。
-返回最终 chat-response（对标 stream().content()）。"
-  (client-response-chat-response
-   (chain-next-stream (spec-advisor-chain spec)
-                      (spec-build-request spec)
-                      on-chunk)))
+返回最终 chat-response（对标 stream().content()）。
+
+  注意：当前实现降级为同步调用（完整文本作为单个 chunk 回调）。
+  完整流式支持需要 kernel 的 invoke-chat-stream（未来实现）。"
+  (let ((response (call-response spec)))
+    (funcall on-chunk (chat-response-text response))
+    response))
 
 ;;; ============================================================
 ;;; chat 宏 —— 声明式请求 DSL
@@ -444,7 +419,7 @@ TEXT 可带 format 控制串。返回 spec。"
             (:user (push `(prompt-user ,spec-var ,@(rest clause)) setters))
             (:messages (push `(prompt-add-messages ,spec-var ,@(rest clause)) setters))
             (:options (push `(prompt-with-options ,spec-var ,@(rest clause)) setters))
-            (:advisors (push `(prompt-advisors ,spec-var ,@(rest clause)) setters))
+            (:advisors (warn ":advisors clause is deprecated; use kernel filters instead"))
             (:tools (push `(prompt-tools ,spec-var ,@(rest clause)) setters))
             (:context (push `(prompt-context ,spec-var ,@(rest clause)) setters))
             (:conversation (push `(prompt-conversation ,spec-var ,@(rest clause)) setters))

@@ -24,9 +24,7 @@
          (model (cl-agent.chat:make-provider-chat-model provider))
          (builder (cl-agent.client:chat-client-builder model))
          (client (cl-agent.client:build-client
-                  (cl-agent.client:default-advisors
-                   (cl-agent.client:default-system builder "默认系统")
-                   (cl-agent.client:make-simple-logger-advisor)))))
+                  (cl-agent.client:default-system builder "默认系统"))))
     (is (typep client 'cl-agent.client:chat-client))
     ;; 默认 system 生效
     (cl-agent.client:call-content
@@ -155,55 +153,10 @@
                    (:tools 'test-adder))))
     (is (= 2 (length (seq-provider-requests provider))))))
 
-(test integration-memory-multi-turn
-  "ChatClient + 消息记忆多轮对话"
-  (let* ((provider (make-seq-provider
-                    (text-response "你好，大卫！")
-                    (lambda (messages)
-                      ;; 第二轮应携带第一轮历史（2 条）+ 新输入
-                      (assert (= 3 (length messages)))
-                      (text-response "你叫大卫。"))))
-         (memory (cl-agent.chat:make-message-window-chat-memory))
-         (client (cl-agent.client:make-chat-client
-                  (cl-agent.chat:make-provider-chat-model provider)
-                  :advisors (list (cl-agent.client:make-message-chat-memory-advisor
-                                   :memory memory)))))
-    (is (string= "你好，大卫！"
-                 (cl-agent.client:chat client
-                   (:user "我叫大卫")
-                   (:conversation "conv-1"))))
-    (is (string= "你叫大卫。"
-                 (cl-agent.client:chat client
-                   (:user "我叫什么？")
-                   (:conversation "conv-1"))))
-    (is (= 4 (length (cl-agent.chat:memory-messages memory "conv-1"))))))
-
-(test integration-request-advisors-merge-with-defaults
-  "请求级 Advisor 与默认 Advisor 合并成一条链"
-  (let* ((log (list nil))
-         (default-advisor (make-trace-advisor :tag :default :log log :order 0))
-         (request-advisor (make-trace-advisor :tag :request :log log :order -1))
-         (client (cl-agent.client:make-chat-client
-                  (cl-agent.chat:make-provider-chat-model
-                   (make-seq-provider (text-response "ok")))
-                  :advisors (list default-advisor))))
-    (cl-agent.client:chat client
-      (:user "hi")
-      (:advisors request-advisor))
-    ;; request-advisor order 更小 → 更外层
-    (is (equal '((:before :request) (:before :default)
-                 (:after :default) (:after :request))
-               (reverse (car log))))))
-
-(test integration-safeguard-plus-model
-  "护栏 + 真实调用路径：命中不消耗 provider 响应"
-  (multiple-value-bind (client provider)
-      (make-test-client (text-response "正常"))
-    (let ((client (cl-agent.client:make-chat-client
-                   (cl-agent.client:chat-client-model client)
-                   :advisors (list (cl-agent.client:make-safe-guard-advisor
-                                    :sensitive-words '("禁词"))))))
-      (is (search "抱歉" (cl-agent.client:chat client "含禁词的问题")))
-      (is (= 0 (length (seq-provider-requests provider))))
-      (is (string= "正常" (cl-agent.client:chat client "普通问题")))
-      (is (= 1 (length (seq-provider-requests provider)))))))
+;;; ============================================================
+;;; Advisor 集成测试已移除（advisor 系统退役）
+;;; memory/safeguard/logger 的等价功能由 kernel filter 提供：
+;;; - cl-agent.kernel:memory-filter
+;;; - cl-agent.kernel:safeguard-turn-filter
+;;; - cl-agent.kernel:logging-chat-filter
+;;; ============================================================

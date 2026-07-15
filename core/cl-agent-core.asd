@@ -141,18 +141,16 @@
          (:file "approval")           ; approval-filter (:tool)
          (:file "token-xform")))))   ; token-redact/hold-release (:token-xform)
 
-   ;; ============================================================
-   ;; ChatClient + Advisor（对标 org.springframework.ai.chat.client.*）
-   ;; ============================================================
+    ;; ============================================================
+    ;; ChatClient（对标 org.springframework.ai.chat.client.*）
+    ;; ============================================================
+    ;; Advisor 系统已退役——保留 advisor.lisp 的 client-request/response 载体
+    ;; 定义（chat-client 依赖），删除协议/链/内置 advisor 实现。
     (:module "client"
-    :components
-    ((:file "package")
-     (:file "advisor")            ; Advisor 协议 + 洋葱链 + defadvisor
-     (:file "advisors")           ; 内置 Advisor（日志/记忆/护栏）
-     (:file "tool-advisor")       ; ToolCallingAdvisor（2.0 递归工具循环 + 钩子）
-     (:file "tool-search-advisor") ; ToolSearch（渐进式工具披露）
-     (:file "structured-output-advisor") ; StructuredOutputValidationAdvisor
-     (:file "chat-client")))))    ; ChatClient + Builder + chat 宏
+     :components
+     ((:file "package")
+      (:file "advisor")            ; 载体定义 only（client-request/response/context）
+      (:file "chat-client")))))    ; ChatClient + Builder + chat 宏（kernel-backed）
 
 ;; ============================================================
 ;; Changelog
