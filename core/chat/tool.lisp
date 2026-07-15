@@ -7,10 +7,24 @@
 ;;;;                        —— 对标 ToolDefinition
 ;;;;   tool-callback        可执行工具（definition + 函数）
 ;;;;                        —— 对标 ToolCallback / FunctionToolCallback
-;;;;   deftool 宏           声明式定义工具并注册
+;;;;   deftool 宏           声明式定义工具
 ;;;;                        —— 对标 @Tool / @ToolParam 注解
 ;;;;   tool-calling-manager 解析响应中的 tool-calls 并执行
 ;;;;                        —— 对标 ToolCallingManager
+;;;;
+;;;; 工具的身份是**符号**：
+;;;;   deftool 生成一个普通函数，并把 tool-callback 挂在符号属性上，
+;;;;   不写任何全局状态。用符号把工具放进请求：
+;;;;
+;;;;     (chat client (:user "...") (:tools 'get-weather))
+;;;;
+;;;;   这与 clj-agent 一致——那边 deftool 生成 defn、schema 挂 var 元数据，
+;;;;   再用 (build-kernel {:tools [#'get-weather]}) 显式传入。Clojure 的 var
+;;;;   带元数据，CL 里对应的载体是符号的属性列表；#'get-weather 是裸函数
+;;;;   对象，取不到 schema，因此不能用作工具引用。
+;;;;
+;;;;   工具执行只认本次请求实际暴露的工具（见 find-callback-for-call）。
+;;;;   按字符串名解析是 opt-in 的（见 register-tool-callback）。
 ;;;;
 ;;;; deftool 示例：
 ;;;;   (deftool get-weather (&key city (unit "celsius"))
@@ -21,7 +35,7 @@
 ;;;;
 ;;;;   展开后：
 ;;;;   - (defun get-weather (&key city (unit "celsius")) ...) 普通函数照常可调
-;;;;   - 生成 tool-callback（JSON Schema 自动派生）并注册到全局注册表
+;;;;   - 生成 tool-callback（JSON Schema 自动派生）挂到符号属性
 ;;;;   - (get 'get-weather 'tool-callback) 可取回 callback
 ;;;;
 ;;;; 参数约定：
@@ -199,14 +213,42 @@
 ;;; 全局工具注册表（deftool 注册目标）
 ;;; ============================================================
 
+;;; 全局注册表是 **opt-in 的逃生通道**，只服务一种场景：按*字符串*名
+;;; 解析工具（工具名来自配置/DB 等，代码里拿不到符号）。
+;;;
+;;; deftool **不会**自动注册。工具的身份是它的符号，用 (:tools 'foo)
+;;; 引用即可——那条路径查符号属性，与本表无关。
+;;;
+;;; 为什么不默认注册（两条都是实测出来的）：
+;;;   - 越权：曾经工具执行会回退查本表，于是任何 deftool 过的工具，
+;;;     模型只要报出名字就会被执行，哪怕从未暴露给它。
+;;;   - 污染：光加载测试套件就会往表里塞 15 个工具，进程内永不消失；
+;;;     且同名静默覆盖，两个模块各自 deftool 同名工具时后者赢、不告警。
+;;;
+;;; 参照实现都没有这种全局表：clj-agent 的工具表挂在 kernel 实例上
+;;; （:tool-vars，由 (build-kernel {:tools [#'foo]}) 显式传入）；
+;;; Spring 的 ToolCallbackResolver 是 ToolCallingManager 的实例字段，
+;;; 默认是空的 DelegatingToolCallbackResolver。
+
 (defvar *tool-registry* (make-hash-table :test #'equal)
-  "全局工具注册表：名称字符串 → tool-callback")
+  "全局工具注册表：名称字符串 → tool-callback。
+
+默认为空——deftool 不写它。只有显式 register-tool-callback 才会填充。")
 
 (defvar *tool-registry-lock* (bt:make-lock "chat-tool-registry")
   "注册表锁")
 
 (defun register-tool-callback (callback)
-  "注册工具到全局注册表（同名覆盖）。返回 callback。"
+  "把工具显式注册到全局注册表，供按字符串名解析（同名覆盖）。返回 callback。
+
+仅在需要用*字符串*引用工具时才需要——例如工具名来自配置：
+
+  (register-tool-callback (symbol-tool-callback 'get-weather))
+  (chat client (:user \"...\") (:options :tool-names (list tool-name-from-config)))
+
+用符号引用（(:tools 'get-weather)）不需要注册。
+
+注意同名覆盖是静默的：本表是进程级全局，多模块共用时注意命名。"
   (bt:with-lock-held (*tool-registry-lock*)
     (setf (gethash (tool-callback-name callback) *tool-registry*) callback))
   callback)
@@ -216,8 +258,22 @@
   (bt:with-lock-held (*tool-registry-lock*)
     (remhash (normalize-tool-name name) *tool-registry*)))
 
+(defun symbol-tool-callback (symbol)
+  "取 SYMBOL 上由 deftool 挂载的 tool-callback（未定义返回 NIL）。
+
+这是工具身份的正规取法——符号属性名是本包内部符号，调用方不该写
+(get 'foo 'cl-agent.chat::tool-callback)。
+
+  (symbol-tool-callback 'get-weather)  ; => #<tool-callback get_weather>
+
+对应 clj-agent 的 var 元数据读取（tool/get-schema）。"
+  (get symbol 'tool-callback))
+
 (defun find-tool-callback (name)
-  "按名查找全局注册的工具（接受字符串/符号，未找到返回 NIL）"
+  "按名查找**全局注册表**中的工具（接受字符串/符号，未找到返回 NIL）。
+
+注意本表默认为空——deftool 不写它，只有显式 register-tool-callback
+才会填充。要取 deftool 定义的工具请用 symbol-tool-callback。"
   (bt:with-lock-held (*tool-registry-lock*)
     (gethash (normalize-tool-name name) *tool-registry*)))
 
@@ -232,8 +288,9 @@
 
 每个引用可以是：
   - tool-callback 实例   → 原样
-  - 符号                → 先取 (get sym 'tool-callback)，再按名查注册表
-  - 字符串              → 按名查全局注册表
+  - 符号                → 取符号属性上的 callback（deftool 挂载），
+                          再回退全局注册表（供显式注册的工具用符号引用）
+  - 字符串              → 查全局注册表（需先 register-tool-callback）
 
 找不到时发出 tool-not-found-error。"
   (mapcar (lambda (spec)
@@ -294,8 +351,22 @@
 
 效果：
   1. (defun 名称 (&key ...) ...) —— 普通函数照常可调
-  2. 自动派生 JSON Schema，创建 tool-callback 并注册到全局注册表
+  2. 自动派生 JSON Schema，创建 tool-callback
   3. callback 挂到符号属性：(get '名称 'tool-callback)
+
+**没有全局副作用**：deftool 不写任何全局注册表，工具的身份就是
+它的符号。用符号把它放进请求即可：
+
+  (chat client (:user \"...\") (:tools 'get-weather))
+
+这与 clj-agent 的 deftool 一致——那边生成 defn 并把 schema 挂在
+var 元数据上，再用 (build-kernel {:tools [#'get-weather]}) 显式传入；
+Clojure 的 var 带元数据，CL 里对应的载体正是符号的属性列表
+（#'get-weather 是裸函数对象，取不到 schema，不能用作工具引用）。
+
+需要按*字符串*名解析（配置驱动等场景）时，显式调用
+register-tool-callback 把它放进全局注册表——那是 opt-in 的逃生通道，
+不是默认机制。
 
 工具名自动转换为小写下划线风格（get-weather → \"get_weather\"）。
 
@@ -311,14 +382,16 @@
        (defun ,name ,lambda-list
          ,description
          ,@real-body)
-       (let ((callback (make-tool-callback
-                        (lambda (&rest args) (apply #',name args))
-                        :name ',name
-                        :description ,description
-                        :parameters ',param-specs
-                        :return-direct ,return-direct)))
-         (setf (get ',name 'tool-callback) callback)
-         (register-tool-callback callback))
+       ;; 工具的身份 = 符号。callback 挂符号属性，不写全局注册表——
+       ;; 自动全局注册会让每个 deftool 都悄悄扩大攻击面，也让测试
+       ;; 相互污染（详见 register-tool-callback 的说明）。
+       (setf (get ',name 'tool-callback)
+             (make-tool-callback
+              (lambda (&rest args) (apply #',name args))
+              :name ',name
+              :description ,description
+              :parameters ',param-specs
+              :return-direct ,return-direct))
        ',name)))
 
 ;;; ============================================================
@@ -414,8 +487,21 @@
   tool-execution-result（conversation-history + return-direct-p）"))
 
 (defun find-callback-for-call (options tool-call)
-  "为一次 tool-call 定位 callback：先查 options 中的运行时工具，
-再回退全局注册表。"
+  "为一次 tool-call 定位 callback：只认本次请求 OPTIONS 里的工具。
+
+**只查 options，不回退全局注册表**——这是刻意的安全边界：
+模型只能调用我们实际暴露给它的工具。此前这里会回退到全局注册表，
+于是任何 deftool 过的工具（哪怕从未出现在本次 tools 列表里）
+只要模型报出名字就会被执行——提示注入下可直接利用的越权。
+而 deftool 是自动注册的，作者根本意识不到攻击面被扩大了。
+
+参照实现同样没有这种回退：clj-agent 的 find-function 只查
+kernel 的 :tool-vars，找不到即抛；Spring 的 ToolCallbackResolver
+是 manager 的实例字段，默认为空。
+
+找不到时发 tool-not-found-error——调用方的
+process-tool-execution-error 会把它转成文本回传模型（行为友好，
+不中断对话）。"
   (let ((name (normalize-tool-name (tool-call-name tool-call))))
     (or (find name (append (chat-options-tool-callbacks options)
                            (ignore-errors
@@ -423,7 +509,6 @@
                              (chat-options-tool-names options))))
               :key #'tool-callback-name
               :test #'string=)
-        (find-tool-callback name)
         (error 'tool-not-found-error :tool-name name))))
 
 (defun execute-one-tool-call (manager options tool-context tool-call)

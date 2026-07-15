@@ -169,6 +169,7 @@
    #:deftool
    #:register-tool-callback
    #:unregister-tool-callback
+   #:symbol-tool-callback
    #:find-tool-callback
    #:list-tool-callbacks
    #:resolve-tool-callbacks
