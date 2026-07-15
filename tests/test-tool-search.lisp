@@ -234,3 +234,148 @@
          (client (make-search-client provider)))
     (is (string= "普通回答" (cl-agent.client:chat client "你好")))
     (is (null (getf (first (seq-provider-requests provider)) :tools)))))
+
+;;; ============================================================
+;;; 系统提示后缀（对标 systemMessageSuffix）
+;;; ============================================================
+
+(test tool-search-appends-system-message-suffix
+  "系统提示末尾追加后缀，告知模型 tool_search 的存在"
+  (let* ((provider (make-seq-provider (text-response "好")))
+         (client (cl-agent.client:make-chat-client
+                  (cl-agent.chat:make-provider-chat-model provider)
+                  :system "你是助手"
+                  :advisors (list (cl-agent.client:make-tool-search-tool-calling-advisor)))))
+    (cl-agent.client:chat client (:user "在吗") (:tools 'ts-get-weather))
+    (let* ((request (first (seq-provider-requests provider)))
+           (system-msg (find :system (getf request :messages)
+                             :key (lambda (m) (getf m :role))))
+           (text (getf system-msg :content)))
+      ;; 原有系统提示保留，后缀追加在末尾
+      (is (search "你是助手" text))
+      (is (search "tool_search" text)))))
+
+(test tool-search-creates-system-message-when-absent
+  "原本没有 system 消息时，后缀会新建一条并置顶"
+  (let* ((provider (make-seq-provider (text-response "好")))
+         (client (make-search-client provider)))
+    (cl-agent.client:chat client (:user "在吗") (:tools 'ts-get-weather))
+    (let* ((request (first (seq-provider-requests provider)))
+           (roles (mapcar (lambda (m) (getf m :role)) (getf request :messages))))
+      (is (eq :system (first roles))))))
+
+(test tool-search-suffix-can-be-disabled
+  ":system-message-suffix 为 NIL 时不改动提示"
+  (let* ((provider (make-seq-provider (text-response "好")))
+         (client (cl-agent.client:make-chat-client
+                  (cl-agent.chat:make-provider-chat-model provider)
+                  :system "你是助手"
+                  :advisors (list (cl-agent.client:make-tool-search-tool-calling-advisor
+                                   :system-message-suffix nil)))))
+    (cl-agent.client:chat client (:user "在吗") (:tools 'ts-get-weather))
+    (let* ((request (first (seq-provider-requests provider)))
+           (system-msg (find :system (getf request :messages)
+                             :key (lambda (m) (getf m :role)))))
+      (is (string= "你是助手" (getf system-msg :content))))))
+
+(test tool-search-no-tools-skips-suffix
+  "未配置工具时不追加后缀——没有可检索的工具，说明只会误导模型"
+  (let* ((provider (make-seq-provider (text-response "普通回答")))
+         (client (cl-agent.client:make-chat-client
+                  (cl-agent.chat:make-provider-chat-model provider)
+                  :system "你是助手"
+                  :advisors (list (cl-agent.client:make-tool-search-tool-calling-advisor)))))
+    (cl-agent.client:chat client "你好")
+    (let* ((request (first (seq-provider-requests provider)))
+           (system-msg (find :system (getf request :messages)
+                             :key (lambda (m) (getf m :role)))))
+      (is (string= "你是助手" (getf system-msg :content))))))
+
+;;; ============================================================
+;;; 会话级索引（对标 "index the full tool set once per session"）
+;;; ============================================================
+
+(test tool-search-session-index-is-reused
+  "同一会话、工具集未变：索引被复用而非重建"
+  (let* ((advisor (cl-agent.client:make-tool-search-tool-calling-advisor))
+         (run (lambda (provider)
+                (cl-agent.client:chat
+                    (cl-agent.client:make-chat-client
+                     (cl-agent.chat:make-provider-chat-model provider)
+                     :advisors (list advisor))
+                  (:user "东京天气？")
+                  (:tools 'ts-get-weather 'ts-send-email)
+                  (:conversation "conv-reuse")))))
+    (funcall run (make-seq-provider (text-response "一")))
+    (funcall run (make-seq-provider (text-response "二")))
+    ;; 两次请求同一会话 → 只留一个索引条目
+    (is (= 1 (hash-table-count (cl-agent.client:tool-search-sessions advisor))))))
+
+(test tool-search-session-index-isolated-per-conversation
+  "不同会话各自建索引"
+  (let* ((advisor (cl-agent.client:make-tool-search-tool-calling-advisor))
+         (run (lambda (provider cid)
+                (cl-agent.client:chat
+                    (cl-agent.client:make-chat-client
+                     (cl-agent.chat:make-provider-chat-model provider)
+                     :advisors (list advisor))
+                  (:user "东京天气？")
+                  (:tools 'ts-get-weather)
+                  (:conversation cid)))))
+    (funcall run (make-seq-provider (text-response "一")) "conv-a")
+    (funcall run (make-seq-provider (text-response "二")) "conv-b")
+    (is (= 2 (hash-table-count (cl-agent.client:tool-search-sessions advisor))))))
+
+(test tool-search-session-index-rebuilds-on-tool-set-change
+  "同一会话但工具集变化：指纹不同 → 重建索引，检索能看到新工具"
+  (let* ((advisor (cl-agent.client:make-tool-search-tool-calling-advisor))
+         (run (lambda (provider tools)
+                (cl-agent.client:chat
+                    (cl-agent.client:make-chat-client
+                     (cl-agent.chat:make-provider-chat-model provider)
+                     :advisors (list advisor))
+                  (:user "帮我做事")
+                  (:tools tools)
+                  (:conversation "conv-change")))))
+    ;; 第一次只有天气工具
+    (funcall run (make-seq-provider (text-response "一")) 'ts-get-weather)
+    ;; 第二次换成邮件工具：检索「邮件」应命中新工具，说明索引已重建
+    (let ((p2 (make-seq-provider
+               (tool-call-response "tool_search" '(("query" . "邮件")))
+               (lambda (messages)
+                 (let ((tool-msg (find :tool messages
+                                       :key (lambda (m) (getf m :role)))))
+                   (assert (search "ts_send_email" (getf tool-msg :content))))
+                 (text-response "二")))))
+      (is (string= "二" (funcall run p2 'ts-send-email))))
+    ;; 会话仍只有一个条目（重建而非新增）
+    (is (= 1 (hash-table-count (cl-agent.client:tool-search-sessions advisor))))))
+
+(defun session-indexed-p (advisor conversation-id)
+  "会话 CONVERSATION-ID 是否有索引条目。
+
+写成函数而非在 is 里直接用 nth-value：fiveam 的 is 宏会把
+(nth-value 1 (gethash ...)) 当函数调用拆解、把实参绑到临时变量，
+多值在这个过程中丢失，断言会假失败（更糟的是取反后会假通过）。"
+  (and (gethash conversation-id (cl-agent.client:tool-search-sessions advisor))
+       t))
+
+(test tool-search-session-index-evicts-beyond-max
+  "索引缓存不会无限增长：超出 max-sessions 时淘汰最久未用的会话"
+  (let* ((advisor (cl-agent.client:make-tool-search-tool-calling-advisor
+                   :max-sessions 2)))
+    (dolist (cid '("c1" "c2" "c3" "c4"))
+      (cl-agent.client:chat
+          (cl-agent.client:make-chat-client
+           (cl-agent.chat:make-provider-chat-model
+            (make-seq-provider (text-response "ok")))
+           :advisors (list advisor))
+        (:user "hi")
+        (:tools 'ts-get-weather)
+        (:conversation cid)))
+    (is (= 2 (hash-table-count (cl-agent.client:tool-search-sessions advisor))))
+    ;; 保留最近用过的两个，最早的被淘汰
+    (is (session-indexed-p advisor "c4"))
+    (is (session-indexed-p advisor "c3"))
+    (is (not (session-indexed-p advisor "c1")))
+    (is (not (session-indexed-p advisor "c2")))))
