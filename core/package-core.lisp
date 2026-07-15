@@ -158,6 +158,15 @@
    #:type-to-json-type
    #:params->json-schema
    #:schema-to-hash-table
+   ;; JSON Schema 校验（structured-output-validation-advisor 使用）
+   #:validate-json-schema
+   #:validate-json-text
+   #:ensure-json-schema
+   #:json-null-p
+   #:json-array-p
+   #:json-boolean-p
+   #:json-type-name
+   #:json-equal
 
    ;; === Unified LLM Response Schema ===
    ;; Response class
