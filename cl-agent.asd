@@ -66,6 +66,8 @@
 
                ;; Core infrastructure tests
                (:file "tests/test-core")
+               (:file "tests/test-json-schema") ; JSON Schema 校验器
+               (:file "tests/test-http-async")  ; 异步 HTTP + 动态绑定继承
 
                ;; Chat Model API tests
                (:file "tests/test-message")     ; 消息体系 + 中立互转
@@ -79,6 +81,7 @@
                (:file "tests/test-chat-client") ; ChatClient / chat 宏 / 集成
                (:file "tests/test-tool-advisor") ; ToolCallingAdvisor（2.0 工具循环）
                (:file "tests/test-tool-search")  ; 循环钩子 + 渐进式工具披露
+               (:file "tests/test-structured-output") ; 结构化输出校验 Advisor
                (:file "tests/test-parallel-tools") ; 并行工具执行
 
                ;; LLM provider tests

@@ -110,11 +110,33 @@
      (:file "advisors")           ; 内置 Advisor（日志/记忆/护栏）
      (:file "tool-advisor")       ; ToolCallingAdvisor（2.0 递归工具循环 + 钩子）
      (:file "tool-search-advisor") ; ToolSearch（渐进式工具披露）
+     (:file "structured-output-advisor") ; StructuredOutputValidationAdvisor
      (:file "chat-client")))))    ; ChatClient + Builder + chat 宏
 
 ;; ============================================================
 ;; Changelog
 ;; ============================================================
+;;
+;; v8.1.0 —— 全面对齐 Spring AI 2.0 的 Advisor 体系：
+;; - 新增 structured-output-validation-advisor（对标
+;;   StructuredOutputValidationAdvisor）：JSON Schema 校验 + 失败自我纠正重试；
+;;   call-entity / (:call :entity schema) 可自动挂载
+;; - 新增 JSON Schema 校验器（cl-agent.core:validate-json-schema /
+;;   validate-json-text），支持 type/required/properties/items/enum/const/
+;;   数值与字符串约束/allOf-anyOf-oneOf-not
+;; - 移除 prompt-chat-memory-advisor：Spring AI 2.0 已移除
+;;   PromptChatMemoryAdvisor（1.0 → 2.0 唯一被移除的 Advisor）
+;; - tool-calling-advisor 补齐 conversation-history-enabled 开关、
+;;   tool-advisor-next-instructions 钩子（对标
+;;   doGetNextInstructionsForToolCall）、可插拔的 eligibility 判定
+;;   （对标 ToolExecutionEligibilityChecker）
+;; - tool-search-tool-calling-advisor 增加会话级索引（指纹判定 + LRU 淘汰）
+;;   与 system-message-suffix（对标 systemMessageSuffix）
+;; - message-chat-memory-advisor 对齐 Spring 语义：记忆前插 + 幂等检查 +
+;;   system 置顶 + 只存最后一条 user/tool 消息
+;; - simple-logger-advisor 支持可插拔的 request-to-string / response-to-string
+;; - Advisor 排序改用具名常量（+chat-memory-advisor-order+ 等），
+;;   并在 advisor.lisp 中说明与 Spring 默认布局的差异及理由
 ;;
 ;; v8.0.0:
 ;; - 全面对标 Spring AI 2.0：删除 Kernel/Filter/SimpleAgent 体系，
