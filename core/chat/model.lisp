@@ -152,6 +152,7 @@
       (add :stop (chat-options-stop-sequences options))
       (add :frequency-penalty (chat-options-frequency-penalty options))
       (add :presence-penalty (chat-options-presence-penalty options))
+      (add :thinking (chat-options-thinking options))
       (add :extra-params (chat-options-extra-params options)))
     args))
 

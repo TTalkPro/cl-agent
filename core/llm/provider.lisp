@@ -24,7 +24,7 @@
 (defgeneric llm-chat (provider messages &key max-tokens temperature model tools system
                                              top-p top-k stop
                                              frequency-penalty presence-penalty
-                                             tool-choice extra-params)
+                                             tool-choice thinking extra-params)
   (:documentation "Send a chat request to an LLM.
 
 所有可选参数遵循\"存在才发送\"（参照 clj-agent build-params）：
@@ -44,6 +44,11 @@ Parameters:
   FREQUENCY-PENALTY - 频率惩罚 (optional)
   PRESENCE-PENALTY  - 存在惩罚 (optional)
   TOOL-CHOICE - :auto / :required / :none 或厂商原生形态 (optional)
+  THINKING    - 扩展思考配置（optional，对标 Spring AI ThinkingConfigParam）：
+                :disabled / :adaptive / (:enabled :budget-tokens N)
+                / (:adaptive :display :omitted) / hash-table（原样下发）。
+                由 Anthropic 系 provider 实现，其它 provider 忽略。
+                详见 chat-options 的 thinking 槽。
   EXTRA-PARAMS - 厂商专有参数逃生通道（plist，直接并入请求体，
                  对标 clj-agent 的 :extra-body）(optional)
 
@@ -64,7 +69,7 @@ Note:
                              &key max-tokens temperature model tools system
                                   top-p top-k stop
                                   frequency-penalty presence-penalty
-                                  tool-choice extra-params)
+                                  tool-choice thinking extra-params)
   (:documentation "Send a streaming chat request to an LLM.
 
 Parameters:
@@ -188,11 +193,11 @@ Returns:
                             &key max-tokens temperature model tools system
                                  top-p top-k stop
                                  frequency-penalty presence-penalty
-                                 tool-choice extra-params)
+                                 tool-choice thinking extra-params)
   "Default streaming implementation: fall back to non-streaming."
   (declare (ignore callback max-tokens temperature model tools system
                    top-p top-k stop frequency-penalty presence-penalty
-                   tool-choice extra-params))
+                   tool-choice thinking extra-params))
   (apply #'llm-chat provider messages args))
 
 ;;; ============================================================

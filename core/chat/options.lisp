@@ -19,7 +19,7 @@
 
 (defparameter +chat-options-slots+
   '(model temperature max-tokens top-p top-k stop-sequences
-    frequency-penalty presence-penalty extra-params
+    frequency-penalty presence-penalty thinking extra-params
     tool-callbacks tool-names tool-context)
   "chat-options 全部槽位（合并/拷贝时枚举用）")
 
@@ -48,6 +48,23 @@
    (presence-penalty
     :initarg :presence-penalty
     :documentation "存在惩罚")
+   (thinking
+    :initarg :thinking
+    :documentation "扩展思考配置（对标 Spring AI 的 ThinkingConfigParam）。
+
+取值（中立规格，由各 provider 翻译为自家 wire 格式）：
+  :disabled                                    关闭思考
+  :adaptive                                    由模型自行决定思考量
+  (:adaptive :display :omitted)
+  (:enabled :budget-tokens 2048)               指定思考预算
+  (:enabled :budget-tokens 2048 :display :omitted)
+  hash-table                                   原样下发（逃生通道）
+
+:display 为 :summarized（默认）或 :omitted——:omitted 时思考内容
+被隐去但仍返回 signature，多轮工具调用的延续性不受影响。
+
+目前由 Anthropic 系 provider（anthropic / minimax）实现；
+其它 provider 忽略该槽位。")
    (extra-params
     :initarg :extra-params
     :documentation "厂商专有参数逃生通道（plist，直接并入请求体，
@@ -69,7 +86,7 @@ cl-agent.client:tool-calling-advisor）"))
 (defun make-chat-options (&rest initargs
                           &key model temperature max-tokens top-p top-k
                                stop-sequences frequency-penalty presence-penalty
-                               extra-params
+                               thinking extra-params
                                tool-callbacks tool-names tool-context)
   "创建 chat-options。只有显式传入的选项才算\"已设置\"。
 
@@ -115,6 +132,10 @@ cl-agent.client:tool-calling-advisor）"))
 
 (defun chat-options-presence-penalty (options)
   (options-slot options 'presence-penalty))
+
+(defun chat-options-thinking (options)
+  "扩展思考配置（未设置返回 NIL）"
+  (options-slot options 'thinking))
 
 (defun chat-options-extra-params (options)
   "厂商专有参数 plist（未设置返回 NIL）"
