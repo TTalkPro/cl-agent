@@ -85,30 +85,11 @@
                                          :message (princ-to-string e)))))))
 
 ;;; ============================================================
-;;; invoke-tool-batch：批量执行工具调用
+;;; invoke-tool-batch：批量执行工具调用（委托 batch.lisp）
 ;;; ============================================================
-
-(defun invoke-tool-batch (kernel tool-calls options context)
-  "批量执行 tool-call 列表（P2: 顺序执行; P3 加并行/:serial）。
-
-  返回 (values tool-responses return-direct-p)：
-  - tool-responses = kernel:tool-response 列表（与 tool-calls 同序）
-  - return-direct-p = 是否所有工具都声明了 return-direct"
-  (let ((return-direct t))
-    (values
-     (mapcar (lambda (tc)
-               (let* ((callback (cl-agent.chat::find-callback-for-call options tc))
-                      (direct-p (cl-agent.chat:tool-callback-return-direct-p callback))
-                      (req (make-tool-request
-                            callback
-                            :args (cl-agent.chat:arguments->plist
-                                   (cl-agent.chat:tool-call-arguments tc))
-                            :context context))
-                      (resp (invoke-tool kernel req)))
-                 (unless direct-p (setf return-direct nil))
-                 resp))
-             tool-calls)
-     (and return-direct tool-calls))))
+;;; P3: 并行默认 + :serial 退化 + 故障路由。
+;;; batch.lisp 中的 invoke-tool-batch 是完整实现；这里不再重复定义。
+;;; （invoke-tool-batch 在 batch.lisp 中定义，通过 package 导出）
 
 ;;; ============================================================
 ;;; resolve-kernel-tools：kernel 工具符号 → chat-options
@@ -157,18 +138,31 @@
                 (let* ((tool-calls (cl-agent.chat:chat-response-tool-calls response)))
                   (multiple-value-bind (tool-results return-direct)
                       (invoke-tool-batch kernel tool-calls options context)
-                    (declare (ignore return-direct))  ; P3 处理 return-direct
                     (let ((tool-msg (cl-agent.chat:tool-response-message
                                      (mapcar (lambda (tr tc)
                                                (cl-agent.chat:make-tool-response
                                                 :id (cl-agent.chat:tool-call-id tc)
                                                 :name (cl-agent.chat:tool-call-name tc)
-                                                :text (tool-response-result tr)))
+                                                :text (or (tool-response-result tr)
+                                                          "（执行失败）")))
                                              tool-results tool-calls))))
-                      (setf messages
-                            (append messages
-                                    (list (cl-agent.chat:chat-response-message response)
-                                          tool-msg)))))))
+                      (if return-direct
+                          ;; return-direct：工具结果即最终答案，不再回传模型
+                          (let ((final-text
+                                  (format nil "~{~A~^~%~}"
+                                          (mapcar #'tool-response-result tool-results))))
+                            (return (make-turn-result
+                                     :completed
+                                     :response (cl-agent.chat:make-chat-response
+                                                (cl-agent.chat:make-generation
+                                                 (cl-agent.chat:assistant-message final-text)
+                                                 :finish-reason :stop))
+                                     :tool-calls-made (1+ iteration))))
+                          ;; 正常路径：追加消息 → 继续循环
+                          (setf messages
+                                (append messages
+                                        (list (cl-agent.chat:chat-response-message response)
+                                              tool-msg))))))))
                (t
                 ;; 无工具调用：最终响应
                 (return (make-turn-result :completed :response response

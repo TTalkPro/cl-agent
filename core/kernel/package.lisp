@@ -92,4 +92,13 @@
     #:invoke-tool
     #:invoke-tool-batch
     #:invoke-turn
-    #:run-tool-loop))
+    #:run-tool-loop
+
+    ;; ==================== 故障分类 ====================
+    #:tool-failure
+    #:tool-failure-class
+    #:tool-failure-message
+    #:semantic-tool-failure
+    #:transient-tool-failure
+    #:environment-tool-failure
+    #:classify-tool-error))
