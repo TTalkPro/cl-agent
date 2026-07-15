@@ -52,8 +52,10 @@
 
    (temperature
     :initarg :temperature
+    :initform nil
     :accessor client-temperature
-    :documentation "默认温度"))
+    :documentation "客户端级默认温度。NIL 表示不下发 temperature 字段
+（见 make-client 的 TEMPERATURE 说明）"))
 
   (:documentation "LLM 客户端
 
@@ -63,7 +65,7 @@
   MODEL       - 模型名称（可选，覆盖提供商默认值）
   BASE-URL    - 基础 URL（可选，覆盖提供商默认值）
   MAX-TOKENS  - 最大 token 数（可选）
-  TEMPERATURE - 默认温度（可选）"))
+  TEMPERATURE - 客户端级默认温度（可选；NIL 表示不下发）"))
 
 ;;; ============================================================
 ;;; 客户端工厂
@@ -75,7 +77,7 @@
                      (api-key nil)
                      (base-url nil)
                      (max-tokens 4096)
-                     (temperature 0.7))
+                     (temperature nil))
   "创建 LLM 客户端
 
 参数：
@@ -83,8 +85,18 @@
   MODEL       - 模型名称（可选）
   API-KEY     - API 密钥（可选，从环境变量读取）
   BASE-URL    - 基础 URL（可选）
-  MAX-TOKENS  - 最大 token 数（可选，默认 4096）
-  TEMPERATURE - 默认温度（可选，默认 0.7）
+  MAX-TOKENS  - 最大 token 数（可选，默认 4096——Anthropic 强制要求该字段）
+  TEMPERATURE - 客户端级默认温度（可选）。NIL（缺省）表示不下发 temperature，
+                由服务端取默认值。
+
+                此前默认 0.7，意味着每次请求都被注入 temperature=0.7。
+                按 Anthropic 官方文档这会直接坏在两处：
+                  1. temperature / top_p / top_k 在 Claude Opus 4.7 及以后
+                     （含 4.8）不受支持，设非默认值返回 400，文档要求
+                     「omit them from request payloads」；
+                  2. Claude 4.1 Opus / 4.5 Sonnet 起 temperature 与 top_p
+                     不能同时指定，否则 400。
+                需要固定温度时显式传入即可。
 
 返回：
   客户端实例

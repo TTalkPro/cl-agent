@@ -148,7 +148,8 @@
 
 (defmethod cl-agent.core:llm-chat-stream ((provider openai-compat-provider) messages callback
                                           &key max-tokens
-                                               (temperature 0.7)
+                                               ;; NIL 时不下发（SPI「存在才发送」契约）
+                                               temperature
                                                model
                                                tools
                                                system
