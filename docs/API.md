@@ -190,8 +190,21 @@ orphaned leading tool messages are dropped.
 ;; advisors with order > 2000 run on every loop iteration
 ;;
 ;; :conversation-history-enabled nil -- next round carries only the system
-;;   message plus the last message; a ChatMemory advisor must then be
-;;   registered in the chain to preserve the full history
+;;   message plus the last message; a ChatMemory advisor then rebuilds the full
+;;   history. That advisor MUST sit *inside* the tool loop
+;;   (order > +tool-calling-advisor-order+) so it runs on every iteration. At
+;;   its default order (outside the loop) it runs once per request, cannot fill
+;;   in the intermediate rounds, and the next prompt degrades to
+;;   [system, tool-result] -- which Anthropic-style providers reject with a
+;;   bare HTTP 400:
+;;     (make-chat-client model
+;;       :advisors (list (make-message-chat-memory-advisor
+;;                        :memory mem
+;;                        :order (1+ +tool-calling-advisor-order+))
+;;                       (make-tool-calling-advisor
+;;                        :conversation-history-enabled nil)))
+;;   Custom memory advisors should specialise memory-advisor-p to return t
+;;   (mirrors the MemoryAdvisor marker interface) or they trigger a config warning.
 ;; :eligibility -- (chat-response) -> boolean; override for provider-specific
 ;;   stop-reason logic (mirrors ToolExecutionEligibilityChecker)
 

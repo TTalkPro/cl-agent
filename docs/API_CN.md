@@ -216,7 +216,18 @@ schema，但不执行工具。携带 tool-calls 的响应原样返回，工具�
 ;; order > 2000 的 Advisor 每轮工具循环都执行
 ;;
 ;; :conversation-history-enabled NIL —— 下一轮只带 system + 最后一条消息，
-;;   完整历史交给链上的记忆 Advisor 维护（此时必须注册记忆 Advisor）
+;;   完整历史交给记忆 Advisor 重建。记忆 Advisor 必须位于工具循环*内侧*
+;;   （order > +tool-calling-advisor-order+）才会每轮迭代执行；放在默认
+;;   order（循环外）每次请求只跑一次，补不上中间轮次，下一轮 prompt 会
+;;   退化成 [system, 工具结果]，Anthropic 类提供商直接返回 HTTP 400：
+;;     (make-chat-client model
+;;       :advisors (list (make-message-chat-memory-advisor
+;;                        :memory mem
+;;                        :order (1+ +tool-calling-advisor-order+))
+;;                       (make-tool-calling-advisor
+;;                        :conversation-history-enabled nil)))
+;;   自定义记忆 Advisor 请特化 memory-advisor-p 返回 T
+;;   （对标 MemoryAdvisor 标记接口），否则会收到配置告警。
 ;; :eligibility —— (chat-response) → boolean，替换它可实现提供商特定的
 ;;   stop-reason 判定（对标 ToolExecutionEligibilityChecker）
 
