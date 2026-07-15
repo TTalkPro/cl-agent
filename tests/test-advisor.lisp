@@ -215,16 +215,16 @@
                  (cl-agent.chat:message-text
                   (first (cl-agent.chat:memory-messages memory "conv-a")))))))
 
-(test prompt-memory-advisor-injects-text
-  "提示词记忆：历史渲染进 system 消息"
+(test message-memory-advisor-keeps-system-first
+  "记忆前插后 system 消息仍位于首位"
   (let* ((memory (cl-agent.chat:make-message-window-chat-memory))
-         (advisor (cl-agent.client:make-prompt-chat-memory-advisor :memory memory))
-         (last-system nil)
+         (advisor (cl-agent.client:make-message-chat-memory-advisor :memory memory))
+         (last-roles nil)
          (terminal (lambda (request)
-                     (let ((systems (cl-agent.chat:prompt-system-messages
-                                     (cl-agent.client:client-request-prompt request))))
-                       (setf last-system (when systems
-                                           (cl-agent.chat:message-text (first systems)))))
+                     (setf last-roles
+                           (mapcar #'cl-agent.chat:message-role
+                                   (cl-agent.chat:prompt-messages
+                                    (cl-agent.client:client-request-prompt request))))
                      (cl-agent.client:make-client-response
                       (cl-agent.chat:make-chat-response
                        (cl-agent.chat:make-generation
@@ -237,9 +237,35 @@
                   (cl-agent.chat:make-prompt text :system "你是助手"))))))
     (funcall run "我叫大卫")
     (funcall run "我叫什么")
-    (is (search "USER: 我叫大卫" last-system))
-    (is (search "ASSISTANT: 回复" last-system))
-    (is (search "你是助手" last-system))))
+    ;; 第二轮：system 置顶，其后是前插的记忆，最后是本轮 user
+    (is (eq :system (first last-roles)))
+    (is (equal '(:system :user :assistant :user) last-roles))))
+
+(test message-memory-advisor-idempotent-prepend
+  "记忆已在 prompt 中时不再重复前插"
+  (let* ((memory (cl-agent.chat:make-message-window-chat-memory))
+         (advisor (cl-agent.client:make-message-chat-memory-advisor :memory memory))
+         (seen 0)
+         (terminal (lambda (request)
+                     (setf seen (length (cl-agent.chat:prompt-messages
+                                         (cl-agent.client:client-request-prompt request))))
+                     (cl-agent.client:make-client-response
+                      (cl-agent.chat:make-chat-response
+                       (cl-agent.chat:make-generation
+                        (cl-agent.chat:assistant-message "回复")))
+                      :context (cl-agent.client:client-request-context request))))
+         (run (lambda (messages)
+                (cl-agent.client:chain-next
+                 (cl-agent.client:make-advisor-chain (list advisor) terminal)
+                 (cl-agent.client:make-client-request
+                  (cl-agent.chat:make-prompt messages))))))
+    (funcall run "第一句")
+    ;; 记忆此时是 [user"第一句", assistant"回复"]；
+    ;; 调用方手动把同样内容塞进 prompt，不应被再前插一遍
+    (funcall run (list (cl-agent.chat:user-message "第一句")
+                       (cl-agent.chat:assistant-message "回复")
+                       (cl-agent.chat:user-message "第二句")))
+    (is (= 3 seen))))
 
 ;;; ============================================================
 ;;; 内置 Advisor：护栏与日志

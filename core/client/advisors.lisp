@@ -1,12 +1,21 @@
 ;;;; advisors.lisp
 ;;;; CL-Agent Client - 内置 Advisor
 ;;;;
-;;;; 概述（对标 Spring AI 内置 Advisor）：
+;;;; 概述（对标 Spring AI 2.0 内置 Advisor）：
 ;;;;
 ;;;;   simple-logger-advisor        —— SimpleLoggerAdvisor
 ;;;;   message-chat-memory-advisor  —— MessageChatMemoryAdvisor
-;;;;   prompt-chat-memory-advisor   —— PromptChatMemoryAdvisor
 ;;;;   safe-guard-advisor           —— SafeGuardAdvisor
+;;;;
+;;;; 另见同目录：
+;;;;   tool-advisor.lisp              —— ToolCallingAdvisor
+;;;;   tool-search-advisor.lisp       —— ToolSearchToolCallingAdvisor
+;;;;   structured-output-advisor.lisp —— StructuredOutputValidationAdvisor
+;;;;
+;;;; 注：PromptChatMemoryAdvisor 在 Spring AI 2.0 中已被移除
+;;;;     （1.0 → 2.0 唯一被移除的 Advisor），本实现同步移除。
+;;;;     需要「历史渲染进系统提示」的场景请改用 message-chat-memory-advisor，
+;;;;     或用 defadvisor 自行实现。
 ;;;;
 ;;;; 会话 ID：
 ;;;;   记忆类 Advisor 从请求 context 的 +conversation-id-key+ 读取会话 ID
@@ -29,41 +38,101 @@
 ;;; SimpleLoggerAdvisor —— 请求/响应日志
 ;;; ============================================================
 
+(defun default-log-request-to-string (request)
+  "simple-logger-advisor 的默认请求格式化"
+  (let ((prompt (client-request-prompt request)))
+    (format nil "request: ~A messages, last-user=~S"
+            (length (prompt-messages prompt))
+            (prompt-last-user-text prompt))))
+
+(defun default-log-response-to-string (chat-response)
+  "simple-logger-advisor 的默认响应格式化"
+  (format nil "response: ~S" (chat-response-text chat-response)))
+
 (defadvisor simple-logger-advisor
-    (:order -1000
+    (:order +simple-logger-advisor-order+
      :documentation "记录请求与响应摘要的日志 Advisor
-（对标 SimpleLoggerAdvisor）。order 极小，位于链最外层。")
+（对标 SimpleLoggerAdvisor）。order 极小，位于链最外层。
+
+格式化函数可替换（对标 Builder 的 requestToString / responseToString）：
+  (make-simple-logger-advisor
+    :response-to-string (lambda (chat-response)
+                          (format nil \"~A tokens\" ...)))")
   (:slots ((stream
             :initarg :stream
             :initform nil
-            :documentation "输出流（NIL 时走 log-debug）")))
+            :documentation "输出流（NIL 时走 log-debug）")
+           (request-to-string
+            :initarg :request-to-string
+            :initform #'default-log-request-to-string
+            :documentation "(client-request) → 字符串
+（对标 SimpleLoggerAdvisor.Builder#requestToString）")
+           (response-to-string
+            :initarg :response-to-string
+            :initform #'default-log-response-to-string
+            :documentation "(chat-response) → 字符串
+（对标 SimpleLoggerAdvisor.Builder#responseToString）")))
   (:call (advisor request chain)
-    (flet ((emit (fmt &rest args)
+    (flet ((emit (text)
              (let ((out (slot-value advisor 'stream)))
                (if out
-                   (format out "~&[chat-client] ~A~%" (apply #'format nil fmt args))
-                   (apply #'log-debug fmt args)))))
-      (let ((prompt (client-request-prompt request)))
-        (emit "request: ~A messages, last-user=~S"
-              (length (prompt-messages prompt))
-              (prompt-last-user-text prompt)))
+                   (format out "~&[chat-client] ~A~%" text)
+                   (log-debug "~A" text)))))
+      (emit (funcall (slot-value advisor 'request-to-string) request))
       (let ((response (chain-next chain request)))
-        (emit "response: ~S"
-              (chat-response-text (client-response-chat-response response)))
+        (emit (funcall (slot-value advisor 'response-to-string)
+                       (client-response-chat-response response)))
         response))))
 
 ;;; ============================================================
 ;;; MessageChatMemoryAdvisor —— 消息级会话记忆
 ;;; ============================================================
 
+(defun message-value-equal-p (a b)
+  "两条消息在「角色 + 文本」意义上相等。
+
+memory-already-in-prompt-p 用它做幂等判断——对标 Spring 用
+Message#equals（值相等）而非对象同一性：调用方手动把历史塞进
+prompt 时，不应再被前插一遍。"
+  (and (eq (message-role a) (message-role b))
+       (equal (message-text a) (message-text b))))
+
+(defun memory-already-in-prompt-p (prompt-messages memory-messages)
+  "记忆是否已作为连续子序列出现在 PROMPT-MESSAGES 中
+（对标 MessageChatMemoryAdvisor#isMemoryAlreadyInPrompt）。
+
+用于避免重复前插：记忆为空视为「已在」（无需前插）。"
+  (let ((memory-count (length memory-messages))
+        (prompt-count (length prompt-messages)))
+    (cond
+      ((zerop memory-count) t)
+      ((< prompt-count memory-count) nil)
+      (t (loop for offset from 0 to (- prompt-count memory-count)
+               thereis (every #'message-value-equal-p
+                              memory-messages
+                              (nthcdr offset prompt-messages)))))))
+
+(defun hoist-system-message (messages)
+  "把首个 system 消息移到列表最前（对标 Spring 的 system-first 处理）。
+记忆前插后 system 消息可能不再位于首位，部分提供商对此敏感。"
+  (let ((pos (position-if #'system-message-p messages)))
+    (if (or (null pos) (zerop pos))
+        messages
+        (cons (nth pos messages)
+              (append (subseq messages 0 pos)
+                      (subseq messages (1+ pos)))))))
+
 (defadvisor message-chat-memory-advisor
-    (:order 1000
+    (:order +chat-memory-advisor-order+
      :documentation "把会话历史作为消息注入 prompt 的记忆 Advisor
 （对标 MessageChatMemoryAdvisor）：
 
-before：新消息（非 system）存入记忆，再用完整记忆替换 prompt 的
-        非 system 消息（记忆是会话的唯一事实来源）
-after： 模型的 assistant 回复存入记忆")
+before：取记忆 → 前插到 prompt 消息之前（已在则跳过）→ system 置顶
+        → 把本轮最后一条 user/tool 消息存入记忆
+after： 模型的 assistant 回复存入记忆
+
+注意存入记忆的是「最后一条 user/tool 消息」而非全部新消息——
+与 Spring 的 getLastUserOrToolResponseMessage 一致。")
   (:slots ((memory
             :initarg :memory
             :reader advisor-memory
@@ -72,14 +141,19 @@ after： 模型的 assistant 回复存入记忆")
     (let* ((memory (advisor-memory advisor))
            (cid (request-conversation-id request))
            (prompt (client-request-prompt request))
-           (new-messages (prompt-instruction-messages prompt)))
-      ;; before：存增量，取全量
-      (memory-add memory cid new-messages)
-      (let* ((augmented (prompt-copy prompt
-                                     :messages (append
-                                                (prompt-system-messages prompt)
-                                                (memory-messages memory cid))))
-             (response (chain-next chain
+           (history (memory-messages memory cid))
+           (prompt-messages (prompt-messages prompt))
+           ;; before：前插记忆（幂等），再把 system 提到最前
+           (processed (hoist-system-message
+                       (if (memory-already-in-prompt-p prompt-messages history)
+                           prompt-messages
+                           (append history prompt-messages))))
+           (augmented (prompt-copy prompt :messages processed)))
+      ;; 本轮新增输入存入记忆（在 augmented 构造之后，不影响本次 prompt）
+      (let ((last-input (prompt-last-user-or-tool-message augmented)))
+        (when last-input
+          (memory-add memory cid (list last-input))))
+      (let* ((response (chain-next chain
                                    (client-request-copy request
                                                         :prompt augmented)))
              (assistant (chat-response-message
@@ -94,75 +168,21 @@ after： 模型的 assistant 回复存入记忆")
     (error "message-chat-memory-advisor 需要 :memory（chat-memory 实例）")))
 
 ;;; ============================================================
-;;; PromptChatMemoryAdvisor —— 提示词级会话记忆
-;;; ============================================================
-
-(defadvisor prompt-chat-memory-advisor
-    (:order 1000
-     :documentation "把会话历史渲染为文本追加进系统提示的记忆 Advisor
-（对标 PromptChatMemoryAdvisor）。适合不支持多轮消息的场景。")
-  (:slots ((memory
-            :initarg :memory
-            :reader advisor-memory
-            :documentation "chat-memory 实例（必填）")
-           (template
-            :initarg :template
-            :initform "~%~%以下是此前的对话记忆：~%~A"
-            :documentation "历史文本注入模板（一个 ~A 占位）")))
-  (:call (advisor request chain)
-    (let* ((memory (advisor-memory advisor))
-           (cid (request-conversation-id request))
-           (prompt (client-request-prompt request))
-           (history (memory-messages memory cid))
-           (new-messages (prompt-instruction-messages prompt)))
-      (memory-add memory cid new-messages)
-      (let* ((history-text
-               (format nil "~{~A~^~%~}"
-                       (mapcar (lambda (msg)
-                                 (format nil "~A: ~A"
-                                         (ecase (message-role msg)
-                                           (:user "USER")
-                                           (:assistant "ASSISTANT")
-                                           (:tool "TOOL"))
-                                         (message-text msg)))
-                               (remove-if #'system-message-p history))))
-             (system-text
-               (concatenate
-                'string
-                (let ((systems (prompt-system-messages prompt)))
-                  (if systems
-                      (format nil "~{~A~^~%~}" (mapcar #'message-text systems))
-                      ""))
-                (if (string= history-text "")
-                    ""
-                    (format nil (slot-value advisor 'template) history-text))))
-             (augmented (prompt-copy prompt
-                                     :messages (append
-                                                (when (string/= system-text "")
-                                                  (list (system-message system-text)))
-                                                new-messages)))
-             (response (chain-next chain
-                                   (client-request-copy request
-                                                        :prompt augmented)))
-             (assistant (chat-response-message
-                         (client-response-chat-response response))))
-        (when assistant
-          (memory-add memory cid (list assistant)))
-        response))))
-
-(defmethod initialize-instance :after ((advisor prompt-chat-memory-advisor) &key)
-  (unless (slot-boundp advisor 'memory)
-    (error "prompt-chat-memory-advisor 需要 :memory（chat-memory 实例）")))
-
-;;; ============================================================
 ;;; SafeGuardAdvisor —— 敏感词安全护栏
 ;;; ============================================================
 
 (defadvisor safe-guard-advisor
-    (:order -500
+    (:order +safe-guard-advisor-order+
      :documentation "敏感词护栏（对标 SafeGuardAdvisor）：
 用户输入命中敏感词时短路返回固定回复，不再调用模型。
-order 较小，位于记忆等 Advisor 之外，避免敏感输入进入记忆。")
+
+默认 order 位于记忆类 Advisor 之外，敏感输入不会进入记忆
+（Spring 默认 order 为 0，即工具循环内侧——差异说明见 advisor.lisp
+的排序常量一节）。传 :order 可覆盖：
+
+  ;; 每轮工具迭代都过护栏（含工具返回结果），对齐 Spring 的默认语义
+  (make-safe-guard-advisor :sensitive-words '(\"...\")
+                           :order (1+ +tool-calling-advisor-order+))")
   (:slots ((sensitive-words
             :initarg :sensitive-words
             :initform nil
