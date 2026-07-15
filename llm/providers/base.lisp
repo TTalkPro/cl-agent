@@ -136,23 +136,9 @@
                (base-provider-api-url provider)
                endpoint))
 
-(defun build-headers (provider api-key &key extra-headers)
-  "构建请求头
-
-参数：
-  PROVIDER      - 提供商实例
-  API-KEY       - API 密钥
-  EXTRA-HEADERS - 额外的请求头（可选，alist 格式）
-
-返回：
-  请求头 alist
-
-说明：
-  这是一个基础实现，各提供商通常需要自己的请求头构建函数"
-  (declare (ignore provider))
-  (let ((base-headers `(("Content-Type" . "application/json")
-                        ("x-api-key" . ,api-key))))
-    (append base-headers extra-headers)))
+;; 注：这里曾有 build-headers（硬编码 x-api-key 的"基础实现"），但无人
+;; 调用——各 provider 都有自己的请求头构建（build-anthropic-headers /
+;; provider-auth-headers），因为鉴权头各家不同。已删除。
 
 (defun make-http-request (url headers body &key (timeout 120))
   "发送 HTTP POST 请求

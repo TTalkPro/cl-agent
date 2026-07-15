@@ -489,13 +489,4 @@ SSE 格式：
       (incf (stream-iterator-current-index iterator))
       chunk)))
 
-(defun stream-has-more-p (iterator)
-  "检查是否还有更多内容
-
-参数：
-  ITERATOR - 流迭代器
-
-返回：
-  t 或 nil"
-  (< (stream-iterator-current-index iterator)
-     (length (stream-iterator-content-list iterator))))
+;; 注：这里曾有 stream-has-more-p（流迭代器的剩余判断），无人调用。已删除。
