@@ -162,8 +162,13 @@
          (msg (assistant-message
                (llm-response-content llm-response)
                :tool-calls tool-calls
-               :metadata (let ((reasoning (llm-response-reasoning llm-response)))
-                           (when reasoning (list :reasoning reasoning))))))
+               ;; :reasoning 是给人看的文本；:reasoning-blocks 是 provider 原生块
+               ;; （含签名），message->neutral 会把它带回请求——工具调用多轮
+               ;; 对话中 Anthropic 要求原样回传，丢了会被拒。
+               :metadata (let ((reasoning (llm-response-reasoning llm-response))
+                               (blocks (llm-response-reasoning-blocks llm-response)))
+                           (append (when reasoning (list :reasoning reasoning))
+                                   (when blocks (list :reasoning-blocks blocks)))))))
     (make-chat-response
      (make-generation msg :finish-reason (llm-response-finish-reason llm-response))
      :metadata (make-chat-response-metadata

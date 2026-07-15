@@ -232,17 +232,22 @@
   (list (list :role :user :content (message-text msg))))
 
 (defmethod message->neutral ((msg assistant-message))
-  (let ((calls (assistant-tool-calls msg)))
+  (let ((calls (assistant-tool-calls msg))
+        ;; provider 原生推理块（含签名）。Anthropic 要求工具调用对话的
+        ;; assistant 轮把 thinking 块原样回传，故必须穿过中立层。
+        ;; 对不产生此类块的 provider 恒为 NIL，不影响它们。
+        (reasoning-blocks (getf (message-metadata msg) :reasoning-blocks)))
     (list
-     (if calls
-         (list :role :assistant
-               :content (message-text msg)
-               :tool-calls (mapcar (lambda (tc)
-                                     (list :id (tool-call-id tc)
-                                           :name (tool-call-name tc)
-                                           :arguments (tool-call-arguments tc)))
-                                   calls))
-         (list :role :assistant :content (message-text msg))))))
+     (append
+      (list :role :assistant :content (message-text msg))
+      (when calls
+        (list :tool-calls (mapcar (lambda (tc)
+                                    (list :id (tool-call-id tc)
+                                          :name (tool-call-name tc)
+                                          :arguments (tool-call-arguments tc)))
+                                  calls)))
+      (when reasoning-blocks
+        (list :reasoning-blocks reasoning-blocks))))))
 
 (defmethod message->neutral ((msg tool-response-message))
   (mapcar (lambda (tr)
@@ -272,7 +277,10 @@
                               (make-tool-call :id (getf tc :id)
                                               :name (getf tc :name)
                                               :arguments (getf tc :arguments)))
-                            (getf plist :tool-calls))))
+                            (getf plist :tool-calls))
+        ;; 与 message->neutral 对称，保证 CLOS ↔ 中立往返不丢推理块
+        :metadata (let ((blocks (getf plist :reasoning-blocks)))
+                    (when blocks (list :reasoning-blocks blocks)))))
       (:tool
        (tool-response-message
         (list (make-tool-response :id (getf plist :tool-call-id)
