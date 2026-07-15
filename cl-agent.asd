@@ -76,6 +76,11 @@
                (:file "tests/test-chat-model")  ; ChatModel + 工具执行循环
                (:file "tests/test-memory")      ; ChatMemory / Repository
 
+               ;; Kernel + Filter 测试
+               (:file "tests/test-filter")          ; filter 机制 + build-chain
+               (:file "tests/test-kernel-skeleton") ; kernel 骨架 + 载体
+               (:file "tests/test-kernel-invoke")   ; invoke 原语 + 工具循环
+
                ;; ChatClient + Advisor tests
                (:file "tests/test-advisor")     ; Advisor 协议 / 链 / defadvisor
                (:file "tests/test-chat-client") ; ChatClient / chat 宏 / 集成
