@@ -117,15 +117,28 @@
    ;; ============================================================
    ;; Kernel + Filter（clj-agent kernel+filter 架构，全量对齐 Spring AI 2.0）
    ;; ============================================================
-    (:module "kernel"
-     :components
-     ((:file "package")              ; cl-agent.kernel 包定义
-      (:file "carriers")             ; 三链请求/响应载体
-      (:file "filter")               ; filter CLOS 类 + build-chain + defilter
-      (:file "kernel")               ; kernel CLOS 类 + build-kernel
-      (:file "conditions")           ; 工具故障分类条件体系
-      (:file "batch")                ; 批量工具执行（并行/:serial/故障路由）
-      (:file "invoke")))             ; invoke-chat/tool/turn + run-tool-loop
+     (:module "kernel"
+      :components
+      ((:file "package")              ; cl-agent.kernel 包定义
+       (:file "carriers")             ; 三链请求/响应载体
+       (:file "filter")               ; filter CLOS 类 + build-chain + defilter
+       (:file "kernel")               ; kernel CLOS 类 + build-kernel
+       (:file "conditions")           ; 工具故障分类条件体系
+       (:file "batch")                ; 批量工具执行（并行/:serial/故障路由）
+       (:file "invoke")               ; invoke-chat/tool/turn + run-tool-loop
+       ;; 内置 filter（P4）
+       (:module "filters"
+        :components
+        ((:file "memory")             ; memory-filter (:chat, 循环内首位)
+         (:file "logging")            ; logging-chat/tool-filter
+         (:file "safeguard")          ; safeguard-turn-filter (:turn)
+         (:file "validation")         ; validation-turn-filter + structured-output
+         (:file "re-reading")         ; re-reading-filter (:turn)
+         (:file "rag")                ; qa-turn-filter (:turn) + IRetriever
+         (:file "tool-search")        ; tool-search-filter (:chat) + IToolIndex
+         (:file "timeout")            ; timeout-filter (:tool)
+         (:file "approval")           ; approval-filter (:tool)
+         (:file "token-xform")))))   ; token-redact/hold-release (:token-xform)
 
    ;; ============================================================
    ;; ChatClient + Advisor（对标 org.springframework.ai.chat.client.*）

@@ -101,4 +101,34 @@
     #:semantic-tool-failure
     #:transient-tool-failure
     #:environment-tool-failure
-    #:classify-tool-error))
+    #:classify-tool-error
+
+    ;; ==================== 内置 Filter ====================
+    ;; Memory
+    #:memory-filter
+    ;; Logging
+    #:logging-chat-filter
+    #:logging-tool-filter
+    ;; Safeguard
+    #:safeguard-turn-filter
+    ;; Validation
+    #:validation-turn-filter
+    #:structured-output-validate-fn
+    #:strip-json-fences
+    ;; Re-reading
+    #:re-reading-filter
+    ;; RAG
+    #:retrieve
+    #:qa-turn-filter
+    ;; Tool-search
+    #:search-tools
+    #:keyword-tool-index
+    #:make-keyword-tool-index
+    #:tool-search-filter
+    ;; Timeout
+    #:timeout-filter
+    ;; Approval
+    #:approval-filter
+    ;; Token-xform
+    #:token-redact-filter
+    #:hold-release-filter))
