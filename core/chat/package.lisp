@@ -162,6 +162,8 @@
    #:tool-callback-definition
    #:tool-callback-function
    #:tool-callback-return-direct-p
+   #:tool-callback-serial-p
+   #:tool-callback-retry-p
    #:tool-callback-name
    #:tool-callback-call
    #:tool-callback->schema

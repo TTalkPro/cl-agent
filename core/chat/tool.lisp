@@ -138,10 +138,23 @@
     :initarg :return-direct
     :initform nil
     :reader tool-callback-return-direct-p
-    :documentation "为 T 时工具结果直接返回调用方，不再回传模型"))
+    :documentation "为 T 时工具结果直接返回调用方，不再回传模型")
+   (serial
+    :initarg :serial
+    :initform nil
+    :reader tool-callback-serial-p
+    :documentation "为 T 时该工具有副作用，批次内任一工具声明 :serial
+则整批退化按序执行（kernel invoke-tool-batch 用）")
+   (retry
+    :initarg :retry
+    :initform nil
+    :reader tool-callback-retry-p
+    :documentation "为 T 时瞬态故障（:transient）触发指数退避重试
+（kernel barrier routing 用）"))
   (:documentation "可执行工具（对标 ToolCallback / FunctionToolCallback）"))
 
-(defun make-tool-callback (function &key name (description "") parameters return-direct)
+(defun make-tool-callback (function &key name (description "") parameters
+                           return-direct serial retry)
   "从函数创建 tool-callback（对标 FunctionToolCallback.builder）。
 
 参数：
@@ -150,6 +163,8 @@
   DESCRIPTION   - 描述
   PARAMETERS    - 参数规格 ((name type description &key required-p default) ...)
   RETURN-DIRECT - 结果是否直接返回（不回传模型）
+  SERIAL        - 有副作用，批次内存在则整批按序执行
+  RETRY         - 瞬态故障触发指数退避重试
 
 示例：
   (make-tool-callback
@@ -164,7 +179,9 @@
                                                    :description description
                                                    :parameters parameters)
                  :function function
-                 :return-direct return-direct))
+                 :return-direct return-direct
+                 :serial serial
+                 :retry retry))
 
 (defun tool-callback-name (callback)
   "工具名称字符串"
@@ -327,20 +344,24 @@
 ;;; ============================================================
 
 (defun parse-deftool-body (name lambda-list body)
-  "解析 deftool body：docstring + (:param ...) / (:return-direct ...) 子句 + 函数体。
+  "解析 deftool body：docstring + (:param ...) / (:return-direct ...) /
+(:serial ...) / (:retry ...) 子句 + 函数体。
 
 返回：
-  (values description param-specs return-direct real-body)"
+  (values description param-specs return-direct serial retry real-body)"
   (let ((description nil)
         (param-specs nil)
         (return-direct nil)
+        (serial nil)
+        (retry nil)
         (rest body))
     ;; docstring
     (when (and (stringp (first rest)) (cdr rest))
       (setf description (pop rest)))
     ;; 选项子句
     (loop while (and (consp (first rest))
-                     (member (first (first rest)) '(:param :return-direct)))
+                     (member (first (first rest))
+                             '(:param :return-direct :serial :retry)))
           do (let ((clause (pop rest)))
                (ecase (first clause)
                  (:param
@@ -351,12 +372,17 @@
                                 :default default)
                           param-specs)))
                  (:return-direct
-                  (setf return-direct (second clause))))))
-    ;; lambda-list 校验：必须为空或 &key 风格（JSON 参数是命名参数）
+                  (setf return-direct (second clause)))
+                 (:serial
+                  (setf serial (second clause)))
+                 (:retry
+                  (setf retry (second clause))))))
+    ;; lambda-list 校验
     (when (and lambda-list (not (eq (first lambda-list) '&key)))
       (error "deftool ~A：lambda-list 必须为空或以 &key 开头（工具参数是命名参数），~
               收到 ~S" name lambda-list))
-    (values (or description "") (nreverse param-specs) return-direct rest)))
+    (values (or description "") (nreverse param-specs)
+            return-direct serial retry rest)))
 
 (defmacro deftool (name lambda-list &body body)
   "定义一个工具函数并注册为 tool-callback（对标 Spring AI @Tool）。
@@ -395,22 +421,21 @@ register-tool-callback 把它放进全局注册表——那是 opt-in 的逃生�
     (:param city :string \"城市名称\" :required t)
     (:param unit :string \"温度单位\")
     (format nil \"~A 的天气：22°C（~A），晴\" city unit))"
-  (multiple-value-bind (description param-specs return-direct real-body)
+  (multiple-value-bind (description param-specs return-direct serial retry real-body)
       (parse-deftool-body name lambda-list body)
     `(progn
        (defun ,name ,lambda-list
          ,description
          ,@real-body)
-       ;; 工具的身份 = 符号。callback 挂符号属性，不写全局注册表——
-       ;; 自动全局注册会让每个 deftool 都悄悄扩大攻击面，也让测试
-       ;; 相互污染（详见 register-tool-callback 的说明）。
        (setf (get ',name 'tool-callback)
              (make-tool-callback
               (lambda (&rest args) (apply #',name args))
               :name ',name
               :description ,description
               :parameters ',param-specs
-              :return-direct ,return-direct))
+              :return-direct ,return-direct
+              :serial ,serial
+              :retry ,retry))
        ',name)))
 
 ;;; ============================================================
