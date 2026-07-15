@@ -74,7 +74,14 @@
                      ;; tool_use 的 input 增量以 JSON 片段累积
                      ;; （start 自带的空 {} 占位丢弃，参照 clj 实现的坑）
                      :input-json (make-string-output-stream)
-                     :text (make-string-output-stream)))))
+                     :text (make-string-output-stream)
+                     ;; thinking 块按块累积思考与签名——Anthropic 要求
+                     ;; 后续轮次连同 signature 原样回传，只留全局文本不够
+                     :thinking (make-string-output-stream)
+                     :signature (make-string-output-stream)
+                     ;; redacted_thinking 的密文在 start 事件里（data 字段），
+                     ;; 没有后续增量，故保留原始块
+                     :raw block))))
 
       ;; 内容块增量
       ((string= event-type "content_block_delta")
@@ -100,8 +107,16 @@
            ((string= delta-type "thinking_delta")
             (let ((thinking (gethash "thinking" delta)))
               (when thinking
+                (when block
+                  (write-string thinking (getf block :thinking)))
                 (write-string thinking (astream-reasoning state))
-                (emit (list :reasoning-delta thinking))))))))
+                (emit (list :reasoning-delta thinking)))))
+           ;; 签名增量：thinking 块的密码学签名。不下发给调用方
+           ;; （对使用者无意义），但必须保留——回传时缺签名会被拒。
+           ((string= delta-type "signature_delta")
+            (let ((signature (gethash "signature" delta)))
+              (when (and signature block)
+                (write-string signature (getf block :signature))))))))
 
       ;; 内容块结束：tool_use 块解析累积的 JSON
       ((string= event-type "content_block_stop")
@@ -151,6 +166,24 @@ message_delta 顶层 usage（output_tokens）"
     (when (plusp (hash-table-count merged))
       merged)))
 
+(defun rebuild-thinking-block (block)
+  "把流式累积的 thinking 块还原为 Anthropic 原生形态（hash-table），
+供后续轮次原样回传。
+
+redacted_thinking 没有增量事件，直接返回 start 事件里的原始块。"
+  (if (equal (getf block :type) "redacted_thinking")
+      (getf block :raw)
+      (let ((ht (make-hash-table :test 'equal))
+            (thinking (get-output-stream-string (getf block :thinking)))
+            (signature (get-output-stream-string (getf block :signature))))
+        (setf (gethash "type" ht) "thinking")
+        (setf (gethash "thinking" ht) thinking)
+        ;; 签名缺失时不写该键：宁可让 API 明确报错，
+        ;; 也不要塞一个空签名让它以更隐晦的方式失败
+        (when (string/= signature "")
+          (setf (gethash "signature" ht) signature))
+        ht)))
+
 (defun build-anthropic-stream-response (state)
   "从最终累积状态构建统一 llm-response（与非流式调用兼容）"
   (when (astream-error state)
@@ -163,16 +196,23 @@ message_delta 顶层 usage（output_tokens）"
   (let* ((message (astream-message state))
          (text (get-output-stream-string (astream-text state)))
          (reasoning (get-output-stream-string (astream-reasoning state)))
+         (indices (sort (loop for k being the hash-keys of (astream-blocks state)
+                              collect k)
+                        #'<))
          (tool-calls
-           (loop for index in (sort (loop for k being the hash-keys
-                                            of (astream-blocks state)
-                                          collect k)
-                                    #'<)
+           (loop for index in indices
                  for block = (astream-block state index)
                  when (equal (getf block :type) "tool_use")
                    collect (list :id (getf block :id)
                                  :name (getf block :name)
-                                 :arguments (getf block :input)))))
+                                 :arguments (getf block :input))))
+         ;; 按原顺序还原 thinking 块（含签名），供多轮工具调用回传
+         (reasoning-blocks
+           (loop for index in indices
+                 for block = (astream-block state index)
+                 when (member (getf block :type) '("thinking" "redacted_thinking")
+                              :test #'equal)
+                   collect (rebuild-thinking-block block))))
     (cl-agent.core:make-llm-response
      :content text
      :tool-calls tool-calls
@@ -181,6 +221,7 @@ message_delta 顶层 usage（output_tokens）"
      :finish-reason (cl-agent.core:normalize-finish-reason
                      (astream-stop-reason state))
      :reasoning (when (string/= reasoning "") reasoning)
+     :reasoning-blocks reasoning-blocks
      :message-id (when message (gethash "id" message))
      :raw-response message)))
 
@@ -194,7 +235,8 @@ message_delta 顶层 usage（output_tokens）"
 (defmethod cl-agent.core:llm-chat-stream ((provider anthropic-provider) messages callback
                                           &key
                                           (max-tokens 4096)
-                                          (temperature 0.7)
+                                          ;; NIL 时不下发（SPI「存在才发送」契约）
+                                          temperature
                                           model
                                           tools
                                           system

@@ -92,7 +92,7 @@
 (defmethod cl-agent.llm:llm-chat ((provider anthropic-provider) messages
                                    &key
                                    (max-tokens 4096)
-                                   (temperature 0.7)
+                                   temperature
                                    model
                                    tools
                                    system
@@ -106,14 +106,20 @@
 参数：
   PROVIDER    - Anthropic 提供商实例
   MESSAGES    - 消息列表
-  MAX-TOKENS  - 最大 token 数（必需，默认 4096）
-  TEMPERATURE - 温度参数（可选，默认 0.7）
+  MAX-TOKENS  - 最大 token 数（Anthropic 强制要求该字段，故默认 4096）
+  TEMPERATURE - 温度参数（可选；NIL 时不下发，用服务端默认）
   MODEL       - 模型名称（可选）
   TOOLS       - 工具列表（可选）
   SYSTEM      - 系统提示（可选）
 
 返回：
-  响应 plist"
+  响应 plist
+
+注：除 MAX-TOKENS 外的可选参数遵循 SPI 的「存在才发送」契约——
+NIL 表示不下发该字段。此前 TEMPERATURE 默认 0.7 违反了该契约：
+调用方即使不设置温度也会被发出 temperature=0.7，既让 chat-options
+的「未设置」语义失效，也会在开启扩展思考时被 Anthropic 拒绝
+（扩展思考只接受 temperature=1）。"
 
   ;; 1. 构建请求体
   (let* ((request-body (build-anthropic-request-body
@@ -271,9 +277,16 @@
                    (push msg-hash other-messages))
                  (setf pending-tool-results nil)))
 
-             (build-tool-use-content (tool-calls text-content)
+             (build-tool-use-content (tool-calls text-content reasoning-blocks)
                "构建包含 tool_use 块的 content 数组"
                (let ((blocks nil))
+                 ;; thinking 块必须排在最前：Anthropic 要求扩展思考的
+                 ;; assistant 轮以 thinking 块开头，且在工具调用对话中连同
+                 ;; signature 原样回传，否则请求被拒。块由 provider 原样
+                 ;; 保留（见 extract-thinking-blocks / rebuild-thinking-block），
+                 ;; 此处不重建、不改写。
+                 (dolist (block reasoning-blocks)
+                   (push block blocks))
                  ;; 添加文本块（如果有）
                  (when (and text-content (not (string= text-content "")))
                    (let ((text-block (make-hash-table :test 'equal)))
@@ -313,7 +326,10 @@
                            (cdr msg)
                            (getf msg :content)))
               (tool-calls (when (consp (cdr msg)) (getf msg :tool-calls)))
-              (tool-call-id (when (consp (cdr msg)) (getf msg :tool-call-id))))
+              (tool-call-id (when (consp (cdr msg)) (getf msg :tool-call-id)))
+              ;; provider 原生推理块（含 signature），由 message->neutral 带过来
+              (reasoning-blocks (when (consp (cdr msg))
+                                  (getf msg :reasoning-blocks))))
           (cond
             ;; 系统消息
             ((member role '(:system "system" system) :test #'equalp)
@@ -338,7 +354,8 @@
                (setf (gethash "role" msg-hash) "assistant")
                (setf (gethash "content" msg-hash)
                      (build-tool-use-content tool-calls
-                                             (if (stringp content) content "")))
+                                             (if (stringp content) content "")
+                                             reasoning-blocks))
                (push msg-hash other-messages)))
 
             ;; 普通消息
@@ -463,6 +480,7 @@ CLOS 扩展点：Anthropic 兼容厂商（如 MiniMax）通过特化本泛型函
          (content (extract-text-content content-blocks))
          (tool-use (extract-tool-use content-blocks))
          (reasoning (extract-thinking-content content-blocks))
+         (reasoning-blocks (extract-thinking-blocks content-blocks))
          (usage (if (hash-table-p parsed)
                     (gethash "usage" parsed)
                     (getf parsed :usage)))
@@ -486,8 +504,16 @@ CLOS 扩展点：Anthropic 兼容厂商（如 MiniMax）通过特化本泛型函
      :model model-name
      :finish-reason (cl-agent.core:normalize-finish-reason stop-reason)
      :reasoning reasoning
+     :reasoning-blocks reasoning-blocks
      :message-id message-id
      :raw-response parsed)))
+
+(defun content-blocks->list (content-blocks)
+  "把 Anthropic 内容块归一化为 list（可能是 vector 或 list）"
+  (cond
+    ((vectorp content-blocks) (coerce content-blocks 'list))
+    ((listp content-blocks) content-blocks)
+    (t nil)))
 
 (defun extract-thinking-content (content-blocks)
   "提取 Anthropic thinking blocks（扩展思考）为 reasoning 字符串。
@@ -497,17 +523,31 @@ CLOS 扩展点：Anthropic 兼容厂商（如 MiniMax）通过特化本泛型函
 
 返回：
   拼接的 thinking 文本，没有则 NIL"
-  (let ((blocks (cond
-                  ((vectorp content-blocks) (coerce content-blocks 'list))
-                  ((listp content-blocks) content-blocks)
-                  (t nil)))
-        (thinking nil))
-    (dolist (block blocks)
+  (let ((thinking nil))
+    (dolist (block (content-blocks->list content-blocks))
       (when (and (hash-table-p block)
                  (equal (gethash "type" block) "thinking"))
         (push (gethash "thinking" block) thinking)))
     (when thinking
       (format nil "~{~A~^~%~}" (nreverse thinking)))))
+
+(defun extract-thinking-blocks (content-blocks)
+  "原样保留 thinking / redacted_thinking 块，供后续轮次回传。
+
+与 extract-thinking-content 的区别：那个函数只取思考*文本*，
+丢掉了 signature。而 Anthropic 要求工具调用对话的 assistant 轮
+必须把 thinking 块连同 signature 一起原样回传，仅凭文本无法重建。
+
+redacted_thinking 块（内容被加密）同样必须回传，故一并保留。
+
+返回：
+  hash-table 块的列表（保持原顺序），没有则 NIL"
+  (remove-if-not
+   (lambda (block)
+     (and (hash-table-p block)
+          (member (gethash "type" block) '("thinking" "redacted_thinking")
+                  :test #'equal)))
+   (content-blocks->list content-blocks)))
 
 (defun extract-text-content (content-blocks)
   "从内容块中提取文本

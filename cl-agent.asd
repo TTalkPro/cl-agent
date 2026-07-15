@@ -87,7 +87,9 @@
                ;; LLM provider tests
                (:file "tests/test-llm")
                (:file "tests/test-providers")  ; 新 provider / registry / 请求参数
-               (:file "tests/test-streaming")) ; SSE 流式处理器
+               (:file "tests/test-streaming")  ; SSE 流式处理器
+               ;; 复用 test-streaming 的事件驱动 harness，须排其后
+               (:file "tests/test-thinking-roundtrip")) ; 思考块回传 + SPI 契约
 
   :perform (asdf:test-op (op c)
              (uiop:symbol-call :fiveam :run! :cl-agent/tests)))
