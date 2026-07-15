@@ -33,7 +33,8 @@
   ;; - make-tool-response：chat 的语义是"工具响应消息"（id/name/text），
   ;;   kernel 的语义是"工具链响应载体"（result/writes/error）
   ;; - tool-response：同理，两个不同的类，必须 shadow 避免覆盖
-  (:shadow #:make-tool-response #:tool-response)
+  (:shadow #:make-tool-response #:tool-response
+           #:execute-tool-calls)
   (:import-from #:cl-agent.core
                 #:log-debug
                 #:log-info
@@ -86,6 +87,19 @@
     #:kernel-filters
     #:kernel-eligibility-fn
     #:kernel-settings
+    #:kernel-tool-manager
+
+    ;; ==================== ToolCallingManager ====================
+    #:tool-calling-manager
+    #:execute-tool-calls
+    #:make-tool-execution-result
+    #:sequential-tool-calling-manager
+    #:make-sequential-tool-calling-manager
+    #:virtual-thread-tool-calling-manager
+    #:make-virtual-thread-tool-calling-manager
+    #:thread-pool-tool-calling-manager
+    #:make-thread-pool-tool-calling-manager
+    #:default-tool-calling-manager
 
     ;; ==================== Invoke 原语 ====================
     #:invoke-chat

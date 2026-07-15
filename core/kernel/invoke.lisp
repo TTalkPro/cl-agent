@@ -135,9 +135,23 @@
                ((and (cl-agent.chat:chat-response-has-tool-calls-p response)
                      (funcall eligibility response context))
                 ;; 有工具调用：执行 → 追加消息 → 继续
-                (let* ((tool-calls (cl-agent.chat:chat-response-tool-calls response)))
-                  (multiple-value-bind (tool-results return-direct)
-                      (invoke-tool-batch kernel tool-calls options context)
+                (let* ((tool-calls (cl-agent.chat:chat-response-tool-calls response))
+                       ;; tool-manager nil-check：有 manager 走协议；nil 走原路径
+                       (tm (kernel-tool-manager kernel)))
+                  (if tm
+                      ;; === Manager 路径 ===
+                      (let* ((result (execute-tool-calls
+                                       tm kernel response
+                                       (list :tool-context context)))
+                             (tool-msg (cl-agent.chat:tool-response-message
+                                        (getf result :messages))))
+                        (setf messages
+                              (append messages
+                                      (list (cl-agent.chat:chat-response-message response)
+                                            tool-msg))))
+                      ;; === 原路径（invoke-tool-batch）===
+                      (multiple-value-bind (tool-results return-direct)
+                          (invoke-tool-batch kernel tool-calls options context)
                     (let ((tool-msg (cl-agent.chat:tool-response-message
                                      (mapcar (lambda (tr tc)
                                                (cl-agent.chat:make-tool-response
@@ -162,7 +176,7 @@
                           (setf messages
                                 (append messages
                                         (list (cl-agent.chat:chat-response-message response)
-                                              tool-msg))))))))
+                                              tool-msg)))))))))
                (t
                 ;; 无工具调用：最终响应
                 (return (make-turn-result :completed :response response

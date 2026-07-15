@@ -47,8 +47,14 @@
     :initarg :settings
     :initform nil
     :reader kernel-settings
-    :documentation "配置 alist（(:max-tool-iterations . 10) 等）"))
-  (:documentation "Kernel 聚合（model/tools/filters/settings）——无 memory。"))
+    :documentation "配置 alist（(:max-tool-iterations . 10) 等）")
+   (tool-manager
+    :initarg :tool-manager
+    :initform nil
+    :reader kernel-tool-manager
+    :documentation "ToolCallingManager 实例（可注入执行策略）。
+nil = 走 invoke-tool-batch 原路径；非 nil = 经 execute-tool-calls 协议。"))
+  (:documentation "Kernel 聚合（model/tools/filters/settings/tool-manager）——无 memory。"))
 
 (defmethod print-object ((kernel kernel) stream)
   (print-unreadable-object (kernel stream :type t)
@@ -60,7 +66,7 @@
 ;;; build-kernel
 ;;; =========================================================;;;
 
-(defun build-kernel (&key model tools filters eligibility-fn settings)
+(defun build-kernel (&key model tools filters eligibility-fn settings tool-manager)
   "构建 Kernel 实例。
 
 参数：
@@ -69,6 +75,9 @@
   - filters        filter 实例列表（注册顺序 = 执行顺序；缺省 nil）
   - eligibility-fn (response context) → boolean（缺省 (constantly t)）
   - settings       配置 alist（缺省 nil）
+  - tool-manager   ToolCallingManager 实例（缺省 nil = 走原路径；
+                   推荐 (make-virtual-thread-tool-calling-manager) 或
+                   (make-sequential-tool-calling-manager)）
 
 返回值：kernel 实例。"
   (make-instance 'kernel
@@ -76,4 +85,5 @@
                  :tools (or tools nil)
                  :filters (or filters nil)
                  :eligibility-fn (or eligibility-fn (constantly t))
-                 :settings (or settings nil)))
+                 :settings (or settings nil)
+                 :tool-manager tool-manager))

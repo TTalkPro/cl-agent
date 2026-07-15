@@ -123,9 +123,10 @@
        (:file "carriers")             ; 三链请求/响应载体
        (:file "filter")               ; filter CLOS 类 + build-chain + defilter
        (:file "kernel")               ; kernel CLOS 类 + build-kernel
-       (:file "conditions")           ; 工具故障分类条件体系
-       (:file "batch")                ; 批量工具执行（并行/:serial/故障路由）
-       (:file "invoke")               ; invoke-chat/tool/turn + run-tool-loop
+      (:file "conditions")           ; 工具故障分类条件体系
+      (:file "batch")                ; 批量工具执行（并行/:serial/故障路由）
+      (:file "tool-calling-manager") ; ToolCallingManager 协议 + 多实现
+      (:file "invoke")               ; invoke-chat/tool/turn + run-tool-loop
        ;; 内置 filter（P4）
        (:module "filters"
         :components
