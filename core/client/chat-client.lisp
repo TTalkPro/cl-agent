@@ -320,7 +320,10 @@ TEXT 可带 format 控制串。返回 spec。"
            (tool-ctx (chat-options-tool-context options)))
       (when tool-ctx
         (loop for (k v) on tool-ctx by #'cddr
-              do (setf (getf ctx k) v))))
+              do (setf (getf ctx k) v)))
+      ;; 把调用方 options 存入 context，供 run-tool-loop 合并到每次调用
+      (when options
+        (setf (getf ctx :caller-options) options)))
     ;; 调用 invoke-turn
     (let* ((turn-req (cl-agent.kernel:make-turn-request
                       messages :context ctx))
@@ -353,17 +356,34 @@ TEXT 可带 format 控制串。返回 spec。"
   (prompt-add-messages
    spec
    (system-message "请只输出 JSON，不要任何多余说明或 markdown 代码围栏。"))
-  (let ((text (call-content spec)))
-    ;; 剥离 markdown 围栏后解析
-    (let ((clean (string-trim '(#\Space #\Tab #\Newline #\Return) text)))
-      (when (and (> (length clean) 7)
-                 (string= clean "```json" :end1 7))
-        (setf clean (subseq clean 7))
-        (when (and (> (length clean) 3)
-                   (string= clean "```" :start2 (- (length clean) 3)))
-          (setf clean (subseq clean 0 (- (length clean) 3))))
-        (setf clean (string-trim '(#\Space #\Tab #\Newline #\Return) clean)))
-      (json-parse clean))))
+  (let* ((text (call-content spec))
+         (clean (strip-json-fences text)))
+    (json-parse clean)))
+
+(defun strip-json-fences (text)
+  "剥离 markdown 代码围栏（```json ... ```）。安全处理短字符串。"
+  (let ((trimmed (string-trim '(#\Space #\Tab #\Newline #\Return) text)))
+    (cond
+      ;; 匹配 ```json ... ``` 围栏
+       ((and (>= (length trimmed) 7)
+             (string= trimmed "```json" :end1 7))
+        (let* ((rest (subseq trimmed 7))
+               (rest (string-trim '(#\Space #\Tab #\Newline #\Return) rest)))
+          ;; 去掉尾部 ```
+          (if (and (>= (length rest) 3)
+                   (string= rest "```" :start1 (- (length rest) 3)))
+              (subseq rest 0 (- (length rest) 3))
+              rest)))
+      ;; 匹配 ``` ... ``` 围栏（无 json 前缀）
+       ((and (>= (length trimmed) 3)
+             (string= trimmed "```" :end1 3))
+        (let* ((rest (subseq trimmed 3))
+               (rest (string-trim '(#\Space #\Tab #\Newline #\Return) rest)))
+          (if (and (>= (length rest) 3)
+                   (string= rest "```" :start1 (- (length rest) 3)))
+              (subseq rest 0 (- (length rest) 3))
+              rest)))
+       (t trimmed))))
 
 (defun stream-content (spec on-chunk)
   "流式执行请求：每个文本增量回调 (on-chunk delta)。

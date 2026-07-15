@@ -119,11 +119,15 @@
   6. 否则（无 tool-calls 或未通过 eligibility）→ 返回 turn-result(:completed)
 
   最大循环次数从 kernel settings 取（缺省 10）。"
-  (let* ((max-iter (or (cdr (assoc :max-tool-iterations (kernel-settings kernel)))
-                       10))
-         (options (resolve-kernel-tools kernel))
-         (eligibility (kernel-eligibility-fn kernel))
-         (context (turn-request-context turn-request)))
+   (let* ((max-iter (or (cdr (assoc :max-tool-iterations (kernel-settings kernel)))
+                        10))
+          (context (turn-request-context turn-request))
+          (caller-options (getf context :caller-options))
+          (kernel-options (resolve-kernel-tools kernel))
+          (options (if caller-options
+                       (cl-agent.chat:merge-chat-options caller-options kernel-options)
+                       kernel-options))
+          (eligibility (kernel-eligibility-fn kernel)))
     (loop for iteration from 0
           with messages = (turn-request-messages turn-request)
           for prompt = (cl-agent.chat:make-prompt messages :options options)

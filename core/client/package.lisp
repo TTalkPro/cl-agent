@@ -115,29 +115,29 @@
     #:make-kernel-client
     #:chat-client-model
     #:client-kernel
-   ;; Builder
-   #:chat-client-builder
-   #:default-system
-   #:default-options
-   #:default-advisors
-   #:default-tools
-   #:build-client
-   ;; 请求 spec（fluent API）
-   #:chat-request-spec
-   #:client-prompt
-   #:prompt-system
-   #:prompt-user
-   #:prompt-add-messages
-   #:prompt-with-options
-   #:prompt-advisors
-   #:prompt-tools
-   #:prompt-context
-   #:prompt-conversation
-   ;; 终结操作
-   #:call-client-response
-   #:call-response
-   #:call-content
-   #:call-entity
-   #:stream-content
-   ;; DSL
-   #:chat))
+    ;; Builder
+    #:chat-client-builder
+    #:default-system
+    #:default-options
+    #:default-advisors                    ; deprecated（保留兼容，no-op）
+    #:default-tools
+    #:build-client
+    ;; 请求 spec（fluent API）
+    #:chat-request-spec
+    #:client-prompt
+    #:prompt-system
+    #:prompt-user
+    #:prompt-add-messages
+    #:prompt-with-options
+    #:prompt-advisors                     ; deprecated（保留兼容，no-op）
+    #:prompt-tools
+    #:prompt-context
+    #:prompt-conversation
+    ;; 终结操作
+    #:call-client-response
+    #:call-response
+    #:call-content
+    #:call-entity
+    #:stream-content
+    ;; DSL
+    #:chat))
