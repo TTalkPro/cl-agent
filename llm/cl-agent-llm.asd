@@ -44,10 +44,12 @@
    (:file "package")
 
    ;; 2. Schema converters and unified response
+   ;; 注：Anthropic 的转换器不在这里——它在 providers/anthropic.lisp
+   ;; （parse-messages-for-anthropic / convert-tools-to-anthropic /
+   ;; parse-anthropic-tool-use），请求路径只走那一份。
    (:module "schema"
     :components
     ((:file "openai")
-     (:file "anthropic")
      (:file "response")))    ; Unified response schema
 
    ;; 3. Provider base class

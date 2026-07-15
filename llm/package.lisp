@@ -147,12 +147,9 @@
    #:convert-message-to-openai
    #:convert-messages-to-openai
 
-   ;; Anthropic format
-   #:convert-tool-to-anthropic
-   #:convert-tools-to-anthropic-format
-   #:parse-anthropic-tool-calls
-   #:convert-message-to-anthropic
-   #:convert-messages-to-anthropic
+   ;; Anthropic format 的转换器不在此导出：它们是 cl-agent.llm.providers
+   ;; 的内部实现（parse-messages-for-anthropic 等），随 provider 演进，
+   ;; 不作为公开 API。
 
    ;; ==================== Unified Response Schema ====================
    ;; Response class
