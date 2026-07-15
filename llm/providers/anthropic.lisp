@@ -99,6 +99,7 @@
                                    top-p
                                    top-k
                                    stop
+                                   thinking
                                    extra-params
                                    &allow-other-keys)
   "发送聊天请求到 Anthropic
@@ -116,10 +117,18 @@
   响应 plist
 
 注：除 MAX-TOKENS 外的可选参数遵循 SPI 的「存在才发送」契约——
-NIL 表示不下发该字段。此前 TEMPERATURE 默认 0.7 违反了该契约：
-调用方即使不设置温度也会被发出 temperature=0.7，既让 chat-options
-的「未设置」语义失效，也会在开启扩展思考时被 Anthropic 拒绝
-（扩展思考只接受 temperature=1）。"
+NIL 表示不下发该字段。TEMPERATURE 此前默认 0.7，违反该契约：
+调用方即使不设置温度也会被发出 temperature=0.7。这不只是语义问题，
+按 Anthropic 官方文档会直接坏在两处：
+
+  1. temperature / top_p / top_k 在 Claude Opus 4.7 及以后（含 4.8）
+     不受支持，设为非默认值返回 400。文档原文要求「omit them from
+     request payloads」——自动注入 0.7 等于让这些模型完全不可用。
+  2. Claude 4.1 Opus / 4.5 Sonnet 起，temperature 与 top_p 不能同时
+     指定，否则 400「temperature and top_p cannot both be specified」。
+     调用方只要传 :top-p，就会被这个默认值连坐。
+
+参见 https://platform.claude.com/docs/en/build-with-claude/working-with-messages"
 
   ;; 1. 构建请求体
   (let* ((request-body (build-anthropic-request-body
@@ -133,6 +142,7 @@ NIL 表示不下发该字段。此前 TEMPERATURE 默认 0.7 违反了该契约�
                         :top-p top-p
                         :top-k top-k
                         :stop stop
+                        :thinking thinking
                         :extra-params extra-params))
 
          ;; 2. 构建 URL
@@ -163,6 +173,70 @@ NIL 表示不下发该字段。此前 TEMPERATURE 默认 0.7 违反了该契约�
 ;;; 请求构建
 ;;; ============================================================
 
+(define-condition invalid-thinking-config-error (error)
+  ((detail :initarg :detail :reader invalid-thinking-config-detail))
+  (:report (lambda (condition stream)
+             (format stream "扩展思考配置非法：~A" (invalid-thinking-config-detail condition))))
+  (:documentation "thinking 配置不符合 Anthropic 规格。
+
+宁可在构建请求时报出可定位的错误，也不要把非法配置发出去换一个
+裸 400（Anthropic 对 budget_tokens 的约束不会告诉你是哪一条违反了）。"))
+
+(defun thinking->anthropic (spec max-tokens)
+  "把中立的 thinking 规格翻译为 Anthropic wire 格式的 hash-table。
+
+规格（对标 ThinkingConfigParam 的三个变体）：
+  :disabled                                   → {\"type\":\"disabled\"}
+  :adaptive                                   → {\"type\":\"adaptive\"}
+  (:adaptive :display :omitted)               → + \"display\"
+  (:enabled :budget-tokens N)                 → {\"type\":\"enabled\",\"budget_tokens\":N}
+  (:enabled :budget-tokens N :display :omitted)
+  hash-table                                  → 原样返回（逃生通道）
+
+约束（来自官方文档，此处提前校验）：
+  budget_tokens 必须 ≥1024 且 < max_tokens——思考计入 max_tokens。"
+  (flet ((fail (fmt &rest args)
+           (error 'invalid-thinking-config-error
+                  :detail (apply #'format nil fmt args)))
+         (display->wire (display)
+           (when display
+             (unless (member display '(:summarized :omitted))
+               (error 'invalid-thinking-config-error
+                      :detail (format nil ":display 只能是 :summarized 或 :omitted，实际为 ~S"
+                                      display)))
+             (string-downcase (symbol-name display)))))
+    (let ((body (make-hash-table :test 'equal)))
+      (etypecase spec
+        ;; 逃生通道：调用方自己按 wire 格式给全，原样下发
+        (hash-table spec)
+        (keyword
+         (ecase spec
+           (:disabled (setf (gethash "type" body) "disabled"))
+           (:adaptive (setf (gethash "type" body) "adaptive"))
+           (:enabled (fail ":enabled 必须给出预算，写成 (:enabled :budget-tokens N)")))
+         body)
+        (cons
+         (destructuring-bind (kind &key budget-tokens display) spec
+           (ecase kind
+             (:disabled (setf (gethash "type" body) "disabled"))
+             (:adaptive
+              (setf (gethash "type" body) "adaptive")
+              (let ((d (display->wire display)))
+                (when d (setf (gethash "display" body) d))))
+             (:enabled
+              (unless (integerp budget-tokens)
+                (fail ":enabled 需要 :budget-tokens（整数），实际为 ~S" budget-tokens))
+              (when (< budget-tokens 1024)
+                (fail "budget-tokens 须 ≥1024，实际为 ~A" budget-tokens))
+              (when (and (integerp max-tokens) (>= budget-tokens max-tokens))
+                (fail "budget-tokens (~A) 须小于 max-tokens (~A)——思考计入 max-tokens"
+                      budget-tokens max-tokens))
+              (setf (gethash "type" body) "enabled")
+              (setf (gethash "budget_tokens" body) budget-tokens)
+              (let ((d (display->wire display)))
+                (when d (setf (gethash "display" body) d)))))
+           body))))))
+
 (defun build-anthropic-request-body (provider messages &key
                                                max-tokens
                                                temperature
@@ -172,6 +246,7 @@ NIL 表示不下发该字段。此前 TEMPERATURE 默认 0.7 违反了该契约�
                                                top-p
                                                top-k
                                                stop
+                                               thinking
                                                extra-params)
   "构建 Anthropic API 请求体
 
@@ -223,6 +298,10 @@ NIL 表示不下发该字段。此前 TEMPERATURE 默认 0.7 违反了该契约�
     (when stop
       (setf (gethash "stop_sequences" body)
             (if (listp stop) (coerce stop 'vector) stop)))
+
+    ;; 扩展思考（存在才发送）
+    (when thinking
+      (setf (gethash "thinking" body) (thinking->anthropic thinking max-tokens)))
 
     ;; 厂商专有参数逃生通道：最后并入，可覆盖任何字段
     (when extra-params

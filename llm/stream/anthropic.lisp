@@ -243,6 +243,7 @@ redacted_thinking 没有增量事件，直接返回 start 事件里的原始块�
                                           top-p
                                           top-k
                                           stop
+                                          thinking
                                           extra-params
                                           &allow-other-keys)
   "Anthropic 格式的真 SSE 流式实现（MiniMax 等子类继承）。
@@ -262,6 +263,7 @@ CALLBACK 收到 chunk plist：
                         :top-p top-p
                         :top-k top-k
                         :stop stop
+                        :thinking thinking
                         :extra-params extra-params))
          (url (cl-agent.llm:build-api-url
                provider
