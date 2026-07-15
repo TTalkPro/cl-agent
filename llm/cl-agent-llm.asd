@@ -90,11 +90,14 @@
    ;; 7. Service layer (response normalization)
    (:file "service")
 
-   ;; 7. Factory (registry, config, builder)
+   ;; 7. Factory (registry, builder)
+   ;; 注：曾有 config.lisp（provider 配置表 + 环境变量加载），但它是个
+   ;; 自封闭的死岛——6 个函数无一被 registry/builder/providers 调用，
+   ;; 表里的 temperature/model 默认值流不进任何请求，只会误导读者。已删除。
+   ;; API key 的读取实际发生在各 make-*-provider 里（读自家环境变量）。
    (:module "factory"
     :components
     ((:file "registry")
-     (:file "config")
      (:file "builder")))))
 
 ;; ============================================================
