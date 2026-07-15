@@ -85,8 +85,10 @@ Service 层负责将各 Provider 返回的原始响应转换为统一的 `llm-re
 (llm-response-tool-calls response)     ; 工具调用列表
 (llm-response-usage response)          ; Token 使用信息
 (llm-response-model response)          ; 模型名称
-(llm-response-finish-reason response)  ; 结束原因 (:stop, :tool-call, :length)
+(llm-response-finish-reason response)  ; 结束原因（见下）
 (llm-response-message-id response)     ; 消息 ID
+(llm-response-reasoning response)      ; 思维链文本
+(llm-response-reasoning-blocks response) ; provider 原生推理块（含签名）
 (llm-response-raw response)            ; 原始响应
 
 ;; 便捷谓词
@@ -99,16 +101,34 @@ Service 层负责将各 Provider 返回的原始响应转换为统一的 `llm-re
 (llm-response-total-tokens response)
 ```
 
-### 智谱特有：思维链
+`finish-reason` 已归一为四个关键字，与提供商原始取值无关：
+
+| 关键字 | 含义 | 提供商原始值示例 |
+|---|---|---|
+| `:stop` | 正常结束 | `stop` / `end_turn` / `stop_sequence` |
+| `:tool-call` | 请求调用工具 | `tool_calls` / `tool_use` |
+| `:max-tokens` | 达到 token 上限被截断 | `length` / `max_tokens` |
+| `:content-filter` | 内容过滤 | `content_filter` |
+
+> `llm-response-reasoning-blocks` 是 provider 原样保留的推理块（Anthropic 的
+> thinking 块含密码学 signature），**只用于在后续轮次原样回传**——工具调用
+> 对话中 Anthropic 要求 assistant 轮把它们不加修改地送回，否则 400。
+> 展示思维链请用 `llm-response-reasoning` 或下面的 `response-reasoning-content`。
+
+### llm-response 工具函数
+
+不限于某一提供商——各家的思维链/结束原因都已在 Service 层归一：
 
 ```lisp
-;; 提取智谱 AI 的思维链内容
+;; 提取思维链内容：GLM / DeepSeek 的 reasoning_content、Anthropic 的
+;; thinking 块都归到这里（并兼容旧版塞在 raw-response 里的形态）
 (response-reasoning-content response)
 ;; => "让我思考一下这个问题..."
 
-;; 检查响应是否完整
+;; 检查响应是否完整（未被截断）
+;; 接受 llm-response 或旧式 plist；未知类型返回 NIL
 (response-complete-p response)
-;; => T 或 NIL
+;; => T（:stop）/ NIL（被截断或其他原因）
 ```
 
 ## 快速开始

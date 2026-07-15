@@ -85,8 +85,10 @@ The Service layer normalizes raw provider responses into unified `llm-response` 
 (llm-response-tool-calls response)     ; Tool calls list
 (llm-response-usage response)          ; Token usage info
 (llm-response-model response)          ; Model name
-(llm-response-finish-reason response)  ; Finish reason (:stop, :tool-call, :length)
+(llm-response-finish-reason response)  ; Finish reason (see below)
 (llm-response-message-id response)     ; Message ID
+(llm-response-reasoning response)      ; Reasoning-chain text
+(llm-response-reasoning-blocks response) ; Provider-native reasoning blocks
 (llm-response-raw response)            ; Raw response
 
 ;; Convenience predicates
@@ -99,16 +101,39 @@ The Service layer normalizes raw provider responses into unified `llm-response` 
 (llm-response-total-tokens response)
 ```
 
-### ZhipuAI-specific: Reasoning Chain
+`finish-reason` is normalized to four keywords, independent of what the provider
+sent on the wire:
+
+| Keyword | Meaning | Example provider values |
+|---|---|---|
+| `:stop` | Normal completion | `stop` / `end_turn` / `stop_sequence` |
+| `:tool-call` | Model requested a tool | `tool_calls` / `tool_use` |
+| `:max-tokens` | Truncated at the token limit | `length` / `max_tokens` |
+| `:content-filter` | Content filtered | `content_filter` |
+
+> `llm-response-reasoning-blocks` holds the provider's reasoning blocks verbatim
+> (Anthropic thinking blocks carry a cryptographic signature). Its **only**
+> supported use is echoing them back unchanged on a later turn — Anthropic
+> *requires* the assistant turn of a tool-calling conversation to replay them, or
+> the request is rejected with a 400. To display the reasoning, use
+> `llm-response-reasoning` or `response-reasoning-content` below.
+
+### llm-response Utilities
+
+Not specific to any one provider — reasoning chains and finish reasons are
+normalized in the Service layer:
 
 ```lisp
-;; Extract ZhipuAI's reasoning chain content
+;; Extract reasoning-chain content: GLM / DeepSeek `reasoning_content` and
+;; Anthropic thinking blocks all land here (legacy raw-response form is
+;; still accepted).
 (response-reasoning-content response)
 ;; => "Let me think about this..."
 
-;; Check if response is complete
+;; Check whether the response is complete (not truncated).
+;; Accepts an llm-response or a legacy plist; returns NIL for anything else.
 (response-complete-p response)
-;; => T or NIL
+;; => T (:stop) / NIL (truncated or ended for another reason)
 ```
 
 ## Quick Start

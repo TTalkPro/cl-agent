@@ -30,6 +30,7 @@ API quick reference by package. Spring AI 2.0 counterparts noted per section.
 (prompt-last-user-text p)
 
 (make-chat-options :model "..." :temperature 0.3 :max-tokens 1024
+                   :thinking '(:enabled :budget-tokens 2048)  ; extended thinking
                    :tool-callbacks (list cb) :tool-names '("get_weather")
                    :tool-context '(:tenant "acme"))
 ;; tool-loop options moved to tool-calling-advisor (2.0 architecture)
@@ -37,6 +38,30 @@ API quick reference by package. Spring AI 2.0 counterparts noted per section.
 ```
 
 Options not explicitly passed are "unset" and fall back on merge.
+
+### Extended thinking (`:thinking`)
+
+Mirrors Spring AI's `ThinkingConfigParam`. A neutral spec that each provider
+translates into its own wire format:
+
+```lisp
+:thinking :disabled                      ; {"type":"disabled"}
+:thinking :adaptive                      ; {"type":"adaptive"} — model decides
+:thinking '(:adaptive :display :omitted)
+:thinking '(:enabled :budget-tokens 2048)
+:thinking '(:enabled :budget-tokens 2048 :display :omitted)
+:thinking <hash-table>                   ; sent verbatim (escape hatch)
+```
+
+- `:budget-tokens` must be **>= 1024 and less than `:max-tokens`** (thinking counts
+  towards `max-tokens`). Violations signal `invalid-thinking-config-error` while
+  building the request rather than shipping it for a bare 400.
+- `:display` is `:summarized` (default) or `:omitted`. `:omitted` redacts the
+  thinking text but **still returns the signature**, so multi-turn tool-calling
+  continuity is preserved.
+- Unset means the field is omitted entirely; the server default applies.
+- Implemented by the Anthropic-family providers (`anthropic` / `minimax`); other
+  providers ignore it.
 
 ### ChatResponse
 

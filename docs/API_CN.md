@@ -35,16 +35,40 @@
 (make-chat-options :model "..." :temperature 0.3 :max-tokens 1024
                    :top-p 0.9 :top-k 40 :stop-sequences '("END")
                    :frequency-penalty 0.0 :presence-penalty 0.0
+                   :thinking '(:enabled :budget-tokens 2048)  ; 扩展思考
                    :extra-params '(:seed 42)            ; 厂商专有参数逃生通道
                    :tool-callbacks (list cb) :tool-names '("get_weather")
                    :tool-context '(:tenant "acme"))
 ;; 工具循环选项已上移至 tool-calling-advisor（2.0 架构）
 (merge-chat-options runtime defaults)  ; 运行时覆盖默认；工具取并集
 (copy-chat-options options)
-;; 读取器：chat-options-model / -temperature / -max-tokens / ...
+;; 读取器：chat-options-model / -temperature / -max-tokens / -thinking / ...
 ```
 
 未显式传入的选项处于"未设置"状态，合并时回退默认值。
+
+### 扩展思考（:thinking）
+
+对标 Spring AI 的 `ThinkingConfigParam`。中立规格由 provider 翻译为自家 wire 格式：
+
+```lisp
+:thinking :disabled                      ; {"type":"disabled"}
+:thinking :adaptive                      ; {"type":"adaptive"} 由模型自行决定思考量
+:thinking '(:adaptive :display :omitted)
+:thinking '(:enabled :budget-tokens 2048)
+:thinking '(:enabled :budget-tokens 2048 :display :omitted)
+:thinking <hash-table>                   ; 原样下发（wire 格式先行于本实现时用）
+```
+
+- `:budget-tokens` 必须 **≥1024 且小于 `:max-tokens`**（思考计入 `max-tokens`）。
+  违反时在构建请求阶段就发 `invalid-thinking-config-error`，而不是发出去换一个裸 400。
+- `:display` 为 `:summarized`（默认）或 `:omitted`。`:omitted` 隐去思考内容但
+  **仍返回 signature**，多轮工具调用的延续性不受影响。
+- 未设置时不下发该字段，用服务端默认。
+- 目前由 Anthropic 系 provider（`anthropic` / `minimax`）实现；其它 provider 忽略。
+
+> MiniMax M 系列是常驻推理模型，思考计入输出 token。需要压缩输出成本或
+> 关闭思考时，用 `:thinking :disabled`。
 
 ### ChatResponse（`chat.model.ChatResponse`）
 
