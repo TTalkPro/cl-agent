@@ -182,6 +182,97 @@
     (is (= 2 (count '(:after :inner) (car log) :test #'equal)))))
 
 ;;; ============================================================
+;;; conversation-history-enabled（对标 2.0 的同名开关）
+;;; ============================================================
+
+(test advisor-conversation-history-enabled-by-default
+  "默认在循环内部维护完整会话历史：第二轮带上 assistant(tool-calls) + tool 结果"
+  (multiple-value-bind (client provider)
+      (make-tool-loop-client
+       (tool-call-response "test_adder" '(("a" . 3) ("b" . 4)))
+       (text-response "7"))
+    (cl-agent.client:chat client (:user "3+4=?") (:tools 'test-adder))
+    (let ((second-round (first (seq-provider-requests provider))))
+      ;; 完整历史：user + assistant(tool-calls) + tool 结果
+      (is (member :tool (getf second-round :messages)
+                  :key (lambda (m) (getf m :role))))
+      (is (member :assistant (getf second-round :messages)
+                  :key (lambda (m) (getf m :role)))))))
+
+(test advisor-conversation-history-disabled-trims-to-last
+  "关闭内部会话历史：下一轮只带 system + 最后一条消息"
+  (let* ((provider (make-seq-provider
+                    (tool-call-response "test_adder" '(("a" . 3) ("b" . 4)))
+                    (text-response "7")))
+         (client (cl-agent.client:make-chat-client
+                  (cl-agent.chat:make-provider-chat-model provider)
+                  :system "你是助手"
+                  :advisors (list (cl-agent.client:make-tool-calling-advisor
+                                   :conversation-history-enabled nil)))))
+    (cl-agent.client:chat client (:user "3+4=?") (:tools 'test-adder))
+    (let* ((second-round (first (seq-provider-requests provider)))
+           (roles (mapcar (lambda (m) (getf m :role))
+                          (getf second-round :messages))))
+      ;; 只剩 system + 最后一条（工具结果），中间的 user/assistant 被裁掉
+      (is (equal '(:system :tool) roles)))))
+
+;;; ============================================================
+;;; eligibility（对标 ToolExecutionEligibilityChecker）
+;;; ============================================================
+
+(test advisor-eligibility-can-suppress-tool-execution
+  "自定义 eligibility 返回 NIL 时不执行工具，带 tool-calls 的响应直接返回"
+  (let* ((provider (make-seq-provider
+                    (tool-call-response "test_adder" '(("a" . 1) ("b" . 1)))))
+         (client (cl-agent.client:make-chat-client
+                  (cl-agent.chat:make-provider-chat-model provider)
+                  :advisors (list (cl-agent.client:make-tool-calling-advisor
+                                   :eligibility (lambda (chat-response)
+                                                  (declare (ignore chat-response))
+                                                  nil)))))
+         (response (cl-agent.client:chat client
+                     (:user "1+1=?")
+                     (:tools 'test-adder)
+                     (:call :response))))
+    ;; 只调一次模型；工具未执行，tool-calls 原样返回给调用方
+    (is (= 1 (length (seq-provider-requests provider))))
+    (is (cl-agent.chat:chat-response-has-tool-calls-p response))))
+
+(test advisor-default-eligibility-predicate
+  "默认判定：响应为 NIL 或无 tool-calls 时不执行工具"
+  (is (not (cl-agent.client:default-tool-execution-eligible-p nil)))
+  (is (not (cl-agent.client:default-tool-execution-eligible-p
+            (cl-agent.chat:make-chat-response
+             (cl-agent.chat:make-generation
+              (cl-agent.chat:assistant-message "纯文本")))))))
+
+;;; ============================================================
+;;; next-instructions 钩子（对标 doGetNextInstructionsForToolCall）
+;;; ============================================================
+
+(defclass drop-tool-messages-advisor (cl-agent.client:tool-calling-advisor)
+  ()
+  (:documentation "测试用：把下一轮消息裁成只剩最后一条"))
+
+(defmethod cl-agent.client:tool-advisor-next-instructions
+    ((advisor drop-tool-messages-advisor) request response result)
+  (declare (ignore request response))
+  (last (cl-agent.chat:tool-execution-conversation-history result)))
+
+(test advisor-next-instructions-hook-rewrites-next-round
+  "特化 next-instructions 钩子即可改写下一轮的消息列表"
+  (let* ((provider (make-seq-provider
+                    (tool-call-response "test_adder" '(("a" . 3) ("b" . 4)))
+                    (text-response "7")))
+         (client (cl-agent.client:make-chat-client
+                  (cl-agent.chat:make-provider-chat-model provider)
+                  :advisors (list (make-instance 'drop-tool-messages-advisor)))))
+    (cl-agent.client:chat client (:user "3+4=?") (:tools 'test-adder))
+    (let ((second-round (first (seq-provider-requests provider))))
+      (is (= 1 (length (getf second-round :messages))))
+      (is (eq :tool (getf (first (getf second-round :messages)) :role))))))
+
+;;; ============================================================
 ;;; 流式工具循环
 ;;; ============================================================
 

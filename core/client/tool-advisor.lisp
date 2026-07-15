@@ -48,6 +48,14 @@ NIL 表示各 advisor 自建独立的顺序 manager（无共享状态）。
 否则新建一个顺序 manager"
   (or *tool-calling-manager* (make-default-tool-calling-manager)))
 
+(defun default-tool-execution-eligible-p (chat-response)
+  "默认的工具执行判定：响应非空且携带 tool-calls
+（对标 DEFAULT_TOOL_EXECUTION_ELIGIBILITY_CHECKER）。
+
+替换它可实现提供商特定的 stop-reason 逻辑，例如某些提供商
+即使 finish-reason 不是 tool_calls 也会返回工具调用。"
+  (and chat-response (chat-response-has-tool-calls-p chat-response)))
+
 (defclass tool-calling-advisor (advisor)
   ((manager
     :initarg :manager
@@ -59,18 +67,43 @@ NIL 表示各 advisor 自建独立的顺序 manager（无共享状态）。
     :initform 10
     :reader tool-advisor-max-iterations
     :documentation "工具循环最大轮数（超过发
-max-tool-iterations-exceeded-error）"))
+max-tool-iterations-exceeded-error）。
+
+注：Spring 的 ToolCallingAdvisor 没有轮数上限，一直循环到模型
+不再请求工具为止。此处的上限是防跑飞的额外保险。")
+   (eligibility
+    :initarg :eligibility
+    :initform #'default-tool-execution-eligible-p
+    :reader tool-advisor-eligibility
+    :documentation "(chat-response) → boolean，判定是否需要执行工具
+（对标 ToolExecutionEligibilityChecker）")
+   (conversation-history-enabled
+    :initarg :conversation-history-enabled
+    :initform t
+    :reader tool-advisor-conversation-history-enabled-p
+    :documentation "是否在循环内部维护完整会话历史（对标
+conversationHistoryEnabled，默认 T）。
+
+为 NIL 时下一轮只带 system + 最后一条消息，完整历史交给链上的
+记忆 Advisor 维护——此时*必须*在链中注册记忆 Advisor，
+否则模型将看不到工具调用的中间过程。"))
   (:default-initargs :order +tool-calling-advisor-order+)
   (:documentation "工具执行循环 Advisor（对标 ToolCallingAdvisor）"))
 
-(defun make-tool-calling-advisor (&rest initargs &key manager max-iterations order)
+(defun make-tool-calling-advisor (&rest initargs
+                                  &key manager max-iterations order
+                                       eligibility conversation-history-enabled)
   "创建 tool-calling-advisor。
 
 参数：
-  MANAGER        - 自定义 tool-calling-manager（可选）
-  MAX-ITERATIONS - 循环上限（默认 10）
-  ORDER          - 排序（默认 2000，记忆 Advisor 内侧）"
-  (declare (ignore manager max-iterations order))
+  MANAGER                      - 自定义 tool-calling-manager（可选）
+  MAX-ITERATIONS               - 循环上限（默认 10）
+  ORDER                        - 排序（默认 +tool-calling-advisor-order+）
+  ELIGIBILITY                  - (chat-response) → boolean 的工具执行判定
+                                 （默认 default-tool-execution-eligible-p）
+  CONVERSATION-HISTORY-ENABLED - 是否内部维护完整会话历史（默认 T）"
+  (declare (ignore manager max-iterations order
+                   eligibility conversation-history-enabled))
   (apply #'make-instance 'tool-calling-advisor initargs))
 
 ;;; ============================================================
@@ -125,6 +158,31 @@ max-tool-iterations-exceeded-error）"))
   (declare (ignore request))
   response)
 
+(defgeneric tool-advisor-next-instructions (advisor request response result)
+  (:documentation "工具执行完毕后，决定下一轮 prompt 的消息列表
+（对标 doGetNextInstructionsForToolCall）。
+
+参数：
+  REQUEST  - 本轮（已经过 before-call 处理的）请求
+  RESPONSE - 本轮携带 tool-calls 的响应
+  RESULT   - tool-execution-result
+
+默认行为取决于 conversation-history-enabled：
+  T   —— 返回完整会话历史（含本轮 assistant 与工具结果消息）
+  NIL —— 只返回 system + 最后一条消息，完整历史交给记忆 Advisor
+
+适合：裁剪工具结果、注入每轮提示。"))
+
+(defmethod tool-advisor-next-instructions ((advisor tool-calling-advisor)
+                                           request response result)
+  (declare (ignore response))
+  (let ((history (tool-execution-conversation-history result)))
+    (if (or (tool-advisor-conversation-history-enabled-p advisor)
+            (null history))
+        history
+        (append (prompt-system-messages (client-request-prompt request))
+                (last history)))))
+
 ;;; ============================================================
 ;;; 循环核心（call 与 stream 共用）
 ;;; ============================================================
@@ -153,7 +211,8 @@ max-tool-iterations-exceeded-error）"))
 钩子调用点：
   initialize-loop → [before-call → 下游 → after-call → 工具执行]* → finalize-loop"
   (let ((max-iterations (tool-advisor-max-iterations advisor))
-        (manager (tool-advisor-manager advisor)))
+        (manager (tool-advisor-manager advisor))
+        (eligible-p (tool-advisor-eligibility advisor)))
     (loop with current-request = (tool-advisor-initialize-loop advisor request)
           for iteration from 0
           do (when (> iteration max-iterations)
@@ -167,9 +226,9 @@ max-tool-iterations-exceeded-error）"))
                                iteration))
                     (chat-response (client-response-chat-response response))
                     (prompt (client-request-prompt current-request)))
-               (if (and (chat-response-has-tool-calls-p chat-response)
+               (if (and (funcall eligible-p chat-response)
                         (prompt-has-tools-p prompt))
-                   ;; 有工具调用：执行 → 会话历史组新 prompt → 重入下游
+                   ;; 有工具调用：执行 → 组下一轮 prompt → 重入下游
                    (let ((result (execute-tool-calls manager prompt chat-response)))
                      (if (tool-execution-return-direct-p result)
                          (return (tool-advisor-finalize-loop
@@ -181,8 +240,9 @@ max-tool-iterations-exceeded-error）"))
                                 current-request
                                 :prompt (prompt-copy
                                          prompt
-                                         :messages (tool-execution-conversation-history
-                                                    result))))))
+                                         :messages (tool-advisor-next-instructions
+                                                    advisor current-request
+                                                    response result))))))
                    ;; 无工具调用（或未配置工具）：最终响应
                    (return (tool-advisor-finalize-loop
                             advisor current-request response)))))))
