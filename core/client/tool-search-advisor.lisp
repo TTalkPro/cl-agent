@@ -207,7 +207,12 @@
                                                 terms)
                           when (plusp score)
                             collect (cons score cb)))
-            (sorted (mapcar #'cdr (sort scored #'> :key #'car))))
+            ;; stable-sort：同分极其常见（命中一个词都是 1 分），而截取
+            ;; max-results 决定了披露给模型的是哪几个工具。CL 的 sort 不
+            ;; 保证稳定，平局顺序将随实现而变——SBCL/CCL 目前对列表都用
+            ;; 归并排序、恰好稳定，但那是运气不是契约。用 stable-sort 让
+            ;; 平局保持工具的声明顺序，结果可复现。
+            (sorted (mapcar #'cdr (stable-sort scored #'> :key #'car))))
        (subseq sorted 0 (min max-results (length sorted)))))))
 
 (defun make-tool-search-callback (advisor context)
