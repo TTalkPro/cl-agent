@@ -70,6 +70,32 @@
                       :from-end t)))
     (when msg (message-text msg))))
 
+(defun prompt-last-user-or-tool-message (prompt)
+  "最后一条 user-message 或 tool-response-message（无则 NIL）
+（对标 Prompt#getLastUserOrToolResponseMessage）。
+
+记忆类 Advisor 用它确定「本轮新增的输入」——工具循环中
+最后一条输入可能是工具结果而非用户消息。"
+  (find-if (lambda (msg)
+             (or (user-message-p msg) (tool-response-message-p msg)))
+           (prompt-messages prompt)
+           :from-end t))
+
+(defun prompt-augment-last-user-message (prompt function)
+  "用 FUNCTION 改写最后一条 user-message 的文本，返回 prompt 副本
+（对标 Prompt#augmentUserMessage）。无 user-message 时原样返回。
+
+FUNCTION：(旧文本) → 新文本"
+  (let ((pos (position-if #'user-message-p (prompt-messages prompt)
+                          :from-end t)))
+    (if (null pos)
+        prompt
+        (let* ((messages (copy-list (prompt-messages prompt)))
+               (old (nth pos messages)))
+          (setf (nth pos messages)
+                (user-message (funcall function (message-text old))))
+          (prompt-copy prompt :messages messages)))))
+
 (defmethod print-object ((prompt prompt) stream)
   (print-unreadable-object (prompt stream :type t)
     (format stream "~A messages~@[ +options~]"

@@ -303,27 +303,27 @@ TEXT 可带 format 控制串。返回 spec。"
   "执行请求，返回文本内容（对标 call().content()）"
   (chat-response-text (call-response spec)))
 
-(defun strip-json-fences (text)
-  "剥掉 markdown 代码围栏，取出 JSON 文本"
-  (let* ((trimmed (string-trim '(#\Space #\Newline #\Return #\Tab) text))
-         (fence-start (search "```" trimmed)))
-    (if (and fence-start (zerop fence-start))
-        (let* ((first-newline (position #\Newline trimmed))
-               (fence-end (search "```" trimmed :from-end t)))
-          (if (and first-newline fence-end (> fence-end first-newline))
-              (string-trim '(#\Space #\Newline #\Return #\Tab)
-                           (subseq trimmed (1+ first-newline) fence-end))
-              trimmed))
-        trimmed)))
-
-(defun call-entity (spec)
+(defun call-entity (spec &key schema (max-repeat-attempts 3))
   "执行请求并把响应内容解析为结构化对象
-（对标 call().entity(...)，JSON → hash-table/list）。
+（对标 call().entity(...)，JSON → hash-table/vector）。
 
-自动追加输出格式指令，并容忍 markdown 代码围栏。"
+自动追加输出格式指令，并容忍 markdown 代码围栏。
+
+参数：
+  SCHEMA              - JSON Schema（字符串 / hash-table /
+                        params->json-schema 的 plist）。给出时自动挂载
+                        structured-output-validation-advisor：
+                        校验响应，不符合就带着校验错误让模型重试。
+  MAX-REPEAT-ATTEMPTS - 校验失败后的最大重试次数（默认 3，仅 SCHEMA 有效时生效）
+
+不传 SCHEMA 时行为与既往一致：只解析，不校验。"
   (prompt-add-messages
    spec
    (system-message "请只输出 JSON，不要任何多余说明或 markdown 代码围栏。"))
+  (when schema
+    (prompt-advisors spec (make-structured-output-validation-advisor
+                           :json-schema schema
+                           :max-repeat-attempts max-repeat-attempts)))
   (json-parse (strip-json-fences (call-content spec))))
 
 (defun stream-content (spec on-chunk)
@@ -351,8 +351,11 @@ TEXT 可带 format 控制串。返回 spec。"
     [(:tools 工具...)]
     [(:context 键 值)]
     [(:conversation 会话ID)]
-    [(:call :content | :response | :client-response | :entity)]
+    [(:call :content | :response | :client-response | :entity [schema])]
     [(:stream 回调)])
+
+(:call :entity schema) 会自动挂载 structured-output-validation-advisor：
+响应不符合 schema 时带着校验错误让模型重试（默认最多 3 次）。
 
 简写：(chat client \"你好\") ≡ (chat client (:user \"你好\"))
 
@@ -387,5 +390,9 @@ TEXT 可带 format 控制串。返回 spec。"
                    (:content `(call-content ,spec-var))
                    (:response `(call-response ,spec-var))
                    (:client-response `(call-client-response ,spec-var))
-                   (:entity `(call-entity ,spec-var))))
+                   (:entity (if (cddr terminal)
+                                `(call-entity ,spec-var
+                                              :schema ,(third terminal)
+                                              ,@(cdddr terminal))
+                                `(call-entity ,spec-var)))))
           (:stream `(stream-content ,spec-var ,(second terminal)))))))
