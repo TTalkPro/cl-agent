@@ -49,6 +49,8 @@
    #:make-advisor-chain
    #:chain-next
    #:chain-next-stream
+   #:chain-advisors
+   #:memory-advisor-p
    #:defadvisor
 
    ;; ==================== 排序常量 ====================

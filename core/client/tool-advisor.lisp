@@ -84,9 +84,20 @@ max-tool-iterations-exceeded-error）。
     :documentation "是否在循环内部维护完整会话历史（对标
 conversationHistoryEnabled，默认 T）。
 
-为 NIL 时下一轮只带 system + 最后一条消息，完整历史交给链上的
-记忆 Advisor 维护——此时*必须*在链中注册记忆 Advisor，
-否则模型将看不到工具调用的中间过程。"))
+为 NIL 时下一轮只带 system + 最后一条消息，完整历史交给记忆
+Advisor 重建。此时记忆 Advisor *必须位于本 Advisor 内侧*
+（order 大于本 advisor 的 order），否则它每次请求只执行一次，
+补不上每轮工具迭代的历史，下一轮 prompt 会退化成
+[system, 工具结果]——工具结果缺少对应的 assistant 工具调用消息，
+Anthropic 等提供商会直接返回 HTTP 400。
+
+  ;; 正确：记忆在工具循环内侧
+  (make-chat-client model
+    :advisors (list (make-message-chat-memory-advisor
+                     :memory mem
+                     :order (1+ +tool-calling-advisor-order+))
+                    (make-tool-calling-advisor
+                     :conversation-history-enabled nil)))"))
   (:default-initargs :order +tool-calling-advisor-order+)
   (:documentation "工具执行循环 Advisor（对标 ToolCallingAdvisor）"))
 
@@ -251,13 +262,30 @@ conversationHistoryEnabled，默认 T）。
 ;;; Advisor 协议实现
 ;;; ============================================================
 
+(defun check-history-handoff (advisor chain)
+  "关闭内部会话历史时，检查链上是否真有能重建历史的记忆 Advisor。
+
+记忆 Advisor 必须位于本 Advisor *内侧*才会每轮工具迭代都执行；
+放在外侧（默认 order）每次请求只跑一次，补不上中间轮次，
+下一轮 prompt 退化成 [system, 工具结果]，提供商会以 HTTP 400 拒绝。
+提前给出可定位的告警，而不是让调用方去猜一个裸的 400。"
+  (unless (tool-advisor-conversation-history-enabled-p advisor)
+    (unless (some #'memory-advisor-p (chain-advisors chain))
+      (log-warn "tool-calling-advisor 的 conversation-history-enabled 为 NIL，~
+但其内侧链上没有记忆 Advisor：下一轮 prompt 只会带 system + 最后一条消息，~
+提供商很可能拒绝（工具结果缺少对应的 assistant 工具调用消息）。~
+请注册 order 大于 ~A 的记忆 Advisor。"
+                (advisor-order advisor)))))
+
 (defmethod advise-call ((advisor tool-calling-advisor) request chain)
+  (check-history-handoff advisor chain)
   (run-tool-calling-loop advisor request
                          (lambda (req) (chain-next chain req))))
 
 (defmethod advise-stream ((advisor tool-calling-advisor) request chain on-chunk)
   "流式工具循环：每轮都走流式下游，文本增量全程透传
 （含中间轮次可能伴随 tool-calls 的说明文本）"
+  (check-history-handoff advisor chain)
   (run-tool-calling-loop advisor request
                          (lambda (req)
                            (chain-next-stream chain req on-chunk))))

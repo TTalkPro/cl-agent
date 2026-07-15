@@ -216,6 +216,42 @@
       ;; 只剩 system + 最后一条（工具结果），中间的 user/assistant 被裁掉
       (is (equal '(:system :tool) roles)))))
 
+(test advisor-history-disabled-with-inner-memory-rebuilds-history
+  "关闭内部历史 + 记忆 Advisor 在循环内侧：每轮迭代重建出合法的完整历史。
+
+这是 conversation-history-enabled NIL 的正确用法。记忆 Advisor 若放在
+默认 order（循环外）只会执行一次，下一轮 prompt 退化成 [system, 工具结果]，
+工具结果缺少对应的 assistant 工具调用消息，真实提供商会返回 HTTP 400。"
+  (let* ((provider (make-seq-provider
+                    (tool-call-response "test_adder" '(("a" . 3) ("b" . 4)))
+                    (text-response "7")))
+         (memory (cl-agent.chat:make-message-window-chat-memory))
+         (client (cl-agent.client:make-chat-client
+                  (cl-agent.chat:make-provider-chat-model provider)
+                  :system "你是助手"
+                  :advisors (list (cl-agent.client:make-message-chat-memory-advisor
+                                   :memory memory
+                                   :order (1+ cl-agent.client:+tool-calling-advisor-order+))
+                                  (cl-agent.client:make-tool-calling-advisor
+                                   :conversation-history-enabled nil)))))
+    (cl-agent.client:chat client (:user "3+4=?") (:tools 'test-adder))
+    (let* ((second-round (first (seq-provider-requests provider)))
+           (roles (mapcar (lambda (m) (getf m :role))
+                          (getf second-round :messages))))
+      ;; 记忆把 user 与 assistant(tool-calls) 补了回来，工具结果前有对应的工具调用
+      (is (equal '(:system :user :assistant :tool) roles)))))
+
+(test advisor-memory-advisor-marker
+  "memory-advisor-p 标记（对标 MemoryAdvisor 标记接口）：
+tool-calling-advisor 用它检查关闭内部历史时链上是否具备重建历史的能力"
+  (is (cl-agent.client:memory-advisor-p
+       (cl-agent.client:make-message-chat-memory-advisor
+        :memory (cl-agent.chat:make-message-window-chat-memory))))
+  (is (not (cl-agent.client:memory-advisor-p
+            (cl-agent.client:make-tool-calling-advisor))))
+  (is (not (cl-agent.client:memory-advisor-p
+            (cl-agent.client:make-simple-logger-advisor)))))
+
 ;;; ============================================================
 ;;; eligibility（对标 ToolExecutionEligibilityChecker）
 ;;; ============================================================

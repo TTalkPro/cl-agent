@@ -177,6 +177,14 @@
 (defmethod advisor-order ((advisor advisor))
   (slot-value advisor 'order))
 
+(defgeneric memory-advisor-p (advisor)
+  (:documentation "本 Advisor 是否负责维护会话历史
+（对标 Spring 的 MemoryAdvisor 标记接口）。
+
+自定义的记忆 Advisor 应特化本方法返回 T——
+tool-calling-advisor 用它检查链上是否具备维护历史的能力。")
+  (:method ((advisor t)) nil))
+
 (defgeneric advise-call (advisor request chain)
   (:documentation "环绕一次同步调用（对标 CallAdvisor#adviseCall）。
 

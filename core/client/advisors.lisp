@@ -167,6 +167,9 @@ after： 模型的 assistant 回复存入记忆
   (unless (slot-boundp advisor 'memory)
     (error "message-chat-memory-advisor 需要 :memory（chat-memory 实例）")))
 
+(defmethod memory-advisor-p ((advisor message-chat-memory-advisor))
+  t)
+
 ;;; ============================================================
 ;;; SafeGuardAdvisor —— 敏感词安全护栏
 ;;; ============================================================
