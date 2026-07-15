@@ -89,7 +89,7 @@
     (cl-agent.chat:chat-model-call
      model (cl-agent.chat:make-prompt
             "hi" :options (cl-agent.chat:make-chat-options
-                           :tool-names '("test_adder"))))
+                           :tool-names '(test-adder))))
     (let ((tools (getf (first (seq-provider-requests provider)) :tools)))
       (is (= 1 (length tools)))
       (is (string= "test_adder" (getf (first tools) :name))))))
@@ -103,7 +103,7 @@
                     model (cl-agent.chat:make-prompt
                            "1+1=?"
                            :options (cl-agent.chat:make-chat-options
-                                     :tool-names '("test_adder"))))))
+                                     :tool-names '(test-adder))))))
     (is-true (cl-agent.chat:chat-response-has-tool-calls-p response))
     ;; 只调用一轮：ChatModel 不执行工具
     (is (= 1 (length (seq-provider-requests provider))))))

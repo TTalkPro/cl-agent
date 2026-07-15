@@ -64,6 +64,20 @@
   "回读动态变量 *pt-request-id*（测 worker 绑定继承）"
   (format nil "ctx:~A" *pt-request-id*))
 
+(defun pt-prompt ()
+  "构造暴露全部 pt-* 工具的 prompt。
+
+工具执行只认本次请求 options 里暴露的工具（find-callback-for-call
+不再回退全局注册表）——这正是真实调用方要做的事。这些测试此前传的是
+不带 options 的 (make-prompt \"go\")，能跑通完全依赖那条已被移除的
+越权回退路径。"
+  (cl-agent.chat:make-prompt
+   "go"
+   :options (cl-agent.chat:make-chat-options
+             :tool-callbacks (cl-agent.chat:resolve-tool-callbacks
+                              '(pt-slow-a pt-slow-b pt-slow-c pt-echo
+                                pt-direct pt-boom pt-never pt-read-ctx)))))
+
 (defun pt-response (&rest names)
   "构造携带多个 tool-call 的 chat-response（无参工具）"
   (cl-agent.chat:make-chat-response
@@ -88,7 +102,7 @@
 
 (test parallel-matches-sequential
   "并行结果与顺序结果一致（内容、顺序）"
-  (let* ((prompt (cl-agent.chat:make-prompt "go"))
+  (let* ((prompt (pt-prompt))
          (response (pt-response "pt_echo" "pt_echo" "pt_echo"))
          ;; 每个 echo 参数不同：改造 response
          (response2 (cl-agent.chat:make-chat-response
@@ -115,7 +129,7 @@
 
 (test parallel-return-direct-union
   "任一 return-direct 工具 → result 标记 return-direct"
-  (let* ((prompt (cl-agent.chat:make-prompt "go"))
+  (let* ((prompt (pt-prompt))
          (response (pt-response "pt_echo" "pt_direct"))
          (par (cl-agent.chat:make-concurrent-tool-calling-manager)))
     (unwind-protect
@@ -135,7 +149,7 @@
 
 (test parallel-error-isolation
   "并行下单个工具报错不影响其他，错误转文本回传"
-  (let* ((prompt (cl-agent.chat:make-prompt "go"))
+  (let* ((prompt (pt-prompt))
          (response (pt-response "pt_boom" "pt_echo"))
          (response2 (cl-agent.chat:make-chat-response
                      (cl-agent.chat:make-generation
@@ -161,7 +175,7 @@
 
 (test parallel-actually-concurrent
   "三个各 sleep 0.2s 的工具并行执行，总耗时明显小于串行 0.6s"
-  (let* ((prompt (cl-agent.chat:make-prompt "go"))
+  (let* ((prompt (pt-prompt))
          (response (pt-response "pt_slow_a" "pt_slow_b" "pt_slow_c"))
          (par (cl-agent.chat:make-concurrent-tool-calling-manager :pool-size 3)))
     (unwind-protect
@@ -180,7 +194,7 @@
 
 (test parallel-single-tool-sequential
   "单个工具短路为顺序执行（不创建线程池）"
-  (let* ((prompt (cl-agent.chat:make-prompt "go"))
+  (let* ((prompt (pt-prompt))
          (response (pt-response "pt_echo"))
          (response2 (cl-agent.chat:make-chat-response
                      (cl-agent.chat:make-generation
@@ -202,7 +216,7 @@
 
 (test parallel-timeout
   "超时工具返回错误文本，不阻塞其余工具"
-  (let* ((prompt (cl-agent.chat:make-prompt "go"))
+  (let* ((prompt (pt-prompt))
          (response (pt-response "pt_never" "pt_echo"))
          (response2 (cl-agent.chat:make-chat-response
                      (cl-agent.chat:make-generation
@@ -230,7 +244,7 @@
     (is-false (cl-agent.chat:shutdown-tool-calling-manager par))
     ;; 触发一次并行执行创建内核
     (cl-agent.chat:execute-tool-calls
-     par (cl-agent.chat:make-prompt "go")
+     par (pt-prompt)
      (pt-response "pt_echo" "pt_echo"))
     (is-true (cl-agent.chat:shutdown-tool-calling-manager par))
     (is-false (cl-agent.chat:shutdown-tool-calling-manager par))))
@@ -260,7 +274,7 @@
     (cl-agent.chat:with-concurrent-tool-calling-manager (mgr :pool-size 2)
       (setf captured mgr)
       (cl-agent.chat:execute-tool-calls
-       mgr (cl-agent.chat:make-prompt "go")
+       mgr (pt-prompt)
        (pt-response "pt_echo" "pt_echo")))
     ;; 退出后内核已释放
     (is (null (cl-agent.chat::manager-kernel captured)))
@@ -270,7 +284,7 @@
      (cl-agent.chat:with-concurrent-tool-calling-manager (mgr)
        (setf captured mgr)
        (cl-agent.chat:execute-tool-calls
-        mgr (cl-agent.chat:make-prompt "go")
+        mgr (pt-prompt)
         (pt-response "pt_echo" "pt_echo"))
        (error "非局部退出")))
     (is (null (cl-agent.chat::manager-kernel captured)))))
@@ -350,7 +364,7 @@
   (result-texts
    (cl-agent.chat:execute-tool-calls
     manager
-    (cl-agent.chat:make-prompt "go")
+    (pt-prompt)
     (pt-response "pt_read_ctx" "pt_read_ctx"))))
 
 ;; 注：不存在「默认不继承」的端到端测试——未列入名单时的可见性本就

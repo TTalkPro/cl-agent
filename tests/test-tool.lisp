@@ -38,17 +38,34 @@
   "deftool 同时定义普通函数"
   (is (= 5 (test-adder :a 2 :b 3))))
 
-(test deftool-registers-callback
-  "deftool 注册到全局注册表（名称转下划线风格）"
-  (let ((callback (cl-agent.chat:find-tool-callback "test_adder")))
+(test deftool-has-no-global-side-effect
+  "deftool 不写全局注册表——工具的身份是它的符号。
+
+自动全局注册会让每个 deftool 悄悄扩大攻击面（模型报出名字即可执行
+从未暴露的工具），也让测试相互污染。对齐 clj-agent：deftool 生成
+defn + var 元数据，工具由 (build-kernel {:tools [#'foo]}) 显式传入。"
+  (let ((callback (cl-agent.chat:symbol-tool-callback 'test-adder)))
     (is-true callback)
     (is (string= "test_adder" (cl-agent.chat:tool-callback-name callback)))
-    ;; 符号属性也可取回
-    (is (eq callback (get 'test-adder 'cl-agent.chat::tool-callback)))))
+    ;; 未显式注册 → 全局表里查不到
+    (is (null (cl-agent.chat:find-tool-callback "test_adder")))))
+
+(test register-tool-callback-is-opt-in
+  "显式 register-tool-callback 后，字符串名才可解析（配置驱动场景）"
+  (let ((cb (cl-agent.chat:symbol-tool-callback 'test-adder)))
+    (is (null (cl-agent.chat:find-tool-callback "test_adder")))
+    (unwind-protect
+         (progn
+           (cl-agent.chat:register-tool-callback cb)
+           (is (eq cb (cl-agent.chat:find-tool-callback "test_adder")))
+           (is (equal (list cb) (cl-agent.chat:resolve-tool-callbacks
+                                 '("test_adder")))))
+      (cl-agent.chat:unregister-tool-callback "test_adder"))
+    (is (null (cl-agent.chat:find-tool-callback "test_adder")))))
 
 (test deftool-description-and-params
   "docstring 与 :param 子句进入 tool-definition"
-  (let* ((callback (cl-agent.chat:find-tool-callback 'test-adder))
+  (let* ((callback (cl-agent.chat:symbol-tool-callback 'test-adder))
          (def (cl-agent.chat:tool-callback-definition callback)))
     (is (string= "把两个数相加" (cl-agent.chat:tool-definition-description def)))
     (is (= 2 (length (cl-agent.chat:tool-definition-parameters def))))))
@@ -56,7 +73,7 @@
 (test deftool-schema
   "自动派生 provider schema"
   (let ((schema (cl-agent.chat:tool-callback->schema
-                 (cl-agent.chat:find-tool-callback 'test-adder))))
+                 (cl-agent.chat:symbol-tool-callback 'test-adder))))
     (is (string= "test_adder" (getf schema :name)))
     (let ((params (getf schema :parameters)))
       (is (equal '("a" "b") (getf params :required))))))
@@ -96,15 +113,19 @@
       (cl-agent.chat:tool-callback-call callback nil))))
 
 (test resolve-tool-callbacks
-  "解析工具引用：实例 / 符号 / 字符串"
+  "解析工具引用：实例 / 符号（deftool 的默认路径）"
   (let* ((inline-cb (cl-agent.chat:make-tool-callback
                      (lambda (&key) "x") :name "inline"))
          (resolved (cl-agent.chat:resolve-tool-callbacks
-                    (list inline-cb 'test-adder "test_adder"))))
-    (is (= 3 (length resolved)))
-    (is (eq inline-cb (first resolved))))
+                    (list inline-cb 'test-adder))))
+    (is (= 2 (length resolved)))
+    (is (eq inline-cb (first resolved)))
+    (is (string= "test_adder" (cl-agent.chat:tool-callback-name (second resolved)))))
   (signals cl-agent.chat:tool-not-found-error
-    (cl-agent.chat:resolve-tool-callbacks '("no_such_tool"))))
+    (cl-agent.chat:resolve-tool-callbacks '("no_such_tool")))
+  ;; 字符串引用需先显式注册——deftool 不再自动进全局表
+  (signals cl-agent.chat:tool-not-found-error
+    (cl-agent.chat:resolve-tool-callbacks '("test_adder"))))
 
 ;;; ============================================================
 ;;; 参数归一化
@@ -154,8 +175,11 @@
 (test manager-executes-calls
   "Manager 执行工具并返回 tool-execution-result（含完整会话历史）"
   (let* ((manager (cl-agent.chat:make-default-tool-calling-manager))
-         (prompt (cl-agent.chat:make-prompt "算一下"
-                                            :options (cl-agent.chat:make-chat-options)))
+         (prompt (cl-agent.chat:make-prompt
+                  "算一下"
+                  :options (cl-agent.chat:make-chat-options
+                            :tool-callbacks (cl-agent.chat:resolve-tool-callbacks
+                                             '(test-adder)))))
          (response (response-with-calls
                     (list "test_adder" '(:a 1 :b 2) "id-1")))
          (result (cl-agent.chat:execute-tool-calls manager prompt response)))
@@ -171,7 +195,11 @@
 (test manager-return-direct
   ":return-direct 工具触发直接返回标记"
   (let* ((manager (cl-agent.chat:make-default-tool-calling-manager))
-         (prompt (cl-agent.chat:make-prompt "test"))
+         (prompt (cl-agent.chat:make-prompt
+                  "test"
+                  :options (cl-agent.chat:make-chat-options
+                            :tool-callbacks (cl-agent.chat:resolve-tool-callbacks
+                                             '(test-direct-tool)))))
          (response (response-with-calls
                     (list "test_direct_tool" '(:text "hi") "id-1")))
          (result (cl-agent.chat:execute-tool-calls manager prompt response)))
@@ -184,7 +212,9 @@
          (prompt (cl-agent.chat:make-prompt
                   "test"
                   :options (cl-agent.chat:make-chat-options
-                            :tool-context '(:tenant "acme"))))
+                            :tool-context '(:tenant "acme")
+                            :tool-callbacks (cl-agent.chat:resolve-tool-callbacks
+                                             '(test-context-tool)))))
          (response (response-with-calls
                     (list "test_context_tool" '(:city "东京") "id-1")))
          (result (cl-agent.chat:execute-tool-calls manager prompt response)))
@@ -219,3 +249,61 @@
          (response (response-with-calls (list "ghost_tool" nil "id-1"))))
     (signals cl-agent.chat:tool-not-found-error
       (cl-agent.chat:execute-tool-calls manager prompt response))))
+
+;;; ============================================================
+;;; 工具暴露边界（越权回归）
+;;; ============================================================
+
+(defvar *secret-tool-fired* nil)
+
+(cl-agent.chat:deftool secret-tool (&key target)
+  "危险操作——本测试中从不暴露给模型"
+  (:param target :string "目标" :required t)
+  (setf *secret-tool-fired* target)
+  "已执行")
+
+(test unexposed-tool-is-never-executed
+  "模型报出一个未暴露的工具名时不得被执行——即便它已被显式注册到全局表。
+
+工具执行只认本次请求 options 里的工具。此前 find-callback-for-call 会
+回退查全局注册表，而 deftool 自动注册，于是任何 deftool 过的工具，
+模型只要报出名字就会被执行（提示注入下可直接利用的越权）。
+
+参照实现同样没有回退：clj-agent 的 find-function 只查 kernel 的
+:tool-vars 并抛异常；Spring 的 ToolCallbackResolver 默认为空。"
+  (let ((cb (cl-agent.chat:symbol-tool-callback 'secret-tool)))
+    (unwind-protect
+         (progn
+           ;; 最坏情况：即使它进了全局表，也不该被执行
+           (cl-agent.chat:register-tool-callback cb)
+           (setf *secret-tool-fired* nil)
+           (let* ((manager (cl-agent.chat:make-default-tool-calling-manager))
+                  ;; 本次请求只暴露 test-adder
+                  (prompt (cl-agent.chat:make-prompt
+                           "hi"
+                           :options (cl-agent.chat:make-chat-options
+                                     :tool-callbacks
+                                     (cl-agent.chat:resolve-tool-callbacks
+                                      '(test-adder)))))
+                  (response (response-with-calls
+                             (list "secret_tool" '(:target "alice") "id-1")))
+                  (result (cl-agent.chat:execute-tool-calls
+                           manager prompt response)))
+             (is (null *secret-tool-fired*)
+                 "未暴露的工具被执行了：越权回归")
+             ;; 错误转文本回传模型，对话不中断
+             (is (search "错误" (result-first-tool-text result)))))
+      (cl-agent.chat:unregister-tool-callback "secret_tool")
+      (setf *secret-tool-fired* nil))))
+
+(test exposed-tool-still-executes
+  "对照：暴露了的工具正常执行（确认上面的隔离不是把功能整个关掉了）"
+  (let* ((manager (cl-agent.chat:make-default-tool-calling-manager))
+         (prompt (cl-agent.chat:make-prompt
+                  "hi"
+                  :options (cl-agent.chat:make-chat-options
+                            :tool-callbacks (cl-agent.chat:resolve-tool-callbacks
+                                             '(test-adder)))))
+         (response (response-with-calls (list "test_adder" '(:a 2 :b 3) "id-1")))
+         (result (cl-agent.chat:execute-tool-calls manager prompt response)))
+    (is (string= "5" (result-first-tool-text result)))))
