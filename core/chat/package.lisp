@@ -41,6 +41,7 @@
                 #:llm-response-model
                 #:llm-response-finish-reason
                 #:llm-response-reasoning
+                #:llm-response-reasoning-blocks
                 #:llm-response-message-id
                 #:llm-response-raw
                 #:llm-tool-call-id

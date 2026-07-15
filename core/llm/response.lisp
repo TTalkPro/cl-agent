@@ -213,6 +213,22 @@ Returns:
     :type (or string null)
     :documentation "Reasoning/thinking content (DeepSeek/GLM reasoning_content,
 Anthropic thinking blocks)")
+   (reasoning-blocks
+    :initarg :reasoning-blocks
+    :accessor llm-response-reasoning-blocks
+    :initform nil
+    :type list
+    :documentation "Provider-native reasoning blocks, preserved verbatim for
+round-tripping. Opaque to the rest of the framework: the only supported use is
+echoing them back unchanged on a later turn.
+
+Why this exists separately from REASONING: that slot holds display text, which
+is lossy. Anthropic's extended thinking blocks carry a cryptographic SIGNATURE,
+and the API *requires* the assistant turn of a tool-calling conversation to
+replay the thinking blocks verbatim, signature included. Reconstructing them
+from the text alone is impossible, so the raw blocks are kept here.
+
+NIL for providers that emit no such blocks.")
    (message-id
     :initarg :message-id
     :accessor llm-response-message-id
@@ -250,19 +266,22 @@ Finish Reason:
                                model
                                finish-reason
                                reasoning
+                               reasoning-blocks
                                message-id
                                raw-response)
   "Create an llm-response instance.
 
 Parameters:
-  CONTENT       - Text content
-  TOOL-CALLS    - List of llm-tool-call objects or plists (converted automatically)
-  USAGE         - llm-usage object, plist or hash-table (converted automatically)
-  MODEL         - Model name string
-  FINISH-REASON - Finish reason keyword
-  REASONING     - Reasoning/thinking content (optional)
-  MESSAGE-ID    - Provider message ID
-  RAW-RESPONSE  - Raw provider response
+  CONTENT          - Text content
+  TOOL-CALLS       - List of llm-tool-call objects or plists (converted automatically)
+  USAGE            - llm-usage object, plist or hash-table (converted automatically)
+  MODEL            - Model name string
+  FINISH-REASON    - Finish reason keyword
+  REASONING        - Reasoning/thinking display text (optional)
+  REASONING-BLOCKS - Provider-native reasoning blocks kept verbatim for
+                     round-tripping (optional; see the slot's documentation)
+  MESSAGE-ID       - Provider message ID
+  RAW-RESPONSE     - Raw provider response
 
 Returns:
   llm-response instance"
@@ -281,6 +300,7 @@ Returns:
                  :model model
                  :finish-reason finish-reason
                  :reasoning reasoning
+                 :reasoning-blocks reasoning-blocks
                  :message-id message-id
                  :raw-response raw-response))
 
