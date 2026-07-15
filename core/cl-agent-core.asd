@@ -52,7 +52,15 @@
    (:file "conditions")           ; Condition system
    (:file "macros")               ; Utility macros
    (:file "types")                ; Core data types
-   (:file "documentation")        ; Documentation system
+   ;; 注：曾有 documentation.lisp（「文档宏系统」：defsection /
+   ;; defun-documented / defstruct-documented 等 11 个宏与函数）。
+   ;; 11 个符号全部零使用，也没有任何文档生成器消费它们，而且其中
+   ;; 两个从提交起就没工作过——defsection 的 lambda list 缺 &body body
+   ;; 却在展开体里用 ,@body（macroexpand 即报 unbound BODY）；
+   ;; defstruct-documented 的字符串形态漏了守卫（对字符串 getf）。
+   ;; 无人调用 → 无人执行 → 无人发现。它们还都被 export 出去，
+   ;; 照导出列表使用的人会直接撞上。已整体删除。
+   ;; 文档请写在各自的 docstring 里，包导出用 defpackage 的 :export。
    (:file "utils")                ; Utility functions
    (:file "validation")           ; Data validation
    (:file "dependency-injection") ; DI container（独立设施，protocols 系统使用）
