@@ -43,19 +43,19 @@
   (;; 1. Package definition
    (:file "package")
 
-   ;; 2. Unified response schema（纯文档，实现在 core/llm/response.lisp）
-   ;;
-   ;; 这里曾有 openai.lisp / anthropic.lisp 两份「schema 转换器」，
-   ;; 但请求路径从不经过它们——真正在用的是 providers/ 下的同名近亲：
-   ;;   convert-messages-for-openai   （providers/define-provider.lisp）
-   ;;   parse-messages-for-anthropic  （providers/anthropic.lisp）
-   ;; 两份死实现只差一个介词（-to- vs -for-），改错一边不会有任何报错，
-   ;; 已删除。新增 provider 侧转换逻辑请直接写在 providers/ 下。
-   (:module "schema"
-    :components
-    ((:file "response")))    ; Unified response schema
+   ;; 注：曾有 schema/ 模块，现已整体移除。
+   ;;   - schema/openai.lisp、schema/anthropic.lisp：请求路径从不经过的死副本，
+   ;;     与真正在用的 providers/ 下同名近亲只差一个介词
+   ;;     （convert-messages-**to**-openai vs convert-messages-**for**-openai；
+   ;;      convert-messages-**to**-anthropic vs parse-messages-**for**-anthropic），
+   ;;     改错一边不会有任何报错。
+   ;;   - schema/response.lisp：58 行注释、1 行代码（in-package），自称
+   ;;     "exists for documentation purposes"。注释双向漂移——列了并不存在的
+   ;;     llm-response-to-plist，又漏了真有的 reasoning / reasoning-blocks。
+   ;; 统一响应 schema 的实现在 core/llm/response.lisp，以 docstring 为准；
+   ;; provider 侧的 wire 转换写在 providers/ 下。
 
-   ;; 3. Provider base class
+   ;; 2. Provider base class
    (:module "provider-base"
     :pathname "providers/"
     :components ((:file "base")))

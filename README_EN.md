@@ -146,6 +146,8 @@ advisors, fluent pipeline, structured output, and streaming.
 
 - [Quick Start](docs/QUICKSTART.md)
 - [API Reference](docs/API.md)
+- [Tool Calling Architecture](docs/tool-calling.md) — advisor/manager split,
+  Spring AI 2.0 mapping, and known divergences
 
 ## License
 

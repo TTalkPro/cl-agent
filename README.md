@@ -152,6 +152,8 @@ fluent 管道、结构化输出与流式。
 
 - [快速开始指南](docs/QUICKSTART_CN.md)
 - [API 参考](docs/API_CN.md)
+- [工具调用架构](docs/tool-calling_CN.md) —— Advisor 与 Manager 的分工、
+  Spring AI 2.0 对应关系与已知偏差
 
 ## 许可证
 

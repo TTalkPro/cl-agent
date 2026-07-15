@@ -25,6 +25,12 @@
 (defclass anthropic-provider (cl-agent.llm:base-provider)
   ((api-key :initarg :api-key
             :reader anthropic-provider-api-key
+            ;; 同时实现 cl-agent.core:provider-api-key 协议——调用方（如
+            ;; make-client）据此统一向 provider 取 key，无需再维护一张
+            ;; 「provider → 环境变量名」的手写表。openai-compat 系早已用
+            ;; :accessor provider-api-key 实现了它，此前只有 Anthropic 系
+            ;; （含 minimax）缺席，于是它们在 make-client 里取不到 key。
+            :reader cl-agent.core:provider-api-key
             :documentation "Anthropic API 密钥")
    (anthropic-version :initarg :anthropic-version
                       :initform "2023-06-01"

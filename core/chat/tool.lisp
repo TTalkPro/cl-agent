@@ -58,9 +58,28 @@
 
 (define-condition tool-not-found-error (error)
   ((tool-name :initarg :tool-name :reader tool-not-found-error-tool-name))
+  ;; 符号名**显式带包**打印。工具的身份是符号，而符号带包作用域——跨包引用
+  ;; 是本设计最常见的绊脚点：别的包里 'get-weather 读出来是
+  ;; THAT-PKG::GET-WEATHER，与定义处的符号并非同一对象。此时报「找不到工具：
+  ;; GET-WEATHER」最误导人——调用方明明定义了 get-weather。
+  ;;
+  ;; 既不能用 ~A（绑定 *print-escape* 为 NIL，直接抹掉包前缀），也不能只靠 ~S
+  ;; （只在符号于当前 *package* 中不可访问时才加前缀——而报错现场往往正是
+  ;; 那个包，于是前缀照样不出现）。只有显式拼 package-name 才稳定可见。
   (:report (lambda (condition stream)
-             (format stream "找不到工具：~A"
-                     (tool-not-found-error-tool-name condition)))))
+             (let ((name (tool-not-found-error-tool-name condition)))
+               (format stream "找不到工具：~A"
+                       (if (and (symbolp name) (not (keywordp name))
+                                (symbol-package name))
+                           (format nil "~A::~A"
+                                   (package-name (symbol-package name))
+                                   (symbol-name name))
+                           (format nil "~S" name)))
+               (when (and (symbolp name) (not (keywordp name)))
+                 (format stream "~%提示：工具的身份是符号，带包作用域。~
+若它定义在别的包，需在那边导出、这边用包限定引用（'other-pkg:~(~A~)）~
+或 :use 那个包。"
+                         (symbol-name name)))))))
 
 ;;; ============================================================
 ;;; ToolDefinition

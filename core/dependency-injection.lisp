@@ -21,6 +21,43 @@
 (in-package :cl-agent.core)
 
 ;;; ============================================================
+;;; 请求作用域
+;;; ============================================================
+
+(define-condition di-request-scope-not-active-error (error)
+  ((service-name :initarg :service-name :reader di-request-scope-service-name))
+  (:report (lambda (condition stream)
+             (format stream "服务 ~S 声明为 :request 作用域，但当前不在请求作用域内。~@
+请用 (with-di-request-scope ...) 包裹，例如每个 HTTP 请求的处理入口。"
+                     (di-request-scope-service-name condition))))
+  (:documentation "在 with-di-request-scope 之外解析 :request 作用域的服务。
+
+宁可报错也不静默退化：此前 :request 未实现，落到和 :prototype 相同的分支
+（每次 resolve 都新建实例）——声明的语义是「请求内共享」，实际行为却相反，
+且毫无提示。对标 Spring 的 ScopeNotActiveException。"))
+
+(defvar *di-request-cache* nil
+  "当前请求作用域的实例缓存（name → instance）；NIL 表示不在请求作用域内。
+
+动态绑定 ⇒ 天然线程隔离：每个线程在自己的 with-di-request-scope 里
+持有自己的缓存，互不可见。")
+
+(defmacro with-di-request-scope (&body body)
+  "在 BODY 内开启一个请求作用域。
+
+:request 作用域的服务在同一动态范围内共享实例，跨范围各自独立：
+
+  (with-di-request-scope
+    (let ((a (di-resolve container :db-conn))
+          (b (di-resolve container :db-conn)))
+      (eq a b)))                          ; => T，同一请求内共享
+  ;; 另一个 with-di-request-scope 里会拿到新的实例
+
+嵌套时内层建立新作用域（内层解析不会看到外层的实例）。"
+  `(let ((*di-request-cache* (make-hash-table :test #'equal)))
+     ,@body))
+
+;;; ============================================================
 ;;; 导出符号
 ;;; ============================================================
 
@@ -42,7 +79,12 @@
           di-resolve-or-default
           di-list-services
           di-container-stats
-          di-print-container))
+          di-print-container
+          ;; 请求作用域
+          with-di-request-scope
+          di-request-scope-not-active-error
+          di-request-scope-service-name
+          *di-request-cache*))
 
 ;;; ============================================================
 ;;; DI 容器类
@@ -73,7 +115,7 @@
   作用域类型：
     - :singleton - 单例模式（默认）
     - :prototype - 原型模式（每次创建新实例）
-    - :request - 请求作用域（未实现）
+    - :request - 请求作用域（同一 with-di-request-scope 内共享实例）
 
   示例：
     (let ((container (make-di-container)))
@@ -241,7 +283,7 @@
   3. 根据作用域创建或返回实例：
      - :singleton - 单例，从缓存获取或创建并缓存
      - :prototype - 原型，每次创建新实例
-     - :request - 请求作用域（未实现）
+     - :request - 请求作用域（同一 with-di-request-scope 内共享实例）
 
 示例：
   (di-resolve container :database)
@@ -310,10 +352,17 @@
                (funcall factory)))
 
           (:request
-           ;; 请求作用域：未实现
-           (if params
-               (apply factory params)
-               (funcall factory)))
+           ;; 请求作用域：同一 with-di-request-scope 动态范围内共享实例，
+           ;; 跨请求各自独立。缓存是动态绑定的，因此天然线程隔离——
+           ;; 每个线程在自己的 with-di-request-scope 里有自己的缓存。
+           (unless *di-request-cache*
+             (error 'di-request-scope-not-active-error :service-name binding-name))
+           (multiple-value-bind (instance cached-p)
+               (gethash binding-name *di-request-cache*)
+             (if cached-p
+                 instance
+                 (setf (gethash binding-name *di-request-cache*)
+                       (if params (apply factory params) (funcall factory))))))
 
           (otherwise
            (error "Unknown scope: ~A" scope)))))))

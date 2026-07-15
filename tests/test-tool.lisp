@@ -307,3 +307,44 @@ defn + var 元数据，工具由 (build-kernel {:tools [#'foo]}) 显式传入。
          (response (response-with-calls (list "test_adder" '(:a 2 :b 3) "id-1")))
          (result (cl-agent.chat:execute-tool-calls manager prompt response)))
     (is (string= "5" (result-first-tool-text result)))))
+
+;;; ============================================================
+;;; 跨包引用（符号身份带包作用域）
+;;; ============================================================
+
+(defpackage #:cl-agent/tests.tool-pkg
+  (:use #:cl)
+  (:export #:pkg-weather))
+
+(in-package #:cl-agent/tests.tool-pkg)
+(cl-agent.chat:deftool pkg-weather (&key city)
+  "另一个包里定义的工具"
+  (:param city :string "城市" :required t)
+  (format nil "~A：晴" city))
+(in-package :cl-agent/tests)
+
+(test cross-package-tool-reference
+  "工具的身份是符号，带包作用域——跨包必须用包限定或 :use。
+
+别的包里 'pkg-weather 读出来是本包的符号，与定义处并非同一对象。
+这与 clj-agent 同构（跨 ns 需 #'other-ns/foo 或 :require :refer）。"
+  ;; 包限定 → 同一符号 → 可解析
+  (is (string= "pkg_weather"
+               (cl-agent.chat:tool-callback-name
+                (first (cl-agent.chat:resolve-tool-callbacks
+                        '(cl-agent/tests.tool-pkg:pkg-weather))))))
+  ;; 本包同名符号是另一个对象 → 解析失败
+  (is (not (eq 'pkg-weather 'cl-agent/tests.tool-pkg:pkg-weather)))
+  (signals cl-agent.chat:tool-not-found-error
+    (cl-agent.chat:resolve-tool-callbacks '(pkg-weather))))
+
+(test tool-not-found-error-reveals-package
+  "报错必须显式带包名——跨包引用是本设计最常见的绊脚点，
+而 ~A 会抹掉包前缀、~S 在报错现场恰好是该包时也不显示前缀，
+两者都会报出误导性的「找不到工具：PKG-WEATHER」。"
+  (let ((message (handler-case
+                     (progn (cl-agent.chat:resolve-tool-callbacks '(pkg-weather)) nil)
+                   (cl-agent.chat:tool-not-found-error (e) (princ-to-string e)))))
+    (is (search "CL-AGENT/TESTS::PKG-WEATHER" message)
+        "报错未显示包名，无法定位：~A" message)
+    (is (search "包限定" message))))

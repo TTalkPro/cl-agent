@@ -149,21 +149,19 @@
   API 密钥字符串
 
 说明：
-  - Ollama 不需要 API 密钥
-  - 其他提供商按优先级：用户提供 > 环境变量"
-  (let ((provider-type (provider-name provider)))
-    (case provider-type
-      (:ollama
-       ;; Ollama 不需要 API 密钥
-       "dummy")
-      (otherwise
-       ;; 其他提供商需要 API 密钥
-       (or provided-key
-           (cl-agent.core:get-env
-            (ecase provider-type
-              (:anthropic "ANTHROPIC_API_KEY")
-              (:openai "OPENAI_API_KEY")
-              (:zhipu "ZHIPU_API_KEY"))))))))
+  优先级：用户显式提供 > provider 自己持有的密钥。
+
+  provider 在构造时就已按自家规则取得密钥（各 make-*-provider 读自己的
+  环境变量，如 make-minimax-provider 读 MINIMAX_API_KEY），这里直接问它要，
+  不再自行推导。
+
+  此前这里维护着一张手写的「provider → 环境变量名」ECASE 表，只列了
+  anthropic/openai/zhipu——minimax / deepseek / gemini / mistral / dashscope
+  会直接 ECASE 落空报错，除非显式传 :api-key。又一个手工同步终将漂移的清单：
+  新增 provider 时没人记得回来改它。"
+  (or provided-key
+      ;; provider-api-key 是 cl-agent.core 的协议，各 provider 均已实现
+      (cl-agent.core:provider-api-key provider)))
 
 ;;; ============================================================
 ;;; 核心聊天 API
@@ -418,26 +416,44 @@
 ;;; 批量处理
 ;;; ============================================================
 
-(defun batch-chat (client prompts &key (system nil) (parallel nil))
+(defun batch-chat (client prompts &key (system nil) (parallel nil) (pool-size 4))
   "批量处理多个聊天请求
 
 参数：
-  CLIENT   - 客户端实例
-  PROMPTS  - 提示列表
-  SYSTEM   - 系统提示（可选）
-  PARALLEL - 是否并行处理（可选，目前不支持）
+  CLIENT    - 客户端实例
+  PROMPTS   - 提示列表
+  SYSTEM    - 系统提示（可选）
+  PARALLEL  - 是否并行处理（默认 NIL 串行）
+  POOL-SIZE - 并行时的线程池大小（默认 4，仅 PARALLEL 为真时有意义）
 
 返回：
-  响应列表
+  响应列表，**顺序与 PROMPTS 一致**（并行不改变结果顺序）
+
+说明：
+  批量请求以 HTTP I/O 为主，并行能显著缩短墙钟时间。
+  线程池按需创建、用完即释放（含非局部退出），不留全局状态——
+  与 with-concurrent-tool-calling-manager 同一惯例。
+
+  单个提示时并行无收益，直接退化为串行（不创建线程池）。
+
+  注：此前本函数 (declare (ignore parallel))——参数被**静默忽略**，
+  调用方传 :parallel t 得到的仍是串行，而 examples/llm-usage.lisp
+  正是这么调的。docstring 虽写了「目前不支持」，但静默忽略一个
+  显式传入的参数仍是错的：要么实现，要么报错，不该假装接受。
 
 示例：
-  (batch-chat *client*
-              '(\"What is AI?\" \"What is ML?\" \"What is DL?\"))"
-  (declare (ignore parallel))
-  ;; 串行处理（并行处理待实现）
-  (mapcar (lambda (prompt)
-            (chat-simple client prompt :system system))
-          prompts))
+  (batch-chat *client* '(\"What is AI?\" \"What is ML?\"))
+  (batch-chat *client* prompts :parallel t :pool-size 8)"
+  (flet ((ask (prompt) (chat-simple client prompt :system system)))
+    (if (and parallel (rest prompts))
+        (let ((kernel (lparallel:make-kernel pool-size :name "batch-chat-pool")))
+          (unwind-protect
+               (let ((lparallel:*kernel* kernel))
+                 ;; pmapcar 保序：结果顺序与 PROMPTS 一致
+                 (lparallel:pmapcar #'ask prompts))
+            (let ((lparallel:*kernel* kernel))
+              (lparallel:end-kernel :wait t))))
+        (mapcar #'ask prompts))))
 
 ;;; ============================================================
 ;;; Token 计数和成本估算

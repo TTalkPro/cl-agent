@@ -110,18 +110,25 @@ Returns:
 ;;; ============================================================
 
 (defun create-provider (name &rest args)
-  "Create a provider by name.
+  "Create a provider by name or alias.
 
 Parameters:
-  NAME - Provider name keyword
+  NAME - Provider name keyword, or a registered alias (\"claude\", \"gpt\", ...)
   ARGS - Arguments to pass to factory
 
 Returns:
   Provider instance
 
 Signals:
-  Error if provider not registered"
-  (let ((factory (get-provider-factory name)))
+  Error if provider not registered
+
+Note:
+  别名在此解析（resolve-provider-name 对非别名是恒等的）。此前这里直接查
+  factory 表、不解析别名，于是 register-provider-alias 注册的别名只在
+  builder 路径可用，主路径 (create-provider \"claude\") 会报 Unknown provider——
+  同一个别名机制在两条路径上行为不一致。"
+  (let* ((resolved (resolve-provider-name name))
+         (factory (get-provider-factory resolved)))
     (unless factory
       (error "Unknown provider: ~A. Registered providers: ~A"
              name (list-providers)))

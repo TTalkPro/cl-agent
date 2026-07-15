@@ -95,10 +95,10 @@
 ;;; ============================================================
 
 (defun make-provider (type &rest args)
-  "通用提供商工厂
+  "通用提供商工厂——委托给 factory/registry.lisp 的注册表。
 
 参数：
-  TYPE - 提供商类型（:anthropic, :openai, :ollama, :zhipu）
+  TYPE - 提供商类型关键字或别名（见 list-providers / resolve-provider-name）
   ARGS - 提供商特定参数
 
 返回：
@@ -107,16 +107,17 @@
 示例：
   (make-provider :anthropic)
   (make-provider :openai :model \"gpt-4o-mini\")
-  (make-provider :ollama :api-url \"http://127.0.0.1:11434\")
-  (make-provider :zhipu :model \"glm-4-flash\")"
-  (ecase type
-    (:anthropic (apply #'cl-agent.llm.providers:make-anthropic-provider args))
-    (:openai (apply #'cl-agent.llm.providers:make-openai-provider args))
-    (:ollama (apply #'cl-agent.llm.providers:make-ollama-provider args))
-    (:zhipu (apply #'cl-agent.llm.providers:make-zhipu-provider args))
-    (:minimax (apply #'cl-agent.llm.providers:make-minimax-provider args))
-    ((:bailian :dashscope)
-     (apply #'cl-agent.llm.providers:make-dashscope-provider args))))
+  (make-provider :deepseek)
+  (make-provider \"claude\")                ; 别名
+
+此前这里是一张手写 ECASE，只列了 anthropic/openai/ollama/zhipu/minimax/
+dashscope——deepseek / gemini / mistral **全部 ECASE 落空报错**，别名也不认，
+尽管注册表里它们一直都在。注册表才是单一事实来源：新增 provider 只需
+register-provider，无需回来改这里。
+
+注：registry 在本文件之后加载，但 create-provider 是运行时解析，
+调用发生时注册表早已填充。"
+  (apply #'create-provider type args))
 
 ;;; ============================================================
 ;;; 提供商访问器（统一接口）

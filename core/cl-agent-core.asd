@@ -63,7 +63,10 @@
    ;; 文档请写在各自的 docstring 里，包导出用 defpackage 的 :export。
    (:file "utils")                ; Utility functions
    (:file "validation")           ; Data validation
-   (:file "dependency-injection") ; DI container（独立设施，protocols 系统使用）
+   ;; DI container：独立设施，库内部不使用（protocols 也不用——此前这里
+   ;; 注明「protocols 系统使用」是错的）。作为公开设施提供，
+   ;; 用例见 examples/di-usage-examples.lisp。
+   (:file "dependency-injection")
    (:file "data-convert")         ; Data conversion (plist <-> hash-table)
    (:file "json-schema")          ; JSON Schema 生成（工具参数规格 → schema）
 

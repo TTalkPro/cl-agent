@@ -311,3 +311,38 @@
     (is (null (cl-agent.llm::alist-get ht "nope"))))
   ;; 奇数长度的 alist 不应像旧 core 实现那样抛 malformed property list
   (is (equal 1 (cl-agent.llm::alist-get '(("a" . 1)) "a"))))
+
+;;; ============================================================
+;;; make-provider / make-client 覆盖全部注册的 provider
+;;; ============================================================
+
+(test make-provider-covers-every-registered-provider
+  "make-provider 必须支持注册表里的每一个 provider。
+
+此前它是一张手写 ECASE，只列了 6 个——deepseek / gemini / mistral 全部
+ECASE 落空报错，尽管注册表里一直有它们。现改为委托 create-provider，
+注册表是单一事实来源，新增 provider 无需再回来改这张表。"
+  (dolist (name (cl-agent.llm:list-providers))
+    (let ((made (handler-case
+                    (cl-agent.llm:make-provider name :api-key "test-key")
+                  (error (e) e))))
+      (is (typep made 'cl-agent.llm:base-provider)
+          "make-provider ~S 失败：~A" name made))))
+
+(test make-provider-accepts-aliases
+  "别名经注册表解析（此前手写 ECASE 完全不认别名）"
+  (dolist (alias '("claude" "gpt" "glm" "qwen"))
+    (is (typep (cl-agent.llm:make-provider alias :api-key "test-key")
+               'cl-agent.llm:base-provider)
+        "别名 ~S 无法创建" alias)))
+
+(test every-provider-implements-provider-api-key
+  "每个 provider 都必须实现 cl-agent.core:provider-api-key 协议。
+
+make-client 据此统一取密钥。此前 Anthropic 系（含 minimax）没实现它，
+于是 client 层只好维护一张手写的「provider → 环境变量名」ECASE 表，
+而那张表漏了 5 个 provider。"
+  (dolist (name (cl-agent.llm:list-providers))
+    (let ((p (cl-agent.llm:make-provider name :api-key "test-key")))
+      (is (stringp (cl-agent.core:provider-api-key p))
+          "~S 未实现 provider-api-key" name))))

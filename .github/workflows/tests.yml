@@ -16,30 +16,45 @@ on:
 
 jobs:
   test:
-    name: ${{ matrix.lisp }}
-    runs-on: ubuntu-latest
+    name: ${{ matrix.lisp }} / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
     strategy:
-      # 一个实现挂了也要看到另一个的结果——两边的失败往往成因不同，
-      # 提前中止会掩盖掉「只在某个实现上坏」这个最有价值的信号。
+      # 一个格子挂了也要看到其余格子的结果——不同实现/平台的失败成因往往不同，
+      # 提前中止会掩盖掉「只在某处坏」这个最有价值的信号。
       fail-fast: false
       matrix:
         include:
-          - lisp: sbcl
+          - os: ubuntu-latest
+            lisp: sbcl
             load: sbcl --non-interactive --load
-          - lisp: ccl
+          - os: ubuntu-latest
+            lisp: ccl
             load: ccl --no-init --batch --load
+          # macOS 只跑 SBCL：CCL 1.13 的发布包只有 linuxx86 与 darwinx86，
+          # 没有 darwinaarch64，而 macos-latest 已是 Apple Silicon。
+          # （macos-13 Intel runner 正被 GitHub 淘汰，不值得为此绑定。）
+          - os: macos-latest
+            lisp: sbcl
+            load: sbcl --non-interactive --load
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: 安装 SBCL
-        if: matrix.lisp == 'sbcl'
+      - name: 安装 SBCL (Linux)
+        if: matrix.lisp == 'sbcl' && runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends sbcl
 
-      - name: 安装 CCL
-        if: matrix.lisp == 'ccl'
+      - name: 安装 SBCL (macOS)
+        if: matrix.lisp == 'sbcl' && runner.os == 'macOS'
+        run: brew install sbcl
+
+      - name: 安装 CCL (Linux)
+        # 显式限定 Linux：下面装的是 linuxx86 包。CCL 1.13 没有
+        # darwinaarch64 构建，若将来往矩阵里加 macOS+CCL，这里会先失败
+        # 而不是悄悄装错包。
+        if: matrix.lisp == 'ccl' && runner.os == 'Linux'
         # apt 没有 CCL 包，从官方 release 解包。
         # 解到 /usr/local/src/ccl 是因为 scripts/ccl64 里的
         # CCL_DEFAULT_DIRECTORY 就指向这里，换路径要同步改脚本。
@@ -62,8 +77,9 @@ jobs:
           path: |
             ~/quicklisp
             ~/.cache/common-lisp
-          key: ql-${{ matrix.lisp }}-${{ hashFiles('**/*.asd') }}
-          restore-keys: ql-${{ matrix.lisp }}-
+          # 按 实现 × 平台 分开：fasl 跨实现不兼容，跨平台亦然
+          key: ql-${{ matrix.os }}-${{ matrix.lisp }}-${{ hashFiles('**/*.asd') }}
+          restore-keys: ql-${{ matrix.os }}-${{ matrix.lisp }}-
 
       - name: 安装 Quicklisp
         run: |
