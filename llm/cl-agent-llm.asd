@@ -43,14 +43,17 @@
   (;; 1. Package definition
    (:file "package")
 
-   ;; 2. Schema converters and unified response
-   ;; 注：Anthropic 的转换器不在这里——它在 providers/anthropic.lisp
-   ;; （parse-messages-for-anthropic / convert-tools-to-anthropic /
-   ;; parse-anthropic-tool-use），请求路径只走那一份。
+   ;; 2. Unified response schema（纯文档，实现在 core/llm/response.lisp）
+   ;;
+   ;; 这里曾有 openai.lisp / anthropic.lisp 两份「schema 转换器」，
+   ;; 但请求路径从不经过它们——真正在用的是 providers/ 下的同名近亲：
+   ;;   convert-messages-for-openai   （providers/define-provider.lisp）
+   ;;   parse-messages-for-anthropic  （providers/anthropic.lisp）
+   ;; 两份死实现只差一个介词（-to- vs -for-），改错一边不会有任何报错，
+   ;; 已删除。新增 provider 侧转换逻辑请直接写在 providers/ 下。
    (:module "schema"
     :components
-    ((:file "openai")
-     (:file "response")))    ; Unified response schema
+    ((:file "response")))    ; Unified response schema
 
    ;; 3. Provider base class
    (:module "provider-base"

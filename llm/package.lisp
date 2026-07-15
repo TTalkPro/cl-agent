@@ -140,16 +140,9 @@
    #:parse-chat-response
 
    ;; ==================== Schema Converters ====================
-   ;; OpenAI format
-   #:convert-tool-to-openai
-   #:convert-tools-to-openai
-   #:parse-openai-tool-calls
-   #:convert-message-to-openai
-   #:convert-messages-to-openai
-
-   ;; Anthropic format 的转换器不在此导出：它们是 cl-agent.llm.providers
-   ;; 的内部实现（parse-messages-for-anthropic 等），随 provider 演进，
-   ;; 不作为公开 API。
+   ;; 消息/工具的 wire 格式转换器不在此导出：它们是 cl-agent.llm.providers
+   ;; 的内部实现（convert-messages-for-openai / parse-messages-for-anthropic
+   ;; 等），随各 provider 的 API 演进，不作为公开 API。
 
    ;; ==================== Unified Response Schema ====================
    ;; Response class
