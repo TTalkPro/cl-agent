@@ -45,8 +45,8 @@
     环境变量值或默认值
 
   示例：
-    (get-env "OPENAI_API_KEY")
-    (get-env "PORT" 8080)"
+    (get-env \"OPENAI_API_KEY\")
+    (get-env \"PORT\" 8080)"
   (let ((value (uiop:getenv var-name)))
     (if (and value (string> value ""))
         value
