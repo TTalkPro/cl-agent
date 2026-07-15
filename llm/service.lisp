@@ -73,12 +73,8 @@ Anthropic thinking）。
         (when (hash-table-p raw)
           (gethash "reasoning_content" raw)))))
 
-(defun response-complete-p (response)
-  "检查响应是否完整（非截断）
-
-参数：
-  RESPONSE - llm-response 对象
-
-返回：
-  t 如果响应完整，nil 如果被截断"
-  (eq (cl-agent.core:llm-response-finish-reason response) :stop))
+;; 注：这里曾有第二份 response-complete-p，只处理 llm-response，
+;; 传入旧式 plist 会直接报错。它与 providers/zhipu.lisp 的同名函数
+;; 语义分叉（那份是严格超集：llm-response + 旧式 plist + 未知类型返回 NIL），
+;; 且两个包各自导出，用户 :use 两包就撞冲突。
+;; 现已统一为 zhipu.lisp 那份，由 package.lisp 的 :import-from 重导出。

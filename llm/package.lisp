@@ -13,6 +13,82 @@
 ;;;;   - 提供统一的 LLM 接口
 ;;;;   - 支持多个提供商（Anthropic、OpenAI、Ollama、智谱 AI）
 
+
+;;; 定义顺序说明：
+;;;   cl-agent.llm.providers 必须先于 cl-agent.llm 定义——主包用
+;;;   :import-from 引入 providers 的 make-*-provider / response-complete-p
+;;;   再导出，而 :import-from 要求源包在求值时已存在。
+;;;   两个包之间没有 :use 关系，所以这个顺序是安全的。
+;;; ============================================================
+;;; LLM 提供商包
+;;; ============================================================
+
+(defpackage #:cl-agent.llm.providers
+  (:use #:common-lisp
+        #:cl-agent.core)
+  (:nicknames #:cla.llm.providers)
+  (:export
+   ;; ==================== Anthropic 提供商 ====================
+   #:anthropic-provider
+   #:make-anthropic-provider
+   #:anthropic-provider-api-key
+   #:anthropic-provider-version
+   #:build-anthropic-headers
+   #:anthropic-model-context-window
+   #:anthropic-model-max-output
+
+   ;; ==================== OpenAI 兼容基座 ====================
+   #:openai-compat-provider
+   #:define-openai-compat-provider
+   #:provider-auth-headers
+   #:provider-finalize-request
+   #:parse-openai-compat-response
+   #:provider-api-key
+
+   ;; ==================== OpenAI 提供商 ====================
+   #:openai-provider
+   #:make-openai-provider
+
+   ;; ==================== Ollama 提供商 ====================
+   #:ollama-provider
+   #:make-ollama-provider
+
+   ;; ==================== MiniMax 提供商 ====================
+   #:minimax-provider
+   #:make-minimax-provider
+   ;; 扩展思考（Anthropic 系）
+   #:thinking->anthropic
+   #:invalid-thinking-config-error
+   #:split-think-block
+
+   ;; ==================== DeepSeek 提供商 ====================
+   #:deepseek-provider
+   #:make-deepseek-provider
+   #:deepseek-prefix-chat
+   #:mark-prefix
+   #:+deepseek-beta-base-url+
+
+   ;; ==================== Gemini 提供商 ====================
+   #:gemini-provider
+   #:make-gemini-provider
+
+   ;; ==================== Mistral 提供商 ====================
+   #:mistral-provider
+   #:make-mistral-provider
+
+   ;; ==================== 智谱 AI 提供商 ====================
+   #:zhipu-provider
+   #:make-zhipu-provider
+   #:extract-reasoning-content
+   #:response-complete-p
+   #:get-suggested-max-tokens
+
+   ;; ==================== 阿里云 DashScope 提供商 ====================
+   #:dashscope-provider
+   #:make-dashscope-provider
+   #:dashscope-list-models))
+
+
 ;;; ============================================================
 ;;; LLM 主包
 ;;; ============================================================
@@ -21,6 +97,23 @@
   (:use #:common-lisp
         #:cl-agent.core)
   (:nicknames #:cla.llm #:llm)
+  ;; 门面层：这些符号的实现属于 cl-agent.llm.providers，此处引入*同一符号*
+  ;; 再导出，而不是在本包另立同名符号。
+  ;;
+  ;; 此前是后者：两个包各自导出一套独立的同名符号，后果有三——
+  ;;   1. 用户包一旦 (:use :cl-agent.llm :cl-agent.llm.providers) 就撞 6 个
+  ;;      name conflict，而这两个包本是「门面 + 实现」，理应能一起 use；
+  ;;   2. make-dashscope-provider 在本包只有导出、没有对应的委托定义，
+  ;;      调用直接 UNDEFINED-FUNCTION——导出了一个不存在的函数；
+  ;;   3. response-complete-p 两处实现语义分叉（本包那份不接受旧式 plist）。
+  ;; 改为 :import-from 后，三者同时消失，且新增 provider 无需再手工同步。
+  (:import-from #:cl-agent.llm.providers
+                #:make-anthropic-provider
+                #:make-openai-provider
+                #:make-ollama-provider
+                #:make-zhipu-provider
+                #:make-dashscope-provider
+                #:response-complete-p)
   (:export
    ;; ==================== 客户端 ====================
    ;; 客户端结构和访问器
@@ -99,7 +192,6 @@
    #:stream-iterator
    #:chat-stream-iterator
    #:stream-next
-   #:stream-has-more-p
 
    ;; 流式上下文
    #:stream-context
@@ -110,23 +202,15 @@
    #:count-tokens-for-client
    #:estimate-cost
 
-   ;; ==================== 全局配置 ====================
-   #:*anthropic-api-url*
-   #:*openai-api-url*
-   #:*ollama-api-url*
-   #:*zhipu-api-url*
-   #:*default-anthropic-model*
-   #:*default-openai-model*
-   #:*default-ollama-model*
-   #:*default-zhipu-model*
+   ;; 注：曾在此导出 *anthropic-api-url* / *default-anthropic-model* 一类
+   ;; 全局配置变量，但无人读取且已过时——端点与默认模型由各
+   ;; make-*-provider 自行持有。已删除。
 
    ;; ==================== 工具函数 ====================
    ;; HTTP 和 JSON
    #:make-http-request
    #:parse-json-response
    #:build-api-url
-   #:build-headers
-   #:build-provider-url
    #:provider-headers
 
    ;; 消息转换
@@ -155,6 +239,10 @@
    #:llm-response-model
    #:llm-response-finish-reason
    #:llm-response-message-id
+   ;; 思维链：reasoning 是展示用文本；reasoning-blocks 是 provider 原生块
+   ;; （含签名），只用于后续轮次原样回传
+   #:llm-response-reasoning
+   #:llm-response-reasoning-blocks
    #:llm-response-raw
 
    ;; Usage class
@@ -204,14 +292,9 @@
    #:register-provider-alias
    #:resolve-provider-name
 
-   ;; ==================== Provider Configuration ====================
-   #:*default-provider-config*
-   #:get-provider-config
-   #:get-config-value
-   #:load-api-key-from-env
-   #:load-provider-config-from-env
-   #:validate-provider-config
-   #:build-provider-config
+   ;; 注：曾在此导出 factory/config.lisp 的一组 provider 配置函数，
+   ;; 但那是个自封闭的死岛（registry/builder/providers 均不调用），
+   ;; API key 实际由各 make-*-provider 读自家环境变量。整个文件已删除。
 
    ;; ==================== Provider Builder ====================
    #:provider-builder
@@ -229,69 +312,3 @@
    ;; ==================== ChatModel 桥接 ====================
    #:create-chat-model
    #:create-chat-model-from-builder))
-
-;;; ============================================================
-;;; LLM 提供商包
-;;; ============================================================
-
-(defpackage #:cl-agent.llm.providers
-  (:use #:common-lisp
-        #:cl-agent.core)
-  (:nicknames #:cla.llm.providers)
-  (:export
-   ;; ==================== Anthropic 提供商 ====================
-   #:anthropic-provider
-   #:make-anthropic-provider
-   #:anthropic-provider-api-key
-   #:anthropic-provider-version
-   #:build-anthropic-headers
-   #:anthropic-model-context-window
-   #:anthropic-model-max-output
-
-   ;; ==================== OpenAI 兼容基座 ====================
-   #:openai-compat-provider
-   #:define-openai-compat-provider
-   #:provider-auth-headers
-   #:provider-finalize-request
-   #:parse-openai-compat-response
-   #:provider-api-key
-
-   ;; ==================== OpenAI 提供商 ====================
-   #:openai-provider
-   #:make-openai-provider
-
-   ;; ==================== Ollama 提供商 ====================
-   #:ollama-provider
-   #:make-ollama-provider
-
-   ;; ==================== MiniMax 提供商 ====================
-   #:minimax-provider
-   #:make-minimax-provider
-   #:split-think-block
-
-   ;; ==================== DeepSeek 提供商 ====================
-   #:deepseek-provider
-   #:make-deepseek-provider
-   #:deepseek-prefix-chat
-   #:mark-prefix
-   #:+deepseek-beta-base-url+
-
-   ;; ==================== Gemini 提供商 ====================
-   #:gemini-provider
-   #:make-gemini-provider
-
-   ;; ==================== Mistral 提供商 ====================
-   #:mistral-provider
-   #:make-mistral-provider
-
-   ;; ==================== 智谱 AI 提供商 ====================
-   #:zhipu-provider
-   #:make-zhipu-provider
-   #:extract-reasoning-content
-   #:response-complete-p
-   #:get-suggested-max-tokens
-
-   ;; ==================== 阿里云 DashScope 提供商 ====================
-   #:dashscope-provider
-   #:make-dashscope-provider
-   #:dashscope-list-models))

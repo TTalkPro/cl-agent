@@ -18,61 +18,20 @@
 (in-package :cl-agent.llm)
 
 ;;; ============================================================
-;;; 全局配置
+;;; 注：这里曾有一组 *anthropic-api-url* / *default-anthropic-model*
+;;; 之类的全局配置变量，但没有任何代码读取它们——端点与默认模型由各
+;;; make-*-provider 自行持有。它们还已经过时（*default-anthropic-model*
+;;; 停留在 claude-3-5-sonnet-20241022，而 provider 实际默认
+;;; claude-sonnet-4-20250514），留着只会让人以为改它有用。已删除。
 ;;; ============================================================
-
-(defparameter *anthropic-api-url* "https://api.anthropic.com"
-  "Anthropic API 基础 URL")
-
-(defparameter *openai-api-url* "https://api.openai.com/v1"
-  "OpenAI API 基础 URL")
-
-(defparameter *ollama-api-url* "http://localhost:11434"
-  "Ollama API 基础 URL")
-
-(defparameter *zhipu-api-url* "https://open.bigmodel.cn/api/paas/v4"
-  "智谱 AI API 基础 URL")
-
-(defparameter *default-anthropic-model* "claude-3-5-sonnet-20241022"
-  "默认 Anthropic 模型")
-
-(defparameter *default-openai-model* "gpt-4o"
-  "默认 OpenAI 模型")
-
-(defparameter *default-ollama-model* "llama3.2"
-  "默认 Ollama 模型")
-
-(defparameter *default-zhipu-model* "glm-4.6"
-  "默认智谱 AI 模型")
-
-;;; ============================================================
-;;; Anthropic 提供商（委托 providers/anthropic.lisp 的正式实现）
-;;; ============================================================
-
-(defun make-anthropic-provider (&rest args)
-  "创建 Anthropic 提供商（委托 cl-agent.llm.providers 的实现）。
-
-参数同 cl-agent.llm.providers:make-anthropic-provider。"
-  (apply #'cl-agent.llm.providers:make-anthropic-provider args))
-
-;;; ============================================================
-;;; Ollama 提供商（委托 providers/ollama.lisp 的 OpenAI 兼容实现）
-;;; ============================================================
-
-(defun make-ollama-provider (&rest args)
-  "创建 Ollama 提供商（委托 cl-agent.llm.providers 的实现）。
-
-参数同 cl-agent.llm.providers:make-ollama-provider。"
-  (apply #'cl-agent.llm.providers:make-ollama-provider args))
-
-(defun make-openai-provider (&rest args)
-  "创建 OpenAI 提供商（委托 cl-agent.llm.providers 的实现）。"
-  (apply #'cl-agent.llm.providers:make-openai-provider args))
-
-(defun make-zhipu-provider (&rest args)
-  "创建智谱 AI 提供商（委托 cl-agent.llm.providers 的实现）。"
-  (apply #'cl-agent.llm.providers:make-zhipu-provider args))
-
+;;; 注：这里曾有 make-anthropic-provider / make-ollama-provider /
+;;; make-openai-provider / make-zhipu-provider 四个手写委托函数，
+;;; 函数体都只是 (apply #'cl-agent.llm.providers:make-X-provider args)。
+;;;
+;;; 它们已被 package.lisp 的 :import-from 取代——主包直接重导出
+;;; providers 的同一符号，语义完全等价，且不再需要手工同步：
+;;; 正是这份手工同步漏掉了 dashscope（导出了却没有委托定义，
+;;; 调用即 UNDEFINED-FUNCTION）。
 ;;; ============================================================
 ;;; 内部工厂函数（提取公共模式）
 ;;; ============================================================
@@ -220,18 +179,8 @@
 ;;; 提供商工具函数
 ;;; ============================================================
 
-(defun build-provider-url (provider endpoint)
-  "构建完整的 API URL
-
-参数：
-  PROVIDER - 提供商实例
-  ENDPOINT - 端点路径
-
-返回：
-  完整的 API URL"
-  (concatenate 'string
-               (provider-api-url provider)
-               endpoint))
+;; 注：这里曾有 build-provider-url，与 base.lisp 的 build-api-url 重复
+;; 且无人调用（请求路径只走 build-api-url）。已删除。
 
 (defun provider-headers (provider api-key)
   "生成提供商特定的请求头
