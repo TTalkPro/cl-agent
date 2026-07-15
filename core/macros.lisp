@@ -75,16 +75,21 @@
         finally (return result)))
 
 (defmacro as-> (initial-form var &rest forms)
-  "线程 AS（显式命名）"
-  (loop for form in forms
-        with result = var
-        initially `(let ((,var ,initial-form))
-                    (declare (ignorable ,var)))
-        do (setf result
-                 `(let ((,var ,form))
-                    (declare (ignorable ,var))
-                    ,result))
-        finally (return result))
+  "线程 AS（显式命名）：把 VAR 依次绑定为前一步的结果，再求值下一个 FORM。
+与 -> / ->> 的区别是插入位置由 VAR 显式指定，不限于首/末参。
+
+  示例：
+    (as-> 5 x (+ x 1) (* x 2))   ; => 12
+    (as-> 5 x)                   ; => 5
+  等价于：
+    (let* ((x 5) (x (+ x 1)) (x (* x 2))) x)"
+  (if (null forms)
+      `(let ((,var ,initial-form))
+         (declare (ignorable ,var))
+         ,var)
+      `(let ((,var ,initial-form))
+         (declare (ignorable ,var))
+         (as-> ,(first forms) ,var ,@(rest forms)))))
 
 ;;; ============================================================
 ;;; 资源管理宏
@@ -378,4 +383,3 @@
 (defun get-log-level ()
   "获取当前日志级别"
   *log-level*)
-)

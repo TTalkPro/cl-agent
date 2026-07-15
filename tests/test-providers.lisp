@@ -285,3 +285,29 @@
                                                   :temperature 0.5))))
     (is (equal '(:seed 1) (cl-agent.chat:chat-options-extra-params merged)))
     (is (= 0.5 (cl-agent.chat:chat-options-temperature merged)))))
+
+;;; ============================================================
+;;; alist-get（响应解析的取值原语）
+;;; ============================================================
+;;; core 里曾有一个同名的假 alist 访问器（函数体是 getf，只对 plist
+;;; 有效），因加载顺序在前而被此处的真实现静默覆盖，只留下一条
+;;; redefining 警告。core 那个已删除，这里锁住真实现的语义。
+
+(test alist-get-semantics
+  "alist-get：字符串/符号键、hash-table、缺失键"
+  (let ((al '(("content" . "hi") ("model" . "m1"))))
+    ;; 字符串键
+    (is (equal "hi" (cl-agent.llm::alist-get al "content")))
+    ;; 符号键降级为小写字符串
+    (is (equal "hi" (cl-agent.llm::alist-get al 'content)))
+    ;; 大小写不敏感（string-equal）
+    (is (equal "hi" (cl-agent.llm::alist-get al "CONTENT")))
+    ;; 缺失键返回 nil
+    (is (null (cl-agent.llm::alist-get al "nope"))))
+  ;; hash-table（json-parse 的返回格式）
+  (let ((ht (make-hash-table :test #'equal)))
+    (setf (gethash "content" ht) "hi")
+    (is (equal "hi" (cl-agent.llm::alist-get ht "content")))
+    (is (null (cl-agent.llm::alist-get ht "nope"))))
+  ;; 奇数长度的 alist 不应像旧 core 实现那样抛 malformed property list
+  (is (equal 1 (cl-agent.llm::alist-get '(("a" . 1)) "a"))))

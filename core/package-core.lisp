@@ -89,7 +89,8 @@
    #:get-env
    #:generate-uuid
    #:timestamp-now
-   #:alist-get
+   ;; 注：alist-get 已移除（原实现是伪装成 alist 访问器的 plist 访问器，
+   ;; 且被 cl-agent.llm 的同名真实现静默覆盖）。plist 访问用 plist-get。
    #:plist-get
    #:json-parse
    #:json-stringify

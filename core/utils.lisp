@@ -134,18 +134,15 @@
       (com.inuoe.jzon:stringify object :pretty t)
       (com.inuoe.jzon:stringify object)))
 
-(defun alist-get (alist key &optional default)
-  "从关联表中获取值（支持嵌套键路径）"
-  (etypecase key
-    (symbol (getf alist key default))
-    (string (getf alist key default))
-    (cons
-     ;; 嵌套路径：'("user" "name")
-     (let ((current alist))
-       (dolist (k key)
-         (setf current (alist-get current k)))
-       current))
-    (keyword (getf alist key default))))
+;;; 此处曾有一个 alist-get：名为 alist 访问器，函数体却是
+;;; (getf alist key default)——getf 是 plist 访问器且以 eq 比较键，
+;;; 用在真正的 alist 上，奇数长度直接抛 malformed property list，
+;;; 偶数长度则恒返回 default（字符串键永不 eq）。它实际只对 plist 有效，
+;;; 而那正是下面 plist-get 的功能，两者逐字等价。
+;;; 它在 core 内零调用，且被 cl-agent.llm 中同名的真 alist 访问器
+;;; （llm/providers.lisp，35 处调用）静默覆盖——那才是干活的那个。
+;;; 故删除本副本并取消导出，让 alist-get 归 cl-agent.llm 私有。
+;;; 需要 plist 访问用 plist-get；需要 alist 访问请另写正确实现。
 
 (defun plist-get (plist key &optional default)
   "从属性列表中获取值"

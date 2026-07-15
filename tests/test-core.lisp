@@ -51,6 +51,29 @@
 ;; 条件系统测试
 ;; ============================================================
 
+;;; 链式宏
+;;; 注：macros.lisp 中 as-> 曾因 defmacro 缺一个右括号而使其后约 290 行
+;;; （含整个日志系统）从未生效；括号补上后 as-> 自身的逻辑缺陷才暴露出来
+;;; （丢弃 initial-form、嵌套顺序颠倒 → UNBOUND-VARIABLE）。
+
+(test thread-as-macro
+  "as-> 依次以 VAR 承接上一步结果"
+  (is (= 12 (cl-agent.core:as-> 5 x (+ x 1) (* x 2))))
+  ;; 插入位置任意（这正是 as-> 相对 -> / ->> 的意义）
+  (is (= 3 (cl-agent.core:as-> 10 x (/ x 5) (- 5 x))))
+  ;; 无 form 时返回初值
+  (is (= 5 (cl-agent.core:as-> 5 x)))
+  ;; form 不引用 VAR 也不应报错（ignorable）
+  (is (= 7 (cl-agent.core:as-> 5 x 7))))
+
+(test thread-first-and-last-macros
+  "-> 与 ->> 的插入位置分别为首参与末参"
+  (is (= 12 (cl-agent.core:-> 5 (+ 1) (* 2))))
+  (is (equal '(1 2 3) (cl-agent.core:->> '(3 2 1) (reverse))))
+  ;; -> 插首参：(/ 10 2) = 5；->> 插末参：(/ 2 10) = 1/5
+  (is (= 5 (cl-agent.core:-> 10 (/ 2))))
+  (is (= 1/5 (cl-agent.core:->> 10 (/ 2)))))
+
 (test signal-error
   "测试错误信号"
   (signals cl-agent.core:cl-agent-error
