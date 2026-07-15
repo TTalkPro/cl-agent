@@ -1,0 +1,96 @@
+name: tests
+
+# 为什么跑两个实现：
+#   本库长期只在 SBCL 上验证。首次用 CCL 跑就抓到一个真 bug——core/utils.lisp
+#   的 get-env 因 docstring 里未转义的双引号，函数体混入了裸符号
+#   OPENAI_API_KEY / PORT。SBCL 把这类未绑定变量引用静默优化掉（只留
+#   style-warning，测试照常全绿），CCL 则在运行时直接 UNBOUND-VARIABLE。
+#   也就是说 SBCL 的宽容恰好掩盖了错误，而 get-env 是读所有 API key 的函数。
+#   多一个实现 = 多一双编译器的眼睛，这一类问题只有靠它才能守住。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: ${{ matrix.lisp }}
+    runs-on: ubuntu-latest
+    strategy:
+      # 一个实现挂了也要看到另一个的结果——两边的失败往往成因不同，
+      # 提前中止会掩盖掉「只在某个实现上坏」这个最有价值的信号。
+      fail-fast: false
+      matrix:
+        include:
+          - lisp: sbcl
+            load: sbcl --non-interactive --load
+          - lisp: ccl
+            load: ccl --no-init --batch --load
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 SBCL
+        if: matrix.lisp == 'sbcl'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends sbcl
+
+      - name: 安装 CCL
+        if: matrix.lisp == 'ccl'
+        # apt 没有 CCL 包，从官方 release 解包。
+        # 解到 /usr/local/src/ccl 是因为 scripts/ccl64 里的
+        # CCL_DEFAULT_DIRECTORY 就指向这里，换路径要同步改脚本。
+        run: |
+          curl -fsSL -o /tmp/ccl.tar.gz \
+            https://github.com/Clozure/ccl/releases/download/v1.13/ccl-1.13-linuxx86.tar.gz
+          sudo mkdir -p /usr/local/src
+          sudo tar xzf /tmp/ccl.tar.gz -C /usr/local/src
+          sudo install -m 755 /usr/local/src/ccl/scripts/ccl64 /usr/local/bin/ccl
+
+      - name: 确认实现可用
+        # 装完立刻自证，免得后续步骤失败时分不清是装的问题还是代码问题
+        run: ${{ matrix.load }} /dev/null --eval '(progn (princ (lisp-implementation-type)) (princ " ") (princ (lisp-implementation-version)) (terpri))'
+
+      - name: 缓存 Quicklisp 与 fasl
+        uses: actions/cache@v4
+        with:
+          # fasl 必须按实现分开缓存：两个实现的 fasl 互不兼容，
+          # 共用 key 会让其中一个每次重编译，甚至读到坏 fasl。
+          path: |
+            ~/quicklisp
+            ~/.cache/common-lisp
+          key: ql-${{ matrix.lisp }}-${{ hashFiles('**/*.asd') }}
+          restore-keys: ql-${{ matrix.lisp }}-
+
+      - name: 安装 Quicklisp
+        run: |
+          if [ ! -f "$HOME/quicklisp/setup.lisp" ]; then
+            curl -fsSL -o /tmp/quicklisp.lisp https://beta.quicklisp.org/quicklisp.lisp
+            ${{ matrix.load }} /tmp/quicklisp.lisp --eval '(quicklisp-quickstart:install)'
+          fi
+
+      - name: 预拉依赖
+        # 依赖清单从 .asd 派生（ql:quickload 递归解析），不在此处手写——
+        # 手写清单迟早与 .asd 漂移。
+        # 单独成步只为把「拉依赖失败」和「测试失败」在 CI 日志里分开。
+        run: |
+          cat > /tmp/deps.lisp <<'EOF'
+          (require :asdf)
+          (dolist (dir '("." "core/" "llm/" "mock/"))
+            (pushnew (truename dir) asdf:*central-registry* :test #'equal))
+          (load (merge-pathnames "quicklisp/setup.lisp" (user-homedir-pathname)))
+          ;; cl-agent-test 与 cl-agent 定义在同一 asd，先解析主系统
+          (asdf:find-system :cl-agent)
+          (ql:quickload :cl-agent-test)
+          EOF
+          ${{ matrix.load }} /tmp/deps.lisp
+
+      - name: 运行测试
+        # run-tests.lisp 两条路径都显式 quit（0 通过 / 1 失败），已在两个
+        # 实现上实测：成功 0、失败 1、加载期报错非零。CI 因此能真正发现
+        # 失败，而不是永远绿灯——也不会在成功时挂到 job 超时
+        # （CCL 的 --batch 跑完会读 stdin，成功路径若不显式 quit 就挂住）。
+        run: ${{ matrix.load }} run-tests.lisp

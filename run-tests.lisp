@@ -1,5 +1,13 @@
 ;;;; run-tests.lisp
-;;;; CL-Agent 测试入口：sbcl --non-interactive --load run-tests.lisp
+;;;; CL-Agent 测试入口：
+;;;;   sbcl --non-interactive --load run-tests.lisp
+;;;;   ccl  --no-init --batch --load run-tests.lisp
+;;;;
+;;;; 退出码：0 全部通过，1 有失败——两条路径都显式 quit。
+;;;; 成功时也必须显式 quit：SBCL 的 --non-interactive 跑完即退，
+;;;; 但 CCL 的 --batch 跑完会去读 stdin，stdin 不是 EOF 时直接挂住
+;;;; （CI 里就是挂到 job 超时）。在这里统一收口，好过让每个调用方
+;;;; 各自记得补 </dev/null 或 --eval '(quit)'。
 
 (require :asdf)
 
@@ -22,5 +30,6 @@
                                  (uiop:find-symbol* :cl-agent-suite :cl-agent/tests))))
   (uiop:symbol-call :fiveam :explain! results)
   (if (uiop:symbol-call :fiveam :results-status results)
-      (format t "~%All tests passed.~%")
+      (progn (format t "~%All tests passed.~%")
+             (uiop:quit 0))
       (uiop:quit 1)))
