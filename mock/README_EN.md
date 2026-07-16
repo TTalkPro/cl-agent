@@ -127,11 +127,11 @@ mock/
 
 ```lisp
 ;; Adapt the mock LLM into a ChatModel
-(deftest test-client-with-mock
+(deftest test-kernel-with-mock
   (let* ((mock-llm (cl-agent.mock:make-mock-llm))
          (model (cl-agent.chat:make-provider-chat-model mock-llm))
-         (client (cl-agent.client:make-chat-client model)))
-    (is (stringp (cl-agent.client:chat client "Hello")))))
+         (k (cl-agent.kernel:build-kernel :model model)))
+    (is (stringp (cl-agent.kernel:chat k "Hello")))))
 
 ;; For precise response sequencing, specialize llm-chat directly
 ;; (see seq-provider in tests/suite.lisp): each call pops a canned
@@ -150,11 +150,9 @@ mock/
                     (tool-call-response "get_weather" '(("city" . "Beijing")))
                     (text-response "Sunny in Beijing, 25°C")))
          (model (cl-agent.chat:make-provider-chat-model provider))
-         (client (cl-agent.client:make-chat-client model)))
+         (k (cl-agent.kernel:build-kernel :model model :tools '(get-weather))))
     (is (search "25°C"
-                (cl-agent.client:chat client
-                  (:user "Weather in Beijing?")
-                  (:tools 'get-weather))))))
+                (cl-agent.kernel:chat k (:user "Weather in Beijing?"))))))
 ```
 
 ### Streaming Response Simulation

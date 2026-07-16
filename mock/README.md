@@ -127,11 +127,11 @@ mock/
 
 ```lisp
 ;; 在测试中把 Mock LLM 适配为 ChatModel
-(deftest test-client-with-mock
+(deftest test-kernel-with-mock
   (let* ((mock-llm (cl-agent.mock:make-mock-llm))
          (model (cl-agent.chat:make-provider-chat-model mock-llm))
-         (client (cl-agent.client:make-chat-client model)))
-    (is (stringp (cl-agent.client:chat client "你好")))))
+         (k (cl-agent.kernel:build-kernel :model model)))
+    (is (stringp (cl-agent.kernel:chat k "你好")))))
 
 ;; 需要精确控制响应序列时，直接特化 llm-chat（见 tests/suite.lisp
 ;; 的 seq-provider）：每次调用弹出预设的 llm-response，
@@ -149,11 +149,9 @@ mock/
                     (tool-call-response "get_weather" '(("city" . "北京")))
                     (text-response "北京今天晴，25°C")))
          (model (cl-agent.chat:make-provider-chat-model provider))
-         (client (cl-agent.client:make-chat-client model)))
+         (k (cl-agent.kernel:build-kernel :model model :tools '(get-weather))))
     (is (search "25°C"
-                (cl-agent.client:chat client
-                  (:user "北京天气怎么样？")
-                  (:tools 'get-weather))))))
+                (cl-agent.kernel:chat k (:user "北京天气怎么样？"))))))
 ```
 
 ### 流式响应模拟

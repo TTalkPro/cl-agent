@@ -314,7 +314,7 @@ Different providers have different tool schema formats, the module handles conve
     (format t "Timeout: ~A~%" e)))
 ```
 
-## Integrating with ChatClient
+## Integrating with the kernel
 
 ```lisp
 ;; Create a ChatModel in one step (recommended entry point)
@@ -328,7 +328,7 @@ Different providers have different tool schema formats, the module handles conve
     (make-anthropic-provider)
     :default-options (cl-agent.chat:make-chat-options :temperature 0.3)))
 
-;; Use with ChatClient
-(defvar *client* (cl-agent.client:make-chat-client *model*))
-(cl-agent.client:chat *client* "Hello")
+;; Assemble a kernel, then chat
+(defvar *kernel* (cl-agent.kernel:build-kernel :model *model*))
+(cl-agent.kernel:chat *kernel* "Hello")
 ```

@@ -309,7 +309,7 @@ Service 层负责将各 Provider 返回的原始响应转换为统一的 `llm-re
     (format t "超时: ~A~%" e)))
 ```
 
-## 与 ChatClient 集成
+## 与 kernel 集成
 
 ```lisp
 ;; 一步创建 ChatModel（推荐入口）
@@ -323,7 +323,7 @@ Service 层负责将各 Provider 返回的原始响应转换为统一的 `llm-re
     (make-anthropic-provider)
     :default-options (cl-agent.chat:make-chat-options :temperature 0.3)))
 
-;; 用于 ChatClient
-(defvar *client* (cl-agent.client:make-chat-client *model*))
-(cl-agent.client:chat *client* "你好")
+;; 装配 kernel 后即可对话
+(defvar *kernel* (cl-agent.kernel:build-kernel :model *model*))
+(cl-agent.kernel:chat *kernel* "你好")
 ```
