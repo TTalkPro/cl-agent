@@ -15,7 +15,7 @@
 
 (defpackage :cl-agent.core
   (:use :cl)
-  (:nicknames :cla.core :core)
+  (:nicknames :cla.core)
   (:export
    ;; === Condition System ===
    #:cl-agent-error
@@ -35,6 +35,9 @@
    #:error-message
    #:error-cause
    #:signal-error
+   ;; 统一错误分类（retryable 判断的单一来源）
+   #:error-retryable-p
+   #:transient-status-p
 
    ;; 注：此处曾导出 core/types.lisp 的一整套旧类型——消息（make-message /
    ;; system-message / user-message / ...）、ToolCall、Response、Usage、
@@ -52,34 +55,18 @@
    #:generate-uuid
    #:timestamp-now
    ;; 注：alist-get 已移除（原实现是伪装成 alist 访问器的 plist 访问器，
-   ;; 且被 cl-agent.llm 的同名真实现静默覆盖）。plist 访问用 plist-get。
-   #:plist-get
+   ;; 且被 cl-agent.llm 的同名真实现静默覆盖）。plist 访问直接用 getf。
+   ;; 注：曾导出一批零调用的工具函数（plist-get / truncate-string /
+   ;; clean-whitespace / string-empty-p / ensure-string / take / drop /
+   ;; group-by / format-timestamp / make-tool），已随实现一并删除。
    #:json-parse
    #:json-stringify
-   #:truncate-string
-   #:clean-whitespace
-   #:string-empty-p
-   #:ensure-string
-   #:take
-   #:drop
-   #:group-by
-   #:format-timestamp
-   #:make-tool
 
    ;; === Utility Macros ===
+   ;; 注：曾导出 20+ 个工具宏（when-let*/if-let/awhen/aif/->/->>/as->/
+   ;; with-timing/with-temp-file/do-alist/do-plist/...），全库零使用，
+   ;; 已随实现一并删除（见 macros.lisp 头注）。
    #:when-let
-   #:when-let*
-   #:if-let
-   #:unless-let
-   #:awhen
-   #:aif
-   #:with-timing
-   #:->
-   #:->>
-   #:as->
-   #:with-temp-file
-   #:do-alist
-   #:do-plist
 
    ;; === 动态绑定继承（跨线程） ===
    #:*inherited-special-variables*
@@ -96,7 +83,6 @@
    #:*log-stream*
    #:set-log-level
    #:get-log-level
-   #:with-log-context
 
    ;; === Data Conversion ===
    #:plist-to-hash
@@ -113,6 +99,32 @@
    ;; === Protocol Defaults ===
    #:*default-id-generator*
    #:*default-timestamp-provider*
+
+   ;; === DI 容器（独立公开设施，库内部不使用） ===
+   #:di-container
+   #:di-container-p
+   #:make-di-container
+   #:di-container-parent
+   #:di-bind
+   #:di-bind*
+   #:di-resolve
+   #:di-with-dependencies
+   #:di-release
+   #:di-clear
+   #:di-cleanup
+   #:di-cleanup-p
+   #:di-lazy-dependency
+   #:di-lazy-service
+   #:di-boundp
+   #:di-resolve-or-default
+   #:di-list-services
+   #:di-container-stats
+   #:di-print-container
+   ;; 请求作用域
+   #:with-di-request-scope
+   #:di-request-scope-not-active-error
+   #:di-request-scope-service-name
+   #:*di-request-cache*
 
    ;; === JSON Schema 工具 ===
    #:type-to-json-type
@@ -547,6 +559,7 @@
     ;; ==================== ToolCallingManager ====================
     #:tool-calling-manager
     #:execute-tool-calls
+    #:manager-run-batch
     #:make-tool-execution-result
     #:sequential-tool-calling-manager
     #:make-sequential-tool-calling-manager

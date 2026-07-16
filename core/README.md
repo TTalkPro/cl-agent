@@ -31,9 +31,8 @@
 core/
 ├── package-core.lisp        cl-agent.core 包定义（单包）
 ├── conditions.lisp          条件系统
-├── macros.lisp              实用宏（-> ->> when-let ...）
+├── macros.lisp              when-let + 日志系统（log-debug/info/warn/error）
 ├── utils.lisp               工具函数 + ID 生成器 / 时间戳提供者
-├── validation.lisp          数据校验
 ├── dependency-injection.lisp  DI 容器（独立设施，库内部不使用）
 ├── data-convert.lisp        plist <-> hash-table 互转
 ├── json-schema.lisp         params->json-schema / 校验器
@@ -67,7 +66,7 @@ core/
     │   ├── tool-search.lisp 渐进式工具披露（:chat）+ IToolIndex
     │   ├── timeout.lisp     工具超时（:tool）
     │   ├── approval.lisp    预执行审批门（:tool）
-    │   └── token-xform.lisp token 改写（:token-xform transducer）
+    │   └── token-xform.lisp token 改写（:token-xform，(downstream) → (values emit finish)）
     └── chat.lisp            chat 宏 DSL + kernel-chat* 调用方入口
 ```
 

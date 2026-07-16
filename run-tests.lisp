@@ -20,10 +20,11 @@
   (when (probe-file ql-setup)
     (load ql-setup)))
 
-(format t "~%Loading cl-agent-test...~%")
-;; cl-agent-test 与 cl-agent 定义在同一 asd 文件，先解析主系统
+(format t "~%Loading cl-agent/test...~%")
+;; cl-agent/test 与 cl-agent 定义在同一 asd 文件（ASDF 次级系统约定），
+;; find-system 主系统即可解析
 (asdf:find-system :cl-agent)
-(asdf:load-system :cl-agent-test)
+(asdf:load-system :cl-agent/test)
 
 (format t "~%Running test suite...~%~%")
 (let ((results (uiop:symbol-call :fiveam :run

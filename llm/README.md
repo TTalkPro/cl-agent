@@ -34,21 +34,24 @@ llm/
 ├── providers.lisp            # 提供商注册
 ├── streaming.lisp            # 流式支持
 ├── service.lisp              # Service 层（响应标准化）
-├── schema/                   # Schema 转换
-│   ├── openai.lisp          # OpenAI 格式
-│   ├── anthropic.lisp       # Anthropic 格式
-│   └── response.lisp        # 响应 schema
 ├── providers/                # 提供商实现
 │   ├── base.lisp            # 基类
-│   ├── define-provider.lisp # 通用宏和函数
+│   ├── define-provider.lisp # 共享 wire 助手
+│   ├── openai-compat.lisp   # OpenAI 兼容基座 + define-openai-compat-provider
 │   ├── anthropic.lisp       # Anthropic Claude
 │   ├── openai.lisp          # OpenAI GPT
 │   ├── zhipu.lisp           # 智谱 AI GLM
-│   └── bailian.lisp         # 阿里云百炼 DashScope
-└── factory/                  # 工厂模式
-    ├── registry.lisp        # 提供商注册表
-    ├── config.lisp          # 配置管理
-    └── builder.lisp         # Builder API
+│   ├── ollama.lisp          # Ollama（本地）
+│   ├── minimax.lisp         # MiniMax
+│   ├── deepseek.lisp        # DeepSeek
+│   ├── gemini.lisp          # Google Gemini
+│   ├── mistral.lisp         # Mistral AI
+│   └── dashscope.lisp       # 阿里云 DashScope（通义千问）
+├── stream/                   # 真 SSE 流式（llm-chat-stream 特化）
+│   ├── anthropic.lisp       # Anthropic 格式（anthropic + minimax）
+│   └── openai.lisp          # OpenAI 兼容格式
+└── factory/                  # 工厂
+    └── registry.lisp        # Provider 注册表 + 别名 + create-chat-model
 ```
 
 ## 支持的提供商

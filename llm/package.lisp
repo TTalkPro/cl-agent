@@ -96,12 +96,11 @@
 (defpackage #:cl-agent.llm
   (:use #:common-lisp
         #:cl-agent.core)
-  (:nicknames #:cla.llm #:llm)
-  ;; chat：cl-agent.core 有一个同名的 **宏**（kernel 的声明式 DSL，
-  ;; (chat kernel (:user ...))），本包的是低层 client **函数**
-  ;; ((chat client messages &key ...))。语义与调用形态都不同，必须 shadow——
-  ;; 否则本包的 defun 会试图把 core 的宏重定义成函数。
-  (:shadow #:chat)
+  (:nicknames #:cla.llm)
+  ;; 注：本包曾 (:shadow #:chat)——低层 client 函数与 cl-agent.core 的
+  ;; chat 宏（kernel 声明式 DSL）同名。shadow 是给读者埋雷（同一个名字
+  ;; 在不同包里一个是宏一个是函数），函数已改名 client-chat，shadow 随之
+  ;; 消失。全库不再 shadow 任何符号。
   ;; 门面层：这些符号的实现属于 cl-agent.llm.providers，此处引入*同一符号*
   ;; 再导出，而不是在本包另立同名符号。
   ;;
@@ -173,7 +172,7 @@
 
    ;; ==================== 聊天 API ====================
    ;; 核心 API
-   #:chat
+   #:client-chat
    #:chat-simple
    #:chat-with-tools
    #:chat-multi-turn
@@ -301,19 +300,11 @@
    ;; 但那是个自封闭的死岛（registry/builder/providers 均不调用），
    ;; API key 实际由各 make-*-provider 读自家环境变量。整个文件已删除。
 
-   ;; ==================== Provider Builder ====================
-   #:provider-builder
-   #:create-provider-builder
-   #:for-provider
-   #:with-api-key
-   #:with-api-url
-   #:with-model
-   #:with-max-tokens
-   #:with-temperature
-   #:builder-with-timeout
-   #:with-extra-config
-   #:build-provider
+   ;; 注：曾在此导出 Provider Builder（provider-builder 类 +
+   ;; create-provider-builder + 8 个 fluent 泛型 + build-provider +
+   ;; create-chat-model-from-builder）。Builder/fluent 链是 Java 表达习惯，
+   ;; 与已退役的 ChatClient Builder 同一模式，且全库零真实消费者；
+   ;; create-chat-model 的关键字参数覆盖全部场景。整体删除。
 
    ;; ==================== ChatModel 桥接 ====================
-   #:create-chat-model
-   #:create-chat-model-from-builder))
+   #:create-chat-model))

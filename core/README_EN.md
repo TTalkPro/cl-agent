@@ -32,9 +32,8 @@ After the merge, `cl-agent.core` and `cl-agent.client` (SimpleAgent) can be
 core/
 ├── package-core.lisp        cl-agent.core package (single package)
 ├── conditions.lisp          condition system
-├── macros.lisp              utility macros (-> ->> when-let ...)
+├── macros.lisp              when-let + logging (log-debug/info/warn/error)
 ├── utils.lisp               utilities + ID generator / timestamp provider
-├── validation.lisp          data validation
 ├── dependency-injection.lisp  DI container (standalone facility, unused internally)
 ├── data-convert.lisp        plist <-> hash-table conversion
 ├── json-schema.lisp         params->json-schema / validator
@@ -68,7 +67,7 @@ core/
     │   ├── tool-search.lisp progressive tool disclosure (:chat) + IToolIndex
     │   ├── timeout.lisp     tool timeout (:tool)
     │   ├── approval.lisp    pre-execution approval gate (:tool)
-    │   └── token-xform.lisp token rewriting (:token-xform transducer)
+    │   └── token-xform.lisp token rewriting (:token-xform, (downstream) → (values emit finish))
     └── chat.lisp            chat macro DSL + kernel-chat* entry points
 ```
 

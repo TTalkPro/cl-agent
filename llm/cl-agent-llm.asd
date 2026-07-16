@@ -20,13 +20,8 @@
 ;;;;   - Ollama (local)
 ;;;;
 ;;;; Usage:
-;;;;   ;; Create a service for Kernel
-;;;;   (create-service :anthropic :model "claude-sonnet-4-20250514")
-;;;;
-;;;;   ;; Use provider builder
-;;;;   (-> (create-provider-builder :openai)
-;;;;       (with-model "gpt-4o")
-;;;;       (build-provider))
+;;;;   (cl-agent.llm:create-chat-model :anthropic
+;;;;                                   :model "claude-sonnet-4-20250514")
 
 (asdf:defsystem #:cl-agent-llm
   :description "CL-Agent LLM Service Layer - Multi-Provider LLM Client (v4.1.0)"
@@ -96,9 +91,10 @@
    ;; 表里的 temperature/model 默认值流不进任何请求，只会误导读者。已删除。
    ;; API key 的读取实际发生在各 make-*-provider 里（读自家环境变量）。
    (:module "factory"
+    ;; 注：曾有 builder.lisp（provider-builder + fluent 泛型），Java 式
+    ;; Builder、零真实消费者，已删除；create-chat-model 并入 registry。
     :components
-    ((:file "registry")
-     (:file "builder")))))
+    ((:file "registry")))))
 
 ;; ============================================================
 ;; Changelog

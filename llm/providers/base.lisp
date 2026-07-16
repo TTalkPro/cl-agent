@@ -210,7 +210,6 @@
 ;;; 错误信号函数：
 ;;;
 ;;;   - cl-agent.core:signal-error        - 通用错误信号
-;;;   - cl-agent.core:signal-llm-error    - LLM 错误信号
 ;;;
 ;;; 使用示例：
 ;;;
@@ -218,7 +217,3 @@
 ;;;                               :message "请求超时"
 ;;;                               :provider :openai
 ;;;                               :model "gpt-4o")
-;;;
-;;;   (cl-agent.core:signal-llm-error :openai "gpt-4o"
-;;;                                   :message "API 调用失败"
-;;;                                   :status-code 429)

@@ -61,30 +61,8 @@
 ;;; 导出符号
 ;;; ============================================================
 
-(export '(di-container
-          di-container-p
-          make-di-container
-          di-container-parent
-          di-bind
-          di-bind*
-          di-resolve
-          di-with-dependencies
-          di-release
-          di-clear
-          di-cleanup
-          di-cleanup-p
-          di-lazy-dependency
-          di-lazy-service
-          di-boundp
-          di-resolve-or-default
-          di-list-services
-          di-container-stats
-          di-print-container
-          ;; 请求作用域
-          with-di-request-scope
-          di-request-scope-not-active-error
-          di-request-scope-service-name
-          *di-request-cache*))
+;;; 导出在 package-core.lisp 的 defpackage（此前是 load 时 (export ...)，
+;;; 违反「导出只发生在 defpackage」的纪律，已收口）。
 
 ;;; ============================================================
 ;;; DI 容器类

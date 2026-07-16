@@ -51,13 +51,15 @@
                ;; Layer 3: Client —— SimpleAgent（面向应用的易用层）
                #:cl-agent-client)
 
-  :in-order-to ((asdf:test-op (asdf:test-op #:cl-agent-test))))
+  :in-order-to ((asdf:test-op (asdf:test-op #:cl-agent/test))))
 
 ;;;; ============================================================
 ;;;; Test System
 ;;;; ============================================================
 
-(asdf:defsystem #:cl-agent-test
+;; 次级系统按 ASDF 约定命名为 cl-agent/test——与主系统同文件定义的
+;; 系统名必须以 "cl-agent/" 开头，否则 ASDF 每次加载都告警。
+(asdf:defsystem #:cl-agent/test
   :description "CL-Agent Complete Test Suite"
   :author "David"
   :license "MIT"
@@ -96,6 +98,10 @@
 
                ;; SimpleAgent（cl-agent.client）
                (:file "tests/test-agent")
+
+               ;; Mock 模块自身的测试
+               ;; （此前文件存在但从未列进组件 → 一次都没运行过）
+               (:file "tests/test-mock")
 
                ;; LLM provider tests
                (:file "tests/test-llm")

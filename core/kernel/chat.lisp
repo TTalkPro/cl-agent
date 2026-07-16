@@ -24,6 +24,26 @@
 ;;; kernel-chat：函数形态入口（chat 宏展开到它）
 ;;; ============================================================
 
+(defun %assemble-messages (kernel system user messages)
+  "按 system（缺省取 kernel）→ messages → user 组装消息列表。
+至少要凑出一条非 system 消息，否则报错——只有 system 的请求对模型
+没有意义，早失败好过让 provider 报一个难懂的 400。"
+  (let* ((system (or system (kernel-default-system kernel)))
+         (msgs (append
+                (when system (list (cl-agent.core:system-message system)))
+                messages
+                (when user (list (cl-agent.core:user-message user))))))
+    (unless (remove-if #'cl-agent.core:system-message-p msgs)
+      (error "请求缺少用户输入：请用 (:user ...) 或 (:messages ...) 提供"))
+    msgs))
+
+(defun %merge-request-options (kernel options)
+  "请求级 options 盖 kernel 默认 options（merge 的 primary 优先）。"
+  (let ((defaults (kernel-default-options kernel)))
+    (if defaults
+        (cl-agent.core:merge-chat-options options defaults)
+        options)))
+
 (defun kernel-chat (kernel &key system user messages options tools context)
   "执行一次完整对话轮次，返回 turn-result。
 
@@ -38,16 +58,8 @@
   system/user/messages 至少要凑出一条非 system 消息，否则报错——
   只有 system 的请求对模型没有意义，早失败好过让 provider 报一个
   难懂的 400。"
-  (let* ((system (or system (kernel-default-system kernel)))
-         (msgs (append
-                (when system (list (cl-agent.core:system-message system)))
-                messages
-                (when user (list (cl-agent.core:user-message user)))))
-         ;; 请求级 options 盖 kernel 默认 options（merge 的 primary 优先）
-         (options (let ((defaults (kernel-default-options kernel)))
-                    (if defaults
-                        (cl-agent.core:merge-chat-options options defaults)
-                        options)))
+  (let* ((msgs (%assemble-messages kernel system user messages))
+         (options (%merge-request-options kernel options))
          ;; 请求级工具并进 options 的 tool-callbacks；
          ;; run-tool-loop 里 merge-chat-options 对 tool-callbacks 取并集，
          ;; 于是请求级工具与 kernel :tools 自然叠加。
@@ -58,8 +70,6 @@
                        options)
                       options))
          (ctx context))
-    (unless (remove-if #'cl-agent.core:system-message-p msgs)
-      (error "请求缺少用户输入：请用 (:user ...) 或 (:messages ...) 提供"))
     ;; caller-options 经 context 传给 run-tool-loop，由它合并到每轮调用
     (when options
       (setf (getf ctx :caller-options) options))
@@ -106,20 +116,12 @@
   provider 不支持流式时 chat-model-stream 会降级为一次性调用，
   整段文本作为单个 chunk 送出——token-xform 仍生效。"
   (let* ((plist args)
-         (system (or (getf plist :system) (kernel-default-system kernel)))
-         (user (getf plist :user))
-         (messages (getf plist :messages))
-         (msgs (append (when system (list (cl-agent.core:system-message system)))
-                       messages
-                       (when user (list (cl-agent.core:user-message user)))))
-         (options (let ((defaults (kernel-default-options kernel))
-                        (given (getf plist :options)))
-                    (if defaults
-                        (cl-agent.core:merge-chat-options given defaults)
-                        given)))
+         (msgs (%assemble-messages kernel
+                                   (getf plist :system)
+                                   (getf plist :user)
+                                   (getf plist :messages)))
+         (options (%merge-request-options kernel (getf plist :options)))
          (ctx (getf plist :context)))
-    (unless (remove-if #'cl-agent.core:system-message-p msgs)
-      (error "请求缺少用户输入：请用 (:user ...) 或 (:messages ...) 提供"))
     ;; 工具会被发给模型 → 模型可能发 tool_call → 但这条路径不跑工具循环。
     ;; 宁可直接拦下：静默丢掉工具执行，用户只会看到一段没头没尾的文本。
     (let ((tools (or (getf plist :tools) (kernel-tools kernel))))

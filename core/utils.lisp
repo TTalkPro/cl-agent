@@ -83,15 +83,6 @@
         value
         default)))
 
-(defun get-env-required (var-name)
-  "获取必需的环境变量，不存在时错误"
-  (let ((value (get-env var-name)))
-    (unless value
-      (signal-error 'missing-api-key-error
-                    :message (format nil "Required environment variable not set: ~A" var-name)
-                    :config-key var-name))
-    value))
-
 ;;; ============================================================
 ;;; ID 生成
 ;;; ============================================================
@@ -102,10 +93,6 @@
   默认实现，走标准 ID 生成器。要自定义，setf *default-id-generator*
   或直接 (funcall (make-standard-id-generator))。"
   (funcall (init-default-id-generator)))
-
-(defun generate-short-id (&optional (length 8))
-  "生成短 ID（用于调试和日志）"
-  (subseq (generate-uuid) 0 length))
 
 ;;; ============================================================
 ;;; 时间工具
@@ -118,18 +105,6 @@
   要自定义，setf *default-timestamp-provider*
   或直接 (funcall (make-standard-timestamp-provider))。"
   (funcall (init-default-timestamp-provider)))
-
-(defun format-timestamp (timestamp &optional (format :rfc3339))
-  "格式化时间戳
-
-  参数：
-    TIMESTAMP - Unix 时间戳
-    FORMAT    - :rfc3339, :iso8601, :human"
-  (let ((ts (local-time:unix-to-timestamp timestamp)))
-    (ecase format
-      (:rfc3339 (local-time:format-timestring nil ts :format '((:year 4) #\- (:month 2) #\- (:day 2) #\T (:hour 2) #\: (:min 2) #\: (:sec 2) #\Z)))
-      (:iso8601 (local-time:format-timestring nil ts))
-      (:human (local-time:format-timestring nil ts :timezone local-time:+utc-zone+)))))
 
 ;;; ============================================================
 ;;; JSON/Alist 操作
@@ -167,11 +142,8 @@
 ;;; 它在 core 内零调用，且被 cl-agent.llm 中同名的真 alist 访问器
 ;;; （llm/providers.lisp，35 处调用）静默覆盖——那才是干活的那个。
 ;;; 故删除本副本并取消导出，让 alist-get 归 cl-agent.llm 私有。
-;;; 需要 plist 访问用 plist-get；需要 alist 访问请另写正确实现。
-
-(defun plist-get (plist key &optional default)
-  "从属性列表中获取值"
-  (getf plist key default))
+;;; 需要 plist 访问直接用 getf（此处曾有 plist-get——对 getf 的逐字
+;;; 包装，零调用，已删）。
 
 
 ;;; 注：此处曾有一个 build-url (base-url params)——零调用的死实现。
@@ -179,83 +151,12 @@
 ;;; （被 http-get / http-get-async 调用）。两者同名不同签名，
 ;;; 合并 http 进 core 时必然撞车；删死留活。
 
-;;; ============================================================
-;;; 字符串工具
-;;; ============================================================
-
-(defun truncate-string (str length &optional (suffix "..."))
-  "截断字符串到指定长度"
-  (if (> (length str) length)
-      (concatenate 'string (subseq str 0 (- length (length suffix))) suffix)
-      str))
-
-(defun clean-whitespace (str)
-  "清理字符串中的多余空白"
-  (cl-ppcre:regex-replace-all "\\s+" str " "))
-
-(defun string-empty-p (str)
-  "检查字符串是否为空"
-  (or (null str)
-      (string= str "")
-      (string= (string-trim '(#\Space #\Tab #\Newline) str) "")))
-
-(defun ensure-string (obj)
-  "确保对象是字符串"
-  (etypecase obj
-    (string obj)
-    (symbol (symbol-name obj))
-    (number (write-to-string obj))
-    (t (princ-to-string obj))))
-
-;;; ============================================================
-;;; 列表工具
-;;; ============================================================
-
-(defun take (n list)
-  "取列表的前 N 个元素"
-  (when (and list (plusp n))
-    (cons (car list) (take (1- n) (cdr list)))))
-
-(defun drop (n list)
-  "丢弃列表的前 N 个元素"
-  (if (or (zerop n) (null list))
-      list
-      (drop (1- n) (cdr list))))
-
-(defun group-by (key-fn list)
-  "按键函数分组列表"
-  (let ((groups (make-hash-table :test 'equal)))
-    (dolist (item list)
-      (let ((key (funcall key-fn item)))
-        (push item (gethash key groups))))
-    (loop for key being each hash-key of groups
-          collect (cons key (gethash key groups)))))
-
-;;; ============================================================
-;;; 函数组合
-;;; ============================================================
-
-(defmacro compose (&rest functions)
-  "组合函数（从右到左）"
-  (if (null functions)
-      #'identity
-      (let ((fn (car (last functions)))
-            (rest (butlast functions)))
-        (if rest
-            `(lambda (&rest args)
-               (funcall ,(loop for f in (reverse rest)
-                               collect f into result
-                               finally (return `#',result))
-                        (apply #',fn args)))
-            fn))))
-
-(defmacro pipe (&rest functions)
-  "管道函数（从左到右）"
-  `(compose ,@(reverse functions)))
-
-;;; 链式调用宏（-> / ->> / as->）定义在 macros.lisp 的控制流宏一节。
-;;; 此处曾有一份与之逐字相同的 -> / ->> 副本（仅 docstring 微差），
-;;; 因加载顺序在后而一直顶替 macros.lisp 的版本并产生重定义警告，已删除。
+;;; 注：此处曾有「字符串工具」（truncate-string / clean-whitespace /
+;;; string-empty-p / ensure-string）、「列表工具」（take / drop /
+;;; group-by）、「函数组合」（compose / pipe，其中 compose 生成的
+;;; `#',result 展开本身就是坏的）与 Clojure 线程宏副本。全库零调用
+;;; ——CL 自带 subseq/nthcdr/princ-to-string/alexandria:compose，
+;;; 框架不重复发明。已整体删除。
 
 ;;; ============================================================
 ;;; 动态绑定继承（跨线程）
@@ -325,33 +226,10 @@ CAPTURE 为空时退化为普通 progn（progv 空列表即无绑定）。"
          ,@body))))
 
 ;;; 日志工具（log-debug / log-info / log-warn / log-error）定义在
-;;; macros.lisp 的日志系统一节：带级别过滤、时间戳与 *log-context*。
+;;; macros.lisp 的日志系统一节：带级别过滤与时间戳。
 ;;; 此处曾有一份无级别过滤的简易重复实现，因 macros.lisp 中 as-> 缺一个
 ;;; 右括号、导致其后全部定义（含整个日志系统）从未生效而长期顶替使用；
 ;;; 括号修复后已删除，以免覆盖真正的实现。
 
-;;; ============================================================
-;;; Tool Specification
-;;; ============================================================
-
-(defun make-tool (&key name description parameters handler)
-  "Create a tool specification plist.
-
-Parameters:
-  NAME        - Tool name (string)
-  DESCRIPTION - Tool description
-  PARAMETERS  - Parameter specifications list
-  HANDLER     - Handler function (lambda (args) ...)
-
-Returns:
-  Tool specification plist
-
-Example:
-  (make-tool :name \"search\"
-             :description \"Search documents\"
-             :parameters '((:name \"query\" :type :string :required t))
-             :handler (lambda (args) (search (getf args :query))))"
-  (list :name name
-        :description description
-        :parameters parameters
-        :handler handler))
+;;; 注：此处曾有 make-tool——plist 版工具规格构造器，早于
+;;; tool-callback / deftool 体系，零调用。工具请用 deftool 定义。

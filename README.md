@@ -259,7 +259,6 @@
 | **llm** | `cl-agent.llm` | 提供商实现，`create-chat-model` 一步创建 ChatModel |
 | **client** | `cl-agent.client` | SimpleAgent：有状态对话 + callbacks + 错误归一化 + HITL |
 | **mock** | `cl-agent.mock` | Mock provider（测试/演示，无需 API 密钥） |
-| **protocols** | — | A2A 协议支持（独立系统，**未完成且加载即报错**，不在主构建） |
 
 ## 安装与测试
 

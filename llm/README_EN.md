@@ -34,21 +34,24 @@ llm/
 ├── providers.lisp            # Provider registration
 ├── streaming.lisp            # Streaming support
 ├── service.lisp              # Service layer (response normalization)
-├── schema/                   # Schema conversion
-│   ├── openai.lisp          # OpenAI format
-│   ├── anthropic.lisp       # Anthropic format
-│   └── response.lisp        # Response schema
 ├── providers/                # Provider implementations
-│   ├── base.lisp            # Base class
-│   ├── define-provider.lisp # Common macros and functions
+│   ├── base.lisp            # base class
+│   ├── define-provider.lisp # shared wire helpers
+│   ├── openai-compat.lisp   # OpenAI-compat base + define-openai-compat-provider
 │   ├── anthropic.lisp       # Anthropic Claude
 │   ├── openai.lisp          # OpenAI GPT
 │   ├── zhipu.lisp           # ZhipuAI GLM
-│   └── bailian.lisp         # Alibaba Cloud DashScope
-└── factory/                  # Factory pattern
-    ├── registry.lisp        # Provider registry
-    ├── config.lisp          # Configuration management
-    └── builder.lisp         # Builder API
+│   ├── ollama.lisp          # Ollama (local)
+│   ├── minimax.lisp         # MiniMax
+│   ├── deepseek.lisp        # DeepSeek
+│   ├── gemini.lisp          # Google Gemini
+│   ├── mistral.lisp         # Mistral AI
+│   └── dashscope.lisp       # Alibaba Cloud DashScope (Qwen)
+├── stream/                   # real SSE streaming (llm-chat-stream)
+│   ├── anthropic.lisp       # Anthropic format (anthropic + minimax)
+│   └── openai.lisp          # OpenAI-compatible format
+└── factory/                  # factory
+    └── registry.lisp        # provider registry + aliases + create-chat-model
 ```
 
 ## Supported Providers

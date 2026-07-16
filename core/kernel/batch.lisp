@@ -66,6 +66,38 @@ find-callback-for-call 找不到工具时是 signal 而非返回 nil。它的调
             (format nil "错误：~A" (or (getf err :message) "工具执行失败"))
             "（执行失败）"))))
 
+;;; 下面两个助手是三处调用点（顺序批 / 并行批 / manager 骨架）的
+;;; 公共分母——此前各处手写同一段构造，改一处漏两处。
+
+(defun tool-call->request (callback tool-call context)
+  "由一次 tool-call 构造 tool-request（参数归一化为 plist）。"
+  (make-tool-request
+   callback
+   :args (cl-agent.core:arguments->plist
+          (cl-agent.core:tool-call-arguments tool-call))
+   :context context))
+
+(defun tool-results->responses (tool-results tool-calls)
+  "把一批 tool-result 转成协议层 tool-response 列表（与 tool-calls 同序、
+id/name 一一对应——顺序错位 = 回传模型的消息 id 全错）。"
+  (mapcar (lambda (tr tc)
+            (cl-agent.core:make-tool-response
+             :id (cl-agent.core:tool-call-id tc)
+             :name (cl-agent.core:tool-call-name tc)
+             :text (tool-result->text tr)))
+          tool-results tool-calls))
+
+(defun batch-error-summaries (tool-results tool-calls)
+  "收集批内失败调用的错误摘要 plist 列表（:id :name :class :message）。"
+  (loop for tr in tool-results
+        for tc in tool-calls
+        for err = (tool-result-error tr)
+        when err
+          collect (list :id (cl-agent.core:tool-call-id tc)
+                        :name (cl-agent.core:tool-call-name tc)
+                        :class (getf err :class)
+                        :message (getf err :message))))
+
 ;;; ============================================================
 ;;; 并行/串行执行
 ;;; ============================================================
@@ -94,12 +126,7 @@ find-callback-for-call 找不到工具时是 signal 而非返回 nil。它的调
                ;; 那些打外部依赖、最需要重试的。
                (resp (or resolve-error
                          (%run-one-tool
-                          kernel
-                          (make-tool-request
-                           callback
-                           :args (cl-agent.core:arguments->plist
-                                  (cl-agent.core:tool-call-arguments tc))
-                           :context context)))))
+                          kernel (tool-call->request callback tc context)))))
           (unless direct-p (setf return-direct nil))
           (push resp results)
           (when (tool-result-error resp)
@@ -265,11 +292,7 @@ receive-result 不保证顺序，故任务里带上索引，回填到定位数�
                             (list direct-p
                                   resolve-error
                                   (when callback
-                                    (make-tool-request
-                                     callback
-                                     :args (cl-agent.core:arguments->plist
-                                            (cl-agent.core:tool-call-arguments tc))
-                                     :context context))))))
+                                    (tool-call->request callback tc context))))))
                       tool-calls))
              (results (%submit-and-collect kernel prepared))
              ;; prepared 的元素是 (direct-p resolve-error req)

@@ -279,7 +279,6 @@ only parses:
 | **llm** | `cl-agent.llm` | Provider implementations; `create-chat-model` builds a ChatModel in one step |
 | **client** | `cl-agent.client` | SimpleAgent: stateful chat + callbacks + error normalization + HITL |
 | **mock** | `cl-agent.mock` | Mock provider (tests/demos, no API key needed) |
-| **protocols** | — | A2A protocol support (standalone system, **unfinished and errors on load**, not in the main build) |
 
 ## Install & Test
 

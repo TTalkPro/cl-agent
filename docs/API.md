@@ -52,9 +52,10 @@ This is exactly the `defpackage` used by `examples/kernel-usage.lisp` and
 > merged. **Every "you must shadowing-import" claim in older docs is obsolete.**
 > See [Migration](#migration).
 >
-> The one remaining `:shadow` is `cl-agent.llm`'s `chat` — its low-level
-> `(chat client messages)` function collides with core's `chat` macro. It only
-> matters if you `:use` both packages.
+> The library is now **shadow-free**: `cl-agent.llm` used to `(:shadow #:chat)`
+> because its low-level function collided with core's `chat` macro; that
+> function is now `client-chat` and the shadow is gone. You can `:use` any
+> combination of this library's packages without name conflicts.
 
 ## cl-agent.core — Chat Model API
 
@@ -270,7 +271,7 @@ Three onion chains, each with its own carriers and terminal:
 | `:chat` | `filter-chat-hook` | `prompt` → `chat-response` | `chat-model-call` |
 | `:tool` | `filter-tool-hook` | `tool-request` → `tool-result` | tool execution |
 | `:turn` | `filter-turn-hook` | `turn-request` → `turn-result` | `run-tool-loop` |
-| `:token-xform` | `filter-token-xform` | transducer `(rf) → rf'` | streaming token flow |
+| `:token-xform` | `filter-token-xform` | `(downstream) → (values emit finish)` | streaming token flow |
 
 ```
 invoke-turn → [:turn filters] → run-tool-loop
@@ -363,7 +364,7 @@ downstream** — upstream can never be re-run, and recursive re-entry is free.
 
 (make-tool-result &key value writes error)
 (tool-result-value r)       ; the tool's return value
-(tool-result-writes r)      ; state-write intents, alist of (key . value)
+(tool-result-writes r)      ; state-write intents plist (see ":writes state folding")
 (tool-result-error r)       ; (:class :semantic|:transient|:environment :message "...") or nil
 
 (tool-result->text r)       ; → text sent back to the model; error results
@@ -377,7 +378,7 @@ downstream** — upstream can never be re-run, and recursive re-entry is free.
                               loop-state pending-tool pause-reason)
 (turn-result-status r)          ; :completed | :paused | :cancelled | :error
 (turn-result-response r)        ; final chat-response (nil on error)
-(turn-result-tool-context r)
+(turn-result-tool-context r)    ; final context after folding every batch's :writes
 (turn-result-tool-calls-made r) ; tool-call count for this turn
 ;; Set only when :paused (see "HITL: pause and resume")
 (turn-result-loop-state r)      ; resume snapshot, fed to resume-turn
@@ -398,7 +399,7 @@ downstream** — upstream can never be re-run, and recursive re-entry is free.
 
 ```lisp
 (build-kernel &key model tools filters eligibility-fn settings tool-manager
-                   system options tool-gate)
+                   system options tool-gate state-slots)
 ;; model          chat-model instance
 ;; tools          list of tool symbols or tool-callbacks (default nil)
 ;; filters        list of filter instances (order = onion order; default nil)
@@ -410,10 +411,59 @@ downstream** — upstream can never be re-run, and recursive re-entry is free.
 ;; options        default chat-options; a request-level (:options ...) merges over it
 ;; tool-gate      the approval gate (HITL): (tool-call) → :proceed | :pause
 ;;                | (:pause . reason); nil (default) = no approval, all execute
+;; state-slots    state-slot declarations ((key :init v0 :reduce fn) ...) —
+;;                merge semantics for tool-batch :writes (see below)
 
 (kernel-model k) (kernel-tools k) (kernel-filters k)
 (kernel-eligibility-fn k) (kernel-settings k) (kernel-tool-manager k)
 (kernel-default-system k) (kernel-default-options k) (kernel-tool-gate k)
+(kernel-state-slots k)
+```
+
+### :writes state folding (the tool-batch MapReduce contract)
+
+The context a tool sees during a parallel batch is a **read-only snapshot** —
+mutating it directly would race. Write intents are declared through the return
+value; once the whole batch has collected (the barrier), they fold into the
+context in the **original tool-call order**, so the actual parallel
+interleaving never affects the merged result:
+
+```lisp
+;; a tool declares writes via (values result writes-plist)
+(deftool take-note (&key text)
+  "Take a note"
+  (:param text :string "content" :required t)
+  (values (format nil "noted: ~A" text)
+          (list :notes (list text))))      ; write intent: takes no effect here
+
+;; :state-slots declares the merge semantics
+(build-kernel :model m :tools '(take-note)
+              :state-slots (list (list :notes :init nil
+                                       :reduce (lambda (old new)
+                                                 (append old new)))))
+
+;; one batch of take-note("a") take-note("b") → barrier fold → (:notes ("a" "b"))
+;; next-round tools see the folded snapshot via tool-context;
+;; (turn-result-tool-context result) hands the final state back to the caller
+```
+
+Rules:
+- a slot with `:reduce` folds through it (`:init` supplies the old value when
+  the context has none)
+- undeclared slots are **last-writer** — later writes win, deterministic by
+  call order
+- a key written ≥2 times in one batch with no reducer triggers a `log-warn`
+- **writes of a failed call (error non-nil) never take effect** (transactional)
+- HITL resume folds the same way: the calls that actually ran commit their
+  writes; rejected/replied ones have none
+
+Low-level primitives (rarely needed directly):
+
+```lisp
+(apply-writes context writes-seq &optional slots)
+;; → (values new-context conflict-keys); pure, does not mutate its arguments
+(fold-batch-writes kernel tool-results context)
+;; → new-context; skips failed calls' writes, warns on conflicts
 ```
 
 The kernel is minimal: **no memory field** — memory is a filter, not an intrinsic
@@ -591,16 +641,31 @@ To get "re-prompt the model with the validation error until it complies", attach
   (:call :entity))
 ```
 
-> `(:stream fn)` / `kernel-chat-stream` currently degrade to a synchronous call
-> (the full text arrives as a single chunk). Real SSE streaming exists at the
-> ChatModel layer (`chat-model-stream`); the kernel's `invoke-chat-stream` is not
-> implemented yet.
+> **Streaming**: `(:stream fn)` / `kernel-chat-stream` go through
+> `invoke-chat-stream` — the `:chat` filter chain applies as usual and the
+> `:token-xform` pipeline is assembled inside the streaming terminal. Two limits:
+> - **No tool loop** (it is a single streaming call). A request that would send
+>   tools to the model **signals an error** rather than silently dropping tool
+>   execution; use `kernel-chat` when you need tools.
+> - If the provider has no streaming, `chat-model-stream` degrades to a one-shot
+>   call and the whole text arrives as a single chunk (`:token-xform` still runs).
 
 ### Invoke primitives
 
 ```lisp
 (invoke-chat kernel prompt)          ; :chat chain → chat-model-call. Single call,
-                                     ; executes no tools → chat-response
+                                     ; executes no tools
+                                     ; → (values chat-response effective-prompt)
+                                     ; The 2nd value is the prompt **as rewritten by
+                                     ; the :chat chain**: tool execution must use the
+                                     ; options the model actually saw, else filter-
+                                     ; injected tools (e.g. tool-search's search_tools)
+                                     ; come back as "tool not found"
+(invoke-chat-stream kernel prompt on-token)
+                                     ; :chat chain → chat-model-stream; the
+                                     ; :token-xform pipeline is assembled inside the
+                                     ; terminal → chat-response
+                                     ; Single call — does NOT run the tool loop
 (invoke-tool kernel tool-request)    ; :tool chain → tool execution → kernel:tool-result
 (invoke-tool-batch kernel tool-calls options context)
                                      ; → (values tool-results return-direct-p)
@@ -685,17 +750,26 @@ action**:
 | Class | Tool declares `:retry` | Actual action |
 |---|---|---|
 | `:semantic` | any | Feed the error text back to the model (loop continues) |
-| `:transient` | any | Feed the error text back to the model |
-| `:environment` | any | Feed the error text back to the model |
+| `:transient` | `t` | **Exponential-backoff retry**, up to `*transient-retry-attempts*` (default 3) |
+| `:transient` | `nil` | Feed the error text back to the model |
+| `:environment` | any | Feed the error text back to the model (see divergence below) |
 
-> **Graded retry is not implemented.** The comments in `batch.lisp` describe a
-> policy matrix (`:transient` + `:retry` → exponential backoff, `:environment` →
-> pause for a human), but the code does not implement it: `invoke-tool-batch`
-> never reads `tool-callback-retry-p`, performs no backoff, and never pauses.
-> `deftool` records `(:retry t)` on the callback, but the kernel's batch path does
-> not consume it. The classification itself is accurate; what is missing is the
-> routing from class to action — see known divergence 3 in
-> [Tool Calling Architecture](tool-calling.md).
+Retry knobs (both are `defparameter`s on `cl-agent.core`):
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `*transient-retry-attempts*` | 3 | Max attempts **including** the first |
+| `*transient-retry-base-delay*` | 0.1 | Backoff base in seconds: attempt *n* waits `base * 2^(n-1)` |
+
+Retry is **opt-in per tool** — only a tool declaring `(:retry t)` is ever retried.
+Retrying means repeating side effects, so the framework never decides that for
+the tool author.
+
+> **Known divergence:** `:environment` still only converts to text. In clj-agent
+> it pauses for a human (an `:env-retry`-class pause). HITL's approval-class pause
+> is implemented here (`:tool-gate` + `resume-turn`); the environment-class one is
+> not — it needs to hook in at the barrier (after the whole batch) rather than at
+> tool resolution. See [Tool Calling Architecture](tool-calling.md).
 
 ### Built-in filters (10 kinds)
 
@@ -759,12 +833,23 @@ action**:
 ;; 8. tool-search-filter (:chat) — mirrors ToolSearchToolCallingAdvisor
 (tool-search-filter index &key (limit 5))
 (defgeneric search-tools (index query &key limit))   ; → list of tool-callbacks
-(make-keyword-tool-index tool-callbacks)             ; zero-dependency keyword index
-;; Before each LLM call it reads :discovered-tools from the tool-context and
-;; rewrites the prompt options' :tool-callbacks to the discovered set; the first
-;; round (no discovered set) is left untouched.
-;; Currently simplified: the filter-side rewrite is in place, the inline
-;; search_tools tool is not wired up yet.
+(make-keyword-tool-index tools)                      ; zero-dep keyword index (CJK bigram)
+;; Each round it rewrites the tools exposed to the model to
+;; [search_tools] + whatever this conversation has already discovered.
+;; **The first round carries a single schema (search_tools)** — that is where the
+;; token saving comes from. The model calls search_tools(query) → retrieval →
+;; the hits are recorded for this conversation → next round it can call them.
+;; search_tools is created and injected by the filter — do NOT add it to :tools.
+;; The discovered set is isolated per conversation-id.
+;;
+;; Measured (MiniMax, 12 tools): first round 1 vs 12; 13 vs 24 schemas over the
+;; whole turn — 46% saved. The more tools, the bigger the saving.
+
+(build-kernel :model m
+              :tools '(get-weather get-stock send-mail ...)   ; the full set
+              :filters (list (tool-search-filter
+                              (make-keyword-tool-index
+                               '(get-weather get-stock send-mail ...)))))
 
 ;; 9. timeout-filter (:tool)
 (timeout-filter milliseconds)
@@ -1098,7 +1183,6 @@ These pre-merge `cl-agent.chat` symbols **no longer exist**: `tool-calling-manag
 
 ```lisp
 (create-chat-model :anthropic :model "..." :api-key "..." :options opts)
-(create-chat-model-from-builder builder :options opts)
 ;; providers: :anthropic :openai :zhipu :deepseek :gemini :mistral
 ;;            :ollama :dashscope :minimax (aliases google/qwen/bailian/claude/glm...)
 ```

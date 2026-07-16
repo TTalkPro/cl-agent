@@ -46,9 +46,9 @@ Advisor 与 ChatClient 两层移植物均已整体退役，见文末[迁移指�
 > 的旧 ToolCallingManager 整体删除，随后三包合并。**旧文档里所有
 > 「必须 shadowing-import」的说法都已作废。** 迁移见文末[迁移指引](#迁移)。
 >
-> 唯一还在的 `:shadow` 是 `cl-agent.llm` 的 `chat`——它的低层函数
-> `(chat client messages)` 与 core 的 `chat` 宏撞名，同时 `:use` 这两个包
-> 时才需要处理。
+> 全库已**零 shadow**：`cl-agent.llm` 曾因低层函数与 core 的 `chat` 宏
+> 撞名而 `(:shadow #:chat)`，该函数已改名 `client-chat`，shadow 随之消失。
+> 现在同时 `:use` 任意本库的包都不会撞名。
 
 ## cl-agent.core —— Chat Model API
 
@@ -259,7 +259,7 @@ ChatModel 只做**单次**模型调用——解析工具引用并注入 schema�
 | `:chat` | `filter-chat-hook` | `prompt` → `chat-response` | `chat-model-call` |
 | `:tool` | `filter-tool-hook` | `tool-request` → `tool-result` | 工具执行 |
 | `:turn` | `filter-turn-hook` | `turn-request` → `turn-result` | `run-tool-loop` |
-| `:token-xform` | `filter-token-xform` | transducer `(rf) → rf'` | 流式 token 流 |
+| `:token-xform` | `filter-token-xform` | `(downstream) → (values emit finish)` | 流式 token 流 |
 
 ```
 invoke-turn → [:turn filters] → run-tool-loop
@@ -347,7 +347,7 @@ invoke-turn → [:turn filters] → run-tool-loop
 
 (make-tool-result &key value writes error)
 (tool-result-value r)       ; 工具返回值
-(tool-result-writes r)      ; 状态写意图 alist（(key . value)...）
+(tool-result-writes r)      ; 状态写意图 plist（见下方「:writes 状态折叠」）
 (tool-result-error r)       ; (:class :semantic|:transient|:environment :message "...") 或 nil
 
 (tool-result->text r)       ; → 回传模型的文本；错误结果渲染为「错误：<message>」
@@ -360,7 +360,7 @@ invoke-turn → [:turn filters] → run-tool-loop
                               loop-state pending-tool pause-reason)
 (turn-result-status r)          ; :completed | :paused | :cancelled | :error
 (turn-result-response r)        ; 最终 chat-response（出错时 nil）
-(turn-result-tool-context r)
+(turn-result-tool-context r)    ; 折叠完全部批次 :writes 后的最终 context
 (turn-result-tool-calls-made r) ; 本轮工具调用计数
 ;; 仅 :paused 时有值（见「HITL：暂停与续跑」）
 (turn-result-loop-state r)      ; 续跑快照，喂给 resume-turn
@@ -380,7 +380,7 @@ invoke-turn → [:turn filters] → run-tool-loop
 
 ```lisp
 (build-kernel &key model tools filters eligibility-fn settings tool-manager
-                   system options tool-gate)
+                   system options tool-gate state-slots)
 ;; model          chat-model 实例
 ;; tools          工具符号列表或 tool-callback 列表（缺省 nil）
 ;; filters        filter 实例列表（顺序 = 洋葱层级；缺省 nil）
@@ -392,10 +392,54 @@ invoke-turn → [:turn filters] → run-tool-loop
 ;; options        默认 chat-options；请求级 (:options ...) 合并覆盖
 ;; tool-gate      工具审批闸门（HITL）：(tool-call) → :proceed | :pause
 ;;                | (:pause . 原因)；nil（缺省）= 不审批，全部直接执行
+;; state-slots    状态槽声明 ((key :init v0 :reduce fn) ...)——工具批次
+;;                :writes 的合并语义（见「:writes 状态折叠」）
 
 (kernel-model k) (kernel-tools k) (kernel-filters k)
 (kernel-eligibility-fn k) (kernel-settings k) (kernel-tool-manager k)
 (kernel-default-system k) (kernel-default-options k) (kernel-tool-gate k)
+(kernel-state-slots k)
+```
+
+### :writes 状态折叠（工具批次的 MapReduce 契约）
+
+工具在并行批次中拿到的 context 是**只读快照**——直接改它会引入竞态。
+写意图经返回值声明，整批收齐后（屏障）按 tool-call **原始序**折叠，
+并行的实际交错不影响合并结果：
+
+```lisp
+;; 工具用 (values 结果 writes-plist) 声明写意图
+(deftool take-note (&key text)
+  "记一条笔记"
+  (:param text :string "内容" :required t)
+  (values (format nil "已记：~A" text)
+          (list :notes (list text))))       ; 写意图：不在这里生效
+
+;; :state-slots 声明合并语义
+(build-kernel :model m :tools '(take-note)
+              :state-slots (list (list :notes :init nil
+                                       :reduce (lambda (old new)
+                                                 (append old new)))))
+
+;; 一批两个 take-note("a") take-note("b") → 屏障折叠 → (:notes ("a" "b"))
+;; 下一轮工具经 tool-context 看到折叠后的快照；
+;; 最终由 (turn-result-tool-context result) 交还调用方
+```
+
+规则：
+- 声明了 `:reduce` 的槽用它折叠（context 里无老值时用 `:init`）
+- 未声明的槽 **last-writer**——后写覆盖，按 call 序确定
+- 同批被写 ≥2 次且无 reducer 的键会 `log-warn` 告警
+- **失败调用（error 非 nil）的写意图不生效**（事务性）
+- HITL 续跑同样折叠：真执行的部分提交写意图，被拒/被答复的没有写
+
+底层原语（一般不直接用）：
+
+```lisp
+(apply-writes context writes-seq &optional slots)
+;; → (values 新context 冲突键列表)；纯函数，不修改实参
+(fold-batch-writes kernel tool-results context)
+;; → 新context；跳过失败调用的 writes，冲突自动告警
 ```
 
 kernel 极简：**没有 memory 字段**——记忆是 filter，不是 kernel 的固有属性。
@@ -563,15 +607,27 @@ resume 时重新提供；本类只装「续跑所需的数据」。
   (:call :entity))
 ```
 
-> `(:stream fn)` / `kernel-chat-stream` 当前降级为同步调用（完整文本作为单个
-> chunk 回调一次）。真 SSE 流式在 ChatModel 层（`chat-model-stream`）已就位，
-> kernel 的 `invoke-chat-stream` 尚未落地。
+> **流式**：`(:stream fn)` / `kernel-chat-stream` 走 `invoke-chat-stream` —
+> `:chat` filter 链照常生效，`:token-xform` 管道组装在流式 terminal 内侧。
+> 两条限制：
+> - **不跑工具循环**（单次流式调用）。会把工具发给模型的请求直接**报错**，
+>   不静默丢掉工具执行；带工具请用 `kernel-chat`。
+> - provider 不支持流式时 `chat-model-stream` 降级为一次性调用，整段文本作为
+>   单个 chunk 送出（`:token-xform` 仍生效）。
 
 ### Invoke 原语
 
 ```lisp
 (invoke-chat kernel prompt)          ; :chat 链 → chat-model-call。单次，不执行工具
-                                     ; → chat-response
+                                     ; → (values chat-response effective-prompt)
+                                     ; 第二值是**经 :chat 链改写后**的 prompt：
+                                     ; 工具执行必须按模型实际看到的那份 options 来，
+                                     ; 否则 filter 注入的工具（如 tool-search 的
+                                     ; search_tools）会「找不到工具」
+(invoke-chat-stream kernel prompt on-token)
+                                     ; :chat 链 → chat-model-stream，:token-xform
+                                     ; 管道在 terminal 内侧组装 → chat-response
+                                     ; 单次调用，**不跑工具循环**
 (invoke-tool kernel tool-request)    ; :tool 链 → 工具执行 → kernel:tool-result
 (invoke-tool-batch kernel tool-calls options context)
                                      ; → (values tool-results return-direct-p)
@@ -641,19 +697,29 @@ environment-tool-failure         ; 环境（服务宕机/权限不足）→ 需�
 （timeout/连接拒绝/429/503 → `:transient`；permission denied/unauthorized/
 forbidden → `:environment`）；兜底 `:semantic`（保守，不重试）。
 
-批次路由（`invoke-tool-batch`）——**当前三类故障动作相同**：
+批次路由（`invoke-tool-batch`）：
 
 | 分类 | 工具声明 `:retry` | 实际动作 |
 |---|---|---|
 | `:semantic` | 任意 | 转文本回传模型（不中断循环） |
-| `:transient` | 任意 | 转文本回传模型 |
-| `:environment` | 任意 | 转文本回传模型 |
+| `:transient` | `t` | **指数退避重试**，最多 `*transient-retry-attempts*` 次（缺省 3） |
+| `:transient` | `nil` | 转文本回传模型 |
+| `:environment` | 任意 | 转文本回传模型（见下方偏差） |
 
-> **分级重试尚未落地。** `batch.lisp` 的注释描绘了一张策略矩阵（`:transient` +
-> `:retry` → 指数退避、`:environment` → 暂停等人介入），但代码没有实现这一段：
-> `invoke-tool-batch` 不读 `tool-callback-retry-p`、不做退避、也不暂停。
-> `(:retry t)` 会被 `deftool` 记到 callback 上，kernel 批执行路径不消费它。
-> 分类本身是准确的，缺的是分类到动作的路由——详见
+重试旋钮（都是 `cl-agent.core` 上的 `defparameter`）：
+
+| 变量 | 缺省 | 含义 |
+|---|---|---|
+| `*transient-retry-attempts*` | 3 | 最大尝试次数（**含**首次） |
+| `*transient-retry-base-delay*` | 0.1 | 退避基数秒：第 n 次尝试前睡 `base * 2^(n-1)` |
+
+重试是**逐工具 opt-in** 的——只有声明了 `(:retry t)` 的工具才会被重试。
+重试意味着重复副作用，框架不替工具作者做这个决定。
+
+> **已知偏差：** `:environment` 目前仍只转文本。在 clj-agent 里它会
+> **暂停等人**（`:env-retry` 类暂停）。本仓库的 HITL 已实现审批类暂停
+> （`:tool-gate` + `resume-turn`），环境类暂停未做——它需要在屏障处
+> （整批执行完）切入，而非工具解析处。详见
 > [工具调用架构](tool-calling_CN.md)的「已知偏差」第 3 条。
 
 ### 内置 Filter（10 类）
@@ -708,13 +774,24 @@ forbidden → `:environment`）；兜底 `:semantic`（保守，不重试）。
 ;; 每 turn 注入一次：取入口最后一条 user 问题 → 检索 → 拼进消息。
 ;; 检索为空时不注入（偏离 Spring 的严格 grounding 语义）。
 
-;; 8. tool-search-filter (:chat) —— 对标 ToolSearchToolCallingAdvisor
-(tool-search-filter index &key (limit 5))
+;; 8. tool-search-filter (:chat) —— 渐进式工具披露，对标 ToolSearchToolCallingAdvisor
+(tool-search-filter index &key (limit 5) (instruction *tool-search-instruction*))
 (defgeneric search-tools (index query &key limit))   ; → tool-callback 列表
-(make-keyword-tool-index tool-callbacks)             ; 零依赖关键词索引
-;; 每轮 LLM 调用前从 tool-context 取 :discovered-tools，把 prompt options 的
-;; :tool-callbacks 改写为已发现集合；首轮（无发现集合）不改写。
-;; 当前为简化版：filter 侧改写逻辑已就位，search_tools 内联工具尚未接入。
+(make-keyword-tool-index tools)                      ; 零依赖关键词索引（中文 bigram）
+;; 每轮把暴露给模型的工具改写为 [search_tools] + 本会话已发现的工具。
+;; **首轮只有 search_tools 一个 schema** —— 这才是省 token 的来源。
+;; 模型调 search_tools(query) → 检索 → 记入本会话发现集合 → 下轮可直接调用。
+;; search_tools 由 filter 内部创建并注入，**不要**自己加进 :tools。
+;; 发现集合按 conversation-id 隔离。
+;;
+;; 实测（MiniMax，12 个工具）：首轮 1 vs 12；整轮 13 vs 24 个 schema，省 46%。
+;; 工具越多省越多。
+
+(build-kernel :model m
+              :tools '(get-weather get-stock send-mail ...)   ; 全量
+              :filters (list (tool-search-filter
+                              (make-keyword-tool-index
+                               '(get-weather get-stock send-mail ...)))))
 
 ;; 9. timeout-filter (:tool)
 (timeout-filter milliseconds)
@@ -728,7 +805,7 @@ forbidden → `:environment`）；兜底 `:semantic`（保守，不重试）。
 ;; sensitive-names  需审批的工具名列表；缺省 nil = 全部审批
 ;; 拒绝 → 返回 tool-result(value=拒绝文本)，不执行，文本回传模型
 
-;; 11. token-xform（:token-xform，transducer 风格 (rf) → rf'，非 around 链）
+;; 11. token-xform（:token-xform，(downstream) → (values emit finish)，非 around 链）
 (token-redact-filter patterns &key (replacement "***"))  ; 逐 token 脱敏（无状态）
 (hold-release-filter &key approve-fn)                    ; 缓冲全部 token →
 ;; 流结束时 (approve-fn full-text) → approved 一次性输出 / rejected 输出拒答文本
@@ -1026,7 +1103,6 @@ kernel 工具链的响应载体改名为 `tool-result`，与 turn 链的 `turn-r
 
 ```lisp
 (create-chat-model :anthropic :model "..." :api-key "..." :options opts)
-(create-chat-model-from-builder builder :options opts)
 ;; 支持：:anthropic :openai :zhipu :deepseek :gemini :mistral
 ;;       :ollama :dashscope :minimax（别名 google/qwen/bailian/claude/glm...）
 ```

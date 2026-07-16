@@ -12,7 +12,6 @@
 
   :serial t
   :components ((:file "package")
-               (:file "llm")
-               (:file "tools"))
+               (:file "llm"))
 
-  :in-order-to ((asdf:test-op (asdf:test-op #:cl-agent-test))))
+  :in-order-to ((asdf:test-op (asdf:test-op #:cl-agent/test))))

@@ -16,7 +16,7 @@
 ;;;;     ;; 简单聊天
 ;;;;     (chat-simple client "Hello!")
 ;;;;     ;; 多轮对话
-;;;;     (chat client '((:user . "Hi") (:assistant . "Hello!") (:user . "How are you?"))))
+;;;;     (client-chat client '((:user . "Hi") (:assistant . "Hello!") (:user . "How are you?"))))
 
 (in-package :cl-agent.llm)
 
@@ -167,7 +167,7 @@
 ;;; 核心聊天 API
 ;;; ============================================================
 
-(defun chat (client messages &key
+(defun client-chat (client messages &key
                             (system nil)
                             (tools nil)
                             (temperature nil)
@@ -198,18 +198,18 @@
 示例：
   (let ((client (make-client)))
     ;; 简单对话
-    (chat client '((:user . \"Hello!\")))
+    (client-chat client '((:user . \"Hello!\")))
 
     ;; 带系统提示
-    (chat client '((:user . \"Write a poem\"))
+    (client-chat client '((:user . \"Write a poem\"))
           :system \"You are a poet.\")
 
     ;; 带工具
-    (chat client '((:user . \"What's the weather?\"))
+    (client-chat client '((:user . \"What's the weather?\"))
           :tools *weather-tools*)
 
     ;; 自定义重试策略
-    (chat client '((:user . \"Hello\"))
+    (client-chat client '((:user . \"Hello\"))
           :retry 5
           :retry-delay 2.0))"
 
@@ -352,7 +352,7 @@
   (chat-simple *client* \"Explain recursion in Lisp\")
   (chat-simple *client* \"Write a poem\"
               :system \"You are a poet\")"
-  (let ((response (chat client `((:user . ,prompt))
+  (let ((response (client-chat client `((:user . ,prompt))
                        :system system
                        :temperature temperature)))
     (cl-agent.core:llm-response-content response)))
@@ -372,7 +372,7 @@
 示例：
   (chat-with-tools *client* \"Search for AI news\"
                    *search-tools*)"
-  (chat client `((:user . ,prompt))
+  (client-chat client `((:user . ,prompt))
         :tools tools
         :system system))
 
@@ -392,7 +392,7 @@
                    '((:user . \"Hi\")
                      (:assistant . \"Hello!\")
                      (:user . \"How are you?\")))"
-  (let ((response (chat client conversation :system system)))
+  (let ((response (client-chat client conversation :system system)))
     (getf response :content)))
 
 ;;; ============================================================

@@ -82,7 +82,9 @@
    ;; 子系统（A2A，另一回事）混淆。它排在 utils 之后加载，逼得 utils 里的
    ;; 默认实现只能用 find-package + find-symbol 动态查找绕开加载顺序。
    ;; 已并入 utils.lisp，那层间接随之消失。
-   (:file "validation")           ; Data validation
+   ;; 注：曾有 validation.lisp——13 个 validate-*/ensure-* 宏，全库零调用，
+   ;; 且经 load 时 (export ...) 导出（违反导出纪律）。整体删除；
+   ;; 参数校验用 check-type / assert，JSON 校验在 json-schema.lisp。
    ;; DI container：独立设施，库内部不使用（protocols 也不用——此前这里
    ;; 注明「protocols 系统使用」是错的）。作为公开设施提供，
    ;; 用例见 examples/di-usage-examples.lisp。
