@@ -21,7 +21,7 @@ run-tool-loop:  invoke-chat → tool-calls & eligible? → run one batch → app
                                                          each tool in the batch also goes through the :tool chain
 ```
 
-The loop lives in `cl-agent.kernel:run-tool-loop` (`core/kernel/invoke.lisp`).
+The loop lives in `cl-agent.core:run-tool-loop` (`core/kernel/invoke.lisp`).
 It is **the terminal of the `:turn` chain, not a filter**, and it is **not
 inside ChatModel** (`chat-model-call` is strictly single-call semantics).
 
@@ -35,7 +35,7 @@ decide whether to continue. All of that belongs to `run-tool-loop`.
 |---|---|---|
 | `ToolCallingAdvisor` (2.0) | `run-tool-loop` (`core/kernel/invoke.lisp`, `:turn` chain terminal) | **Yes** |
 | `CallAdvisor` / `AdvisorChain` | `make-filter` / `defilter` + `build-chain` tri-chain | No (wraps) |
-| `ToolCallingManager` | `cl-agent.kernel:tool-calling-manager` (three impls) | No |
+| `ToolCallingManager` | `cl-agent.core:tool-calling-manager` (three impls) | No |
 | `ToolExecutionResult` | `make-tool-execution-result` plist | Result object |
 | `ToolExecutionExceptionProcessor` | none; the kernel uses three failure classes (below) | Error handling |
 
@@ -45,8 +45,9 @@ old name.
 
 > **Both of cl-agent's Spring AI porting layers are retired.** `defadvisor` /
 > `advise-call` / `chain-next` / `tool-calling-advisor` / the
-> `+*-advisor-order+` constants are all gone, and so is the whole
-> `cl-agent.client` package (ChatClient / Builder / fluent RequestSpec).
+> `+*-advisor-order+` constants are all gone, and so is the ChatClient porting
+> layer (ChatClient / Builder / fluent RequestSpec) — note the package name
+> `cl-agent.client` has been **reused** and is now SimpleAgent.
 > Spring's Advisor semantics are expressed here with the kernel + filter
 > tri-chain: `:advisors (list ...)` → `build-kernel :filters (list ...)`; the
 > entry point is `build-kernel` + the `chat` macro.
@@ -94,31 +95,32 @@ The split yields two execution modes; both go through the kernel:
 
 ```lisp
 ;; 1. Framework-controlled
-(cl-agent.kernel:build-kernel
+(cl-agent.core:build-kernel
   :model model
-  :filters (list (cl-agent.kernel:timeout-filter 5000))
+  :filters (list (cl-agent.core:timeout-filter 5000))
   :tools '(get-weather))
 
 ;; 2. Kernel-controlled: inject an execution strategy
-(cl-agent.kernel:build-kernel
+(cl-agent.core:build-kernel
   :model model
   :tools '(get-weather)
-  :tool-manager (cl-agent.kernel:make-sequential-tool-calling-manager))
+  :tool-manager (cl-agent.core:make-sequential-tool-calling-manager))
 ```
 
 > **There used to be a third, "user-controlled" mode** — call `chat-model-call`
-> yourself and drive the loop with `cl-agent.chat`'s own ToolCallingManager. It
+> yourself and drive the loop with the pre-merge `cl-agent.chat`'s own
+> ToolCallingManager. It
 > is gone. That whole chat-level manager
 > (`default-tool-calling-manager` / `concurrent-tool-calling-manager` /
 > `execute-tool-calls` with the `(manager prompt response)` arity /
 > `tool-execution-result` and its accessors) was deleted. Tool execution now
-> lives **only** in `cl-agent.kernel` — `run-tool-loop`, `invoke-tool-batch`,
-> and the three kernel ToolCallingManagers. The kernel is the only path.
+> lives **only** in the kernel layer — `run-tool-loop`, `invoke-tool-batch`,
+> and the three ToolCallingManagers. The kernel is the only path.
 >
 > A side benefit: with the chat-level `execute-tool-calls` gone and the kernel
-> carrier renamed to `tool-result`, the two packages share no exported names, so
-> `cl-agent.kernel` needs no `:shadow` and you can `(:use :cl :cl-agent.chat
-> :cl-agent.kernel)` with no shadowing at all.
+> carrier renamed to `tool-result`, the two packages shared no exported names,
+> so every `:shadow` disappeared — which is precisely what made merging
+> `cl-agent.http` / `.chat` / `.kernel` into `cl-agent.core` possible.
 
 ## What the execution layer does
 
@@ -182,13 +184,13 @@ retry).
 Tool authors can signal the precise condition and bypass the heuristic:
 
 ```lisp
-(cl-agent.chat:deftool fetch-quote (&key symbol)
+(cl-agent.core:deftool fetch-quote (&key symbol)
   "Fetch a stock quote"
   (:param symbol :string "Ticker symbol" :required t)
   (:retry t)
   (handler-case (http-get-quote symbol)
     (error (e)
-      (error 'cl-agent.kernel:transient-tool-failure
+      (error 'cl-agent.core:transient-tool-failure
              :message (princ-to-string e)))))
 ```
 
@@ -282,7 +284,7 @@ cl-agent has no such seam. Errors are captured in `tool-apply-terminal` into the
 filter around it — a filter sees both the request and the response sides, which
 is strictly more than a processor that only receives an exception.
 
-(The deleted `cl-agent.chat` manager did have a counterpart: the generic function
+(The deleted old chat-level manager did have a counterpart: the generic function
 `(process-tool-execution-error manager condition tool-call)`. It went away with
 the manager. Its default behaviour — convert the failure to text and hand it back
 to the model — is preserved by `tool-result->text`, which is why an unknown tool
