@@ -672,10 +672,15 @@ cl-agent.client（面向应用的易用层，v10 新增）
 > 5 个并行 review agent（Goal/QA/CodeQuality/Security/ContextMining）。
 > ContextMining 因配额失败，其余 4 个完成。QA（847/0 离线 + 11/11 live）
 > 与 Goal（P1-P3 全部达成）PASS，但 CodeQuality 发现 3 个 MAJOR。
+> 全部修复于 commit **26ee239**（fix(kernel)），含 4 个回归测试：
+> - test-kernel-invoke 返回 return-direct-via-manager-skeleton / -end-to-end
+> - test-kernel-invoke 返回 resume-honors-tool-manager
+> - test-kernel-invoke 返回 tool-search-instruction-injected-once
+> 全套测试 **855/0 通过**（基线 847 → +8）。
 
 #### 4.1 `:return-direct` 在 ToolCallingManager 路径上静默失效 ❌→✅
 
-- [ ] **manager 分支恒返回 `done=nil`**：`%execute-and-append` 的 manager
+- [x] **manager 分支恒返回 `done=nil`**：`%execute-and-append` 的 manager
       分支无视 return-direct，`make-tool-execution-result` 也不携带它。
       后果：配了 `:tool-manager`（README 推荐路径）的用户，`:return-direct t`
       的工具结果被当成普通 tool 消息回传模型，而非直接返回调用方。
@@ -686,7 +691,7 @@ cl-agent.client（面向应用的易用层，v10 新增）
 
 #### 4.2 `resume-turn` 绕过已配置的 ToolCallingManager ❌→✅
 
-- [ ] **续跑批直接调 `invoke-tool-batch`**：`%resume-continuation` 第 473 行
+- [x] **续跑批直接调 `invoke-tool-batch`**：`%resume-continuation` 第 473 行
       不检查 `(kernel-tool-manager kernel)`。后果：配了 thread-pool manager
       限流 **又**配了 tool-gate HITL——第一批被限流，**被暂停的那批**
       （往往是敏感工具）续跑时不限流。return-direct 在续跑上同样失效。
@@ -695,14 +700,14 @@ cl-agent.client（面向应用的易用层，v10 新增）
 
 #### 4.3 tool-search sessions 哈希表无界增长 ❌→✅
 
-- [ ] **`(make-hash-table :test #'equal)` 按 conversation-id 累积，无淘汰**：
+- [x] **`(make-hash-table :test #'equal)` 按 conversation-id 累积，无淘汰**：
       长驻服务多会话 = 内存只增不减。每条目很小（工具名字符串列表），
       是慢泄漏而非瞬间爆，但永不回收。
       修法：加 LRU 上限（缺省 256），超出时淘汰最旧会话。
 
 #### 4.4 非阻塞（修顺手）
 
-- [ ] `filter.lisp` 的 `token-xform` 槽 docstring 仍写旧 transducer 协议
+- [x] `filter.lisp` 的 `token-xform` 槽 docstring 仍写旧 transducer 协议
       （应为 `(downstream) → (values emit finish)`）
-- [ ] tool-search 的 instruction 系统消息每轮追加 → 多轮循环里重复膨胀
+- [x] tool-search 的 instruction 系统消息每轮追加 → 多轮循环里重复膨胀
       （只追加一次）
