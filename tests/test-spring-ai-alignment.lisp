@@ -369,3 +369,129 @@ tool-context，memory-filter 读不到 → 记忆静默失效。"
 (defmethod cl-agent.core:retrieve ((r mock-retriever) query &key top-k)
   (declare (ignore query top-k))
   (list "doc1" "doc2"))
+
+;;; ============================================================
+;;; 渐进式工具披露（tool-search-filter）
+;;;
+;;; 此前这里是个**装饰品**：search_tools 只存在于注释里，
+;;; :discovered-tools 只有读没有写 → filter 永远 no-op，省 token = 0；
+;;; search-tools 本身还有 subseq 越界（匹配数 < min(limit,总数) 就崩，
+;;; 几乎必崩）；注释承诺的「中文二元组切分」也没写，中文恒 0 命中。
+;;; 而 all-filter-types-constructable 只测「能构造」，一路放行。
+;;;
+;;; 所以这里测的是**行为**：暴露给模型的工具数、检索命中、中文分词。
+;;; ============================================================
+
+(cl-agent.core:deftool disc-weather (&key city)
+  "查询天气" (:param city :string "城市" :required t) (format nil "~A 晴" city))
+(cl-agent.core:deftool disc-stock (&key sym)
+  "查询股价" (:param sym :string "代码" :required t) "100")
+(cl-agent.core:deftool disc-mail (&key to)
+  "发送邮件" (:param to :string "收件人" :required t) "sent")
+
+(defparameter +disc-tools+ '(disc-weather disc-stock disc-mail))
+
+(defun disc-index ()
+  (cl-agent.core:make-keyword-tool-index +disc-tools+))
+
+;;; --- 检索本身 ---
+
+(test search-tools-returns-callbacks-not-conses
+  "search-tools 的契约是**返回 tool-callback 列表**（docstring 如此写）"
+  (let ((r (cl-agent.core:search-tools (disc-index) "天气" :limit 5)))
+    (is (= 1 (length r)))
+    (is (typep (first r) 'cl-agent.core:tool-callback))
+    (is (string= "disc_weather" (cl-agent.core:tool-callback-name (first r))))))
+
+(test search-tools-does-not-overflow-on-few-matches
+  "匹配数 < limit 时不得越界。
+回归：subseq 的上界曾按**过滤前**的全量算，几乎每次都崩。"
+  (is (= 1 (length (cl-agent.core:search-tools (disc-index) "邮件" :limit 5))))
+  (is (null (cl-agent.core:search-tools (disc-index) "完全不相关的东西" :limit 5)))
+  (is (= 1 (length (cl-agent.core:search-tools (disc-index) "weather" :limit 99)))))
+
+(test search-tools-tokenizes-chinese-by-bigram
+  "中文按二元组切分——否则查询「天气」与描述「查询天气」永远交不上。
+回归：注释承诺了 bigram，代码没写，中文恒 0 命中。"
+  (let ((tokens (cl-agent.core::split-and-tokenize "查询天气")))
+    (is (member "天气" tokens :test #'string=))
+    (is (member "查询" tokens :test #'string=)))
+  ;; 端到端：中文查询能命中中文描述
+  (is (= 1 (length (cl-agent.core:search-tools (disc-index) "天气" :limit 5)))))
+
+;;; --- filter 行为 ---
+
+(defun disc-spy-provider (&rest responses)
+  "记录每轮收到的工具名"
+  (apply #'make-seq-provider responses))
+
+(test tool-search-filter-exposes-only-search-tools-first
+  "首轮只暴露 search_tools —— 这才是省 token 的来源。
+回归：filter 曾是 no-op，首轮把全部工具都发出去。"
+  (let* ((provider (make-seq-provider (text-response "答")))
+         (k (cl-agent.core:build-kernel
+             :model (cl-agent.core:make-provider-chat-model provider)
+             :tools +disc-tools+
+             :filters (list (cl-agent.core:tool-search-filter (disc-index))))))
+    (cl-agent.core:chat k (:user "北京天气"))
+    (let ((tools (getf (first (seq-provider-requests provider)) :tools)))
+      (is (= 1 (length tools)))
+      (is (string= "search_tools" (getf (first tools) :name))))))
+
+(test tool-search-filter-exposes-discovered-after-search
+  "模型调 search_tools 后，下一轮暴露 search_tools + 发现的工具"
+  (let* ((provider (make-seq-provider
+                    (tool-call-response "search_tools" '(("query" . "天气")))
+                    (text-response "答")))
+         (k (cl-agent.core:build-kernel
+             :model (cl-agent.core:make-provider-chat-model provider)
+             :tools +disc-tools+
+             :filters (list (cl-agent.core:tool-search-filter (disc-index))))))
+    (cl-agent.core:chat k (:user "北京天气") (:conversation "d1"))
+    ;; requests 是 push 的 → first 是第二轮
+    (let ((second-round (mapcar (lambda (tl) (getf tl :name))
+                                (getf (first (seq-provider-requests provider)) :tools))))
+      (is (= 2 (length second-round)))
+      (is (member "search_tools" second-round :test #'string=))
+      (is (member "disc_weather" second-round :test #'string=)))))
+
+(test tool-search-injected-tool-is-executable
+  "filter 注入的 search_tools 必须真能执行。
+回归：:chat filter 改写的是发给模型的 prompt options，而工具执行曾用
+循环级 options —— 模型看得见 search_tools 却执行不了，直接报
+「找不到工具」。修法是让 invoke-chat 把 effective-prompt 传出来。"
+  (let* ((provider (make-seq-provider
+                    (tool-call-response "search_tools" '(("query" . "天气")))
+                    (text-response "答")))
+         (k (cl-agent.core:build-kernel
+             :model (cl-agent.core:make-provider-chat-model provider)
+             :tools +disc-tools+
+             :filters (list (cl-agent.core:tool-search-filter (disc-index))))))
+    (cl-agent.core:chat k (:user "北京天气") (:conversation "d2"))
+    ;; 第二轮的 tool 消息应是检索结果，不是「找不到工具」
+    (let* ((msgs (getf (first (seq-provider-requests provider)) :messages))
+           (tool-msg (find :tool msgs :key (lambda (m) (getf m :role)))))
+      (is (not (null tool-msg)))
+      (is (search "找到" (getf tool-msg :content)))
+      (is (not (search "找不到工具" (getf tool-msg :content)))))))
+
+(test tool-search-sessions-are-isolated
+  "发现集合按 conversation-id 隔离"
+  (let* ((idx (disc-index))
+         (filter (cl-agent.core:tool-search-filter idx))
+         (p1 (make-seq-provider (tool-call-response "search_tools" '(("query" . "天气")))
+                                (text-response "a")))
+         (p2 (make-seq-provider (text-response "b"))))
+    ;; 会话 d3 里搜到了 weather
+    (cl-agent.core:chat (cl-agent.core:build-kernel
+                         :model (cl-agent.core:make-provider-chat-model p1)
+                         :tools +disc-tools+ :filters (list filter))
+                        (:user "x") (:conversation "d3"))
+    ;; 会话 d4 是干净的——不该看到 d3 的发现
+    (cl-agent.core:chat (cl-agent.core:build-kernel
+                         :model (cl-agent.core:make-provider-chat-model p2)
+                         :tools +disc-tools+ :filters (list filter))
+                        (:user "y") (:conversation "d4"))
+    (let ((d4-tools (getf (first (seq-provider-requests p2)) :tools)))
+      (is (= 1 (length d4-tools)))
+      (is (string= "search_tools" (getf (first d4-tools) :name))))))
