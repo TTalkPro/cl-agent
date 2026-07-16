@@ -3,11 +3,12 @@
 > 来源：2026-07-16 会话。advisor→kernel+filter 架构重构（P1-P5 + TCM）。
 > 参照实现为 `~/workspace/clj-agent`（Clojure kernel+filter 架构）+ Spring AI 2.0。
 >
-> 测试基线：SBCL 2.6.6 **693 checks / 0 failures**
-> （810 → 652：advisor 实现与测试一并删除；→ 699：补 filter 实际调用、
->  memory 桥接、chat 宏 DSL、kernel 默认 system/options 等回归测试；
->  → 693：旧 ToolCallingManager 测试随该层退役，安全边界测试改写保留）。
-> 真实 provider 验证：`scripts/live-test.lisp` MiniMax **5/5**。
+> 测试基线：SBCL 2.6.6 **761 checks / 0 failures**
+> （810 → 652：advisor 实现与测试一并删除；→ 693：旧 ToolCallingManager
+>  测试随该层退役，安全边界测试改写保留；→ 761：新增 SimpleAgent、
+>  HITL pause/resume、消息去重等测试）。
+> 真实 provider 验证：`scripts/live-test.lisp` MiniMax **8/8**
+> （单次问答 / 工具循环 / 多轮记忆 / schema 校验 / HITL 暂停·批准·拒绝 / SSE）。
 >
 > 完整重构计划见 `.sisyphus/plans/kernel-filter-refactor.md`。
 
@@ -15,8 +16,10 @@
 
 ## 架构现状
 
+三模块分层（对标 clj-agent 的 core / provider / client）：
+
 ```
-cl-agent.kernel（唯一执行路径 + 调用方入口）
+cl-agent.core（框架本体，单包 458 导出）
   ├── Filter CLOS 类（四钩子: :tool/:chat/:turn/:token-xform）
   ├── build-chain（洋葱折叠, 闭包仅下游, 递归重入免费）
   ├── Kernel（model/tools/filters/settings/tool-manager +
@@ -28,12 +31,15 @@ cl-agent.kernel（唯一执行路径 + 调用方入口）
   ├── ToolCallingManager 协议（Sequential/VirtualThread/ThreadPool 三实现）
   ├── 10 个内置 filter（memory/logging/safeguard/validation/
   │   re-reading/RAG/tool-search/timeout/approval/token-xform）
-  └── chat 宏 DSL + kernel-chat* 函数入口（调用方唯一入口）
+  ├── chat 宏 DSL + kernel-chat* 函数入口
+  ├── HITL：tool-gate + loop-state + resume-turn
+  └── 基础设施 + HTTP/SSE + Chat API（原 core/http/chat/kernel 四包合并）
 
-cl-agent.client —— 已整包删除（v9.0.0）
-  Spring AI 的 ChatClient + Builder + fluent RequestSpec 移植层。
-  迁移：make-kernel-client → build-kernel；(chat client ...) 原样可用，
-  符号来自 cl-agent.kernel。
+cl-agent.llm（提供商，独立可插拔）
+  └── 9 个 provider + create-chat-model
+
+cl-agent.client（面向应用的易用层，v10 新增）
+  └── SimpleAgent：有状态对话 + callbacks + 错误归一化 + HITL
 ```
 
 ## 已完成（2026-07-16）
@@ -256,8 +262,6 @@ cl-agent.client —— 已整包删除（v9.0.0）
 
 ---
 
-## 待完成
-
 ### 包设计撞名 + 旧 ToolCallingManager 退役 ✅（2026-07-16 续三）
 
 > 两件是同一个根因，一起做掉。做完 `cl-agent.kernel` **不再需要任何
@@ -329,6 +333,90 @@ cl-agent.client —— 已整包删除（v9.0.0）
       模型无从自纠）。安全边界不变：未暴露的工具依然绝不执行。
       2 个回归测试守住，验证过「回退即失败」。
 
+---
+
+## 已完成（2026-07-16 续四）
+
+### 包合并：三模块分层 ✅
+
+- [x] **http / chat / kernel → cl-agent.core**（458 导出），对齐 clj-agent 的
+      core / provider / client 三模块
+- [x] **llm 保持独立**（provider 可插拔）；`chat` 与 core 的宏撞名 → llm `:shadow` 之
+- [x] **合并前先清死代码**（否则正面撞名 15 处，SBCL 调用图坐实全是死的）：
+      - `core/types.lisp` **整个文件**（319 行、34 符号）——唯一「调用」是内部
+        自闭环（`make-message` 被 4 个构造器调用，那 4 个本身零调用），
+        与 chat 的 CLOS 消息体系撞 11 个名
+      - core 的 `build-url`（零调用）/ `with-retry`（零使用）——各自与 http 里
+        **活着**的同名实现撞车，同 `alist-get` 的老套路
+- [x] **stream-context 不导出**：core/http 的是传输层内部实现，llm 另有一个
+      同名但语义不同的（客户端层累积器）。`:use` 只继承 external 符号——
+      不导出即互不干扰
+
+### cl-agent.client：SimpleAgent ✅
+
+- [x] **有状态对话**：`make-agent` / `agent-chat` / `agent-chat-result` /
+      `agent-history` / `agent-reset`。内部持 conversation-id + memory-filter，
+      调用方不用再手写 `(:conversation "c1")`
+- [x] **kernel 级默认**：`:model :system :options :tools :memory :settings`
+- [x] **callbacks**：`:on-turn-start/-end/-error`、`:on-tool-call/-result`、
+      `:on-interrupt/:on-resume`。回调抛异常不掀翻整轮（观测手段非控制流）
+- [x] **错误归一化**：`:completed` / `:paused` / `:cancelled` / `:error`，
+      **不抛条件**（对标 clj-agent 的 `{:status :error}`）
+- [x] **分层边界**：`make-agent` **不接受 `:filters`**，只暴露 `:callbacks`。
+      要 filter 就自建 kernel 传 `:kernel`。比 clj-agent 更硬——它是
+      warn+ignore，我们直接报错并给迁移指引（静默丢横切能力正是刚清掉的
+      ChatClient 老坑）
+
+### HITL：pause / resume ✅
+
+> `:paused` 从此不再是死类型。
+
+- [x] **kernel 层**：`tool-gate` 槽（`(tool-call) → :proceed | :pause | (:pause . 原因)`）、
+      `loop-state` / `pending-tool` 载体、`resume-turn`
+- [x] **gate 在批执行之前评估，且每个 tool-call 恰好一次**——gate 常带副作用
+      （审计/弹窗/计数），评估两遍就是重复触发
+- [x] **核心不变量：暂停时工具一个都不执行**（单测 + live 都硬断言）
+- [x] **resume 三种 decision**：
+      - `:approved`（`payload (:args ...)` → 编辑后批准，用新参数执行）
+      - `:rejected`（`payload (:message ...)` → 「已拒绝执行：理由」回模型，
+        省它一轮干猜）
+      - `:reply`（`payload (:message ...)` → 答复即工具结果，ask-user 语义）
+- [x] **resume 同样过 :turn filter 链**：validation 之类要能作用于续跑结果。
+      首次进 terminal = 暂停延续，filter 递归重入 = 常规循环，靠 consumed 一次性分派
+- [x] **client 层**：`:on-tool-call` 返回 `(:interrupt . 原因)` 即启用 HITL——
+      不是另一套机制，就是回调返回值（clj-agent 同款设计）。
+      `agent-paused-p` / `agent-pending-tool` / `agent-resume`
+- [x] live-test 加 3 项 HITL（暂停/批准/拒绝），MiniMax **8/8**
+
+### 顺带修掉的第 7、8 个真实 bug ✅
+
+- [x] **system 消息在历史里线性累积**（`filters/memory.lisp`）：memory-filter
+      存了全部 prompt 消息**含 system**，而 kernel-chat 每轮都注入 system →
+      2 轮 2 条、10 轮 10 条。实测 `history: 6 条`（应为 4），**多轮后再发
+      工具调用直接失败**。修：system 不进历史（每轮由 prompt 提供），
+      展开时置顶；window 只裁历史不碰 system（否则长对话里 system 先被裁掉，
+      模型直接失忆人设）。
+
+- [x] **工具循环把历史整份重复**（同上）：`run-tool-loop` 传的是**本轮累积的
+      完整 messages**（非 delta），而 memory-filter 挂 :chat 链、每轮都过。
+      第 2 轮把 user/assistant 又存一份 →
+      `(user assistant user assistant tool ...)`，发给模型的序列**非法**
+      （Anthropic 要求 user/assistant 交替、tool_result 紧跟 tool_use）——
+      实测 MiniMax **400**。
+      **与 HITL 无关，普通工具循环一样中招**；mock 不校验序列，只有真实
+      provider 才暴露。
+      修：memory-filter 存之前用 `eq` 判重（循环用 append 累积，同一条消息
+      各轮是同一对象，eq 足够准）。
+      修复后模型理解也变正确了——之前 `:approved` 后模型说「文件已在之前被
+      删除，无需重复操作」（被重复消息搞糊涂），修复后是「已成功删除文件」。
+      > 注：clj-agent 无此问题——它的 run-tool-loop 参数就叫 `delta`，历史
+      > 完全交给 memory filter。我们的循环自己累积（好处：无 memory 也能跑），
+      > 故改用 eq 幂等而非照搬。
+
+---
+
+## 待完成
+
 ### 待查：batch 故障路由名不副实（文档审计时发现，未改代码）
 
 > `kernel/batch.lisp` 的文件头注释承诺一套策略矩阵，但实现没兑现。
@@ -354,24 +442,10 @@ cl-agent.client —— 已整包删除（v9.0.0）
 - [ ] **`stream-content` 不是真流式**：降级为一次性同步 chunk；真 SSE
       只在 `chat-model-stream`。invoke-chat-stream 仍待实现（见下）。
 
-### ToolCallingManager PR2: deftool :backend 扩展（HTTP/MCP）
-
-> 状态：⏸️ 搁置（待真实需求触发）
-> 设计文档已就绪：`~/workspace/clj-agent/docs/tool-calling-manager-design.md` §5-6
-
-- [ ] deftool 扩展 `:backend` 元数据（`:local`/`:http`/`:mcp`）
-- [ ] `invoke-backend` defmulti 分派
-- [ ] HTTP transport 实现（client 模块）
-- [ ] MCP backend 协议接口（IMcpClient）
-
 ### Kernel 集成深化
 
-- [ ] **kernel-client 端到端集成测试**：用 mock provider 验证完整的
-      `make-kernel-client` → `chat` 宏 → `invoke-turn` → `turn-result` 链路
-      （含工具循环 + memory-filter + safeguard）
 - [ ] **:writes + :state-slots MapReduce 契约**（对标 clj-agent 的
       context/apply-writes 屏障折叠）
-- [ ] **HITL（暂停/resume）**：对标 clj-agent 的 gate/pause/resume 机制
 - [ ] **Streaming 通路**：invoke-chat-stream + :token-xform 组装
 
 ### 既有遗留（非本轮引入）
