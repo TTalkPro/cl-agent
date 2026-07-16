@@ -42,11 +42,14 @@
   :version "9.0.0"
 
   ;; Meta-system contains no components, only declares dependencies
-  :depends-on (;; Layer 1: Core (Infrastructure + Chat + Kernel)
+  :depends-on (;; Layer 1: Core —— 框架本体（基础设施 + HTTP + Chat API + Kernel/Filter）
                #:cl-agent-core
 
-               ;; Layer 2: LLM (Provider implementations)
-               #:cl-agent-llm)
+               ;; Layer 2: LLM —— 提供商适配器（独立可插拔）
+               #:cl-agent-llm
+
+               ;; Layer 3: Client —— SimpleAgent（面向应用的易用层）
+               #:cl-agent-client)
 
   :in-order-to ((asdf:test-op (asdf:test-op #:cl-agent-test))))
 
@@ -90,6 +93,9 @@
                ;; （前身 test-chat-client：Builder / fluent spec 随
                ;;   cl-agent.client 一并退役）
                (:file "tests/test-kernel-chat")
+
+               ;; SimpleAgent（cl-agent.client）
+               (:file "tests/test-agent")
 
                ;; LLM provider tests
                (:file "tests/test-llm")

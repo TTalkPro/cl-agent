@@ -12,7 +12,7 @@
 (require :asdf)
 
 ;; Add paths
-(dolist (dir '("." "core/" "llm/" "mock/"))
+(dolist (dir '("." "core/" "llm/" "mock/" "client/"))
   (pushnew (truename dir) asdf:*central-registry* :test #'equal))
 
 ;; Load quicklisp if available
