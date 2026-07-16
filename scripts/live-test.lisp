@@ -89,13 +89,13 @@
 ;;; 检查项
 ;;; ============================================================
 
-(deflive check-single-turn "[1/8] 单次问答"
+(deflive check-single-turn "[1/11] 单次问答"
   (let* ((k (build-kernel :model *model*))
          (text (chat k (:user "只回答一个词，不要标点：法国的首都是？"))))
     (values (and (stringp text) (search "巴黎" text))
             (string-trim '(#\Space #\Newline) text))))
 
-(deflive check-tool-loop "[2/8] 真实工具循环（模型自主决定调用）"
+(deflive check-tool-loop "[2/11] 真实工具循环（模型自主决定调用）"
   (let ((*tool-hits* 0))
     (let* ((k (build-kernel :model *model* :tools '(live-counted-weather)))
            (text (chat k
@@ -105,7 +105,7 @@
       (values (and (> *tool-hits* 0) (search "22" text))
               (format nil "工具被调用 ~A 次" *tool-hits*)))))
 
-(deflive check-memory-multi-turn "[3/8] memory-filter 多轮记忆"
+(deflive check-memory-multi-turn "[3/11] memory-filter 多轮记忆"
   (let* ((mem (make-message-window-chat-memory))
          (k (build-kernel :model *model* :filters (list (memory-filter mem)))))
     (chat k (:user "记住：我的幸运数字是 42。") (:conversation "live-1"))
@@ -117,7 +117,7 @@
                       (length (memory-messages mem "live-1"))
                       (string-trim '(#\Space #\Newline) text))))))
 
-(deflive check-structured-output "[4/8] 结构化输出 + schema 校验"
+(deflive check-structured-output "[4/11] 结构化输出 + schema 校验"
   (let* ((schema "{\"type\":\"object\",
                    \"properties\":{\"name\":{\"type\":\"string\"},
                                   \"population\":{\"type\":\"integer\"}},
@@ -154,7 +154,7 @@
                       (when (string= n "live_rm_file")
                         (cons :interrupt (format nil "删除 ~A 需审批" (getf args :path))))))))
 
-(deflive check-hitl-pause "[5/8] HITL 暂停（工具不得执行）"
+(deflive check-hitl-pause "[5/11] HITL 暂停（工具不得执行）"
   (let ((*hitl-fired* nil))
     (let* ((a (make-hitl-agent))
            (r (cl-agent.client:agent-chat-result a "删除 /tmp/report.log")))
@@ -165,7 +165,7 @@
                       (cl-agent.client:agent-result-status r)
                       (if *hitl-fired* "是（BUG）" "否"))))))
 
-(deflive check-hitl-approve "[6/8] HITL :approved → 执行并续跑"
+(deflive check-hitl-approve "[6/11] HITL :approved → 执行并续跑"
   (let ((*hitl-fired* nil))
     (let ((a (make-hitl-agent)))
       (cl-agent.client:agent-chat-result a "删除 /tmp/report.log")
@@ -174,7 +174,7 @@
                      (equal *hitl-fired* "/tmp/report.log"))
                 (format nil "已删除=~S" *hitl-fired*))))))
 
-(deflive check-hitl-reject "[7/8] HITL :rejected → 不执行，理由回模型"
+(deflive check-hitl-reject "[7/11] HITL :rejected → 不执行，理由回模型"
   (let ((*hitl-fired* nil))
     (let ((a (make-hitl-agent)))
       (cl-agent.client:agent-chat-result a "删除 /tmp/prod.db")
@@ -186,7 +186,54 @@
                         (cl-agent.client:agent-result-status r)
                         (if (null *hitl-fired*) "✓" "✗")))))))
 
-(deflive check-streaming "[8/8] 真实 SSE 流式（chat-model-stream）"
+(deftool live-lookup-weather (&key city)
+  "查询指定城市的天气"
+  (:param city :string "城市名称" :required t)
+  (format nil "~A：晴，22°C" city))
+(deftool live-send-sms (&key n) "发送短信" (:param n :string "号码" :required t) "sent")
+(deftool live-query-db (&key sql) "执行数据库查询" (:param sql :string "SQL" :required t) "rows")
+(deftool live-make-image (&key p) "生成图片" (:param p :string "提示词" :required t) "img")
+(deftool live-read-file (&key path) "读取文件内容" (:param path :string "路径" :required t) "content")
+
+(defparameter +disclosure-tools+
+  '(live-lookup-weather live-send-sms live-query-db live-make-image live-read-file))
+
+(deflive check-tool-search "[8/11] 渐进式工具披露（首轮只暴露 search_tools）"
+  (let ((rounds nil))
+    (let* ((counter (make-filter
+                     :count
+                     :chat (lambda (prompt chain)
+                             (push (length (chat-options-tool-callbacks
+                                            (prompt-options prompt)))
+                                   rounds)
+                             (funcall chain prompt))))
+           (k (build-kernel :model *model* :tools +disclosure-tools+
+                            ;; counter 放最内：数的是 tool-search 改写**之后**的
+                            :filters (list (tool-search-filter
+                                            (make-keyword-tool-index +disclosure-tools+))
+                                           counter)))
+           (text (chat k (:system "查天气必须先用 search_tools 找工具。")
+                       (:user "北京天气怎么样？")
+                       (:conversation "live-disc"))))
+      (let ((counts (reverse rounds)))
+        ;; 首轮必须只有 1 个 schema（search_tools），而不是全部 5 个
+        (values (and (= 1 (first counts)) (search "22" text))
+                (format nil "每轮暴露 ~S（共 ~D 个工具）"
+                        counts (length +disclosure-tools+)))))))
+
+(deflive check-stream-token-xform "[9/11] 流式 + :token-xform 脱敏"
+  (let ((chunks nil))
+    (kernel-chat-stream
+     (build-kernel :model *model*
+                   :filters (list (token-redact-filter '("北京"))))
+     (lambda (d) (push d chunks))
+     :user "只说两个字：北京")
+    (let ((full (apply #'concatenate 'string (reverse chunks))))
+      ;; 脱敏后原词不得出现
+      (values (and chunks (not (search "北京" full)))
+              (format nil "~D 片，输出=~S" (length chunks) full)))))
+
+(deflive check-streaming "[10/11] 真实 SSE 流式（chat-model-stream）"
   ;; 提示要够长才能可靠地分片——「数到 5」这种模型一口就吐完了，
   ;; 断言 >1 分片会假失败（问的是回答长度，不是流式实现）。
   (let ((chunks nil))
@@ -199,6 +246,30 @@
       ;; 多个 chunk ⇒ 确实是增量流式，不是攒完一次性回调
       (values (and (> (length chunks) 1) (search "30" full))
               (format nil "~A 个分片" (length chunks))))))
+
+;;; 工具经 (values 结果 writes) 声明写意图；批次屏障按 call 序折叠
+(deftool live-note (&key text)
+  "把一条重要信息记入笔记本。每条信息调用一次。"
+  (:param text :string "要记录的信息" :required t)
+  (values (format nil "已记录：~A" text)
+          (list :notes (list text))))
+
+(deflive check-writes-fold "[11/11] :writes + :state-slots（真模型驱动折叠）"
+  (let* ((k (build-kernel
+             :model *model*
+             :tools '(live-note)
+             :state-slots (list (list :notes :init nil
+                                      :reduce (lambda (old new)
+                                                (append old new))))))
+         (result (kernel-chat k
+                  :system "用户给你的每条信息都必须用 live_note 工具记录。"
+                  :user "帮我记两条信息：第一条「买牛奶」，第二条「修自行车」。"))
+         (notes (getf (turn-result-tool-context result) :notes)))
+    ;; 模型可能一批发两个 tool_call，也可能分两轮——两条路径都经过屏障折叠
+    (values (and (= 2 (length notes))
+                 (search "牛奶" (first notes))
+                 (search "自行车" (second notes)))
+            (format nil "notes=~S" notes))))
 
 ;;; ============================================================
 ;;; 主流程
@@ -218,7 +289,10 @@
   (check-hitl-pause)
   (check-hitl-approve)
   (check-hitl-reject)
+  (check-tool-search)
+  (check-stream-token-xform)
   (check-streaming)
+  (check-writes-fold)
   (format t "~%--- 通过 ~A，失败 ~A ---~%" *pass* *fail*)
   (uiop:quit (if (zerop *fail*) 0 1)))
 
