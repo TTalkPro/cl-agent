@@ -436,7 +436,10 @@
    #:arguments->plist
    ;; 条件
    #:tool-execution-error
+   #:tool-execution-error-tool-name
+   #:tool-execution-error-cause
    #:tool-not-found-error
+   #:tool-not-found-error-tool-name
 
    ;; ==================== ChatModel ====================
    #:chat-model

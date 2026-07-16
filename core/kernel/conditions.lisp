@@ -49,13 +49,27 @@
 
   分类规则（按优先级）：
   1. tool-failure 子类 → 直接取 :class
-  2. 网络类错误（超时/连接拒绝）→ :transient
-  3. 权限/认证类错误 → :environment
-  4. 其他 → :semantic（保守默认，不重试）"
+  2. tool-execution-error → **解包 cause 后递归分类**（见下）
+  3. tool-not-found-error → :semantic（模型报了个不存在的工具名）
+  4. 网络类错误（超时/连接拒绝/限流）→ :transient
+  5. 权限/认证类错误 → :environment
+  6. 其他 → :semantic（保守默认，不重试）
+
+  关于第 2 条：cl-agent.core:tool-callback-call 会把工具体内抛出的
+  **一切** condition 包成 tool-execution-error（原件塞进 :cause）。
+  此前这里直接把 tool-execution-error 判成 :semantic，于是工具明明
+  signal 了 transient-tool-failure，走完真实路径后也只剩 :semantic——
+  三类故障在实际链路上退化成一类，分类体系形同虚设。
+  必须解包 cause 才拿得到真分类。"
   (etypecase condition
     (tool-failure (tool-failure-class condition))
     (cl-agent.core:tool-not-found-error :semantic)
-    (cl-agent.core:tool-execution-error :semantic)
+    (cl-agent.core:tool-execution-error
+     ;; 包装层：真正的分类信息在 cause 里
+     (let ((cause (tool-execution-error-cause condition)))
+       (if cause
+           (classify-tool-error cause)
+           :semantic)))
     (error
      ;; 启发式分类：检查错误消息中的关键词
      (let ((msg (princ-to-string condition)))
