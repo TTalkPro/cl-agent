@@ -1,10 +1,10 @@
 ;;;; test-tool.lisp
-;;;; CL-Agent - 工具体系测试（deftool / ToolCallback / ToolCallingManager）
+;;;; CL-Agent - 工具体系测试（deftool / ToolCallback / 工具解析与暴露边界）
 
 (in-package :cl-agent/tests)
 
 (def-suite tool-suite :in cl-agent-suite
-  :description "deftool 宏、ToolCallback 与 ToolCallingManager")
+  :description "deftool 宏、ToolCallback、按名解析与工具暴露边界")
 
 (in-suite tool-suite)
 
@@ -143,112 +143,33 @@ defn + var 元数据，工具由 (build-kernel {:tools [#'foo]}) 显式传入。
   (is (null (cl-agent.chat:arguments->plist "不是 JSON"))))
 
 ;;; ============================================================
-;;; ToolCallingManager
+;;; 工具解析：find-callback-for-call
 ;;; ============================================================
+;;;
+;;; ToolCallingManager 的测试已随该层删除——工具执行循环现在唯一住在
+;;; cl-agent.kernel（覆盖见 test-kernel-invoke / test-kernel-chat）。
+;;; 本层只剩「工具是什么」：定义、注册、schema、按名解析。
 
-(defclass rethrow-tool-manager (cl-agent.chat:default-tool-calling-manager)
-  ()
-  (:documentation "测试用：工具错误直接冒泡而非转文本"))
+(defun opts-exposing (&rest tool-syms)
+  "构造只暴露指定工具的 chat-options"
+  (cl-agent.chat:make-chat-options
+   :tool-callbacks (cl-agent.chat:resolve-tool-callbacks tool-syms)))
 
-(defmethod cl-agent.chat:process-tool-execution-error
-    ((manager rethrow-tool-manager) condition tool-call)
-  (declare (ignore tool-call))
-  (error condition))
+(test find-callback-for-call-resolves-exposed
+  "本次请求暴露了的工具，按名解析得到"
+  (let* ((options (opts-exposing 'test-adder))
+         (tc (cl-agent.chat:make-tool-call :id "1" :name "test_adder"
+                                           :arguments '(:a 1 :b 2)))
+         (cb (cl-agent.chat:find-callback-for-call options tc)))
+    (is (string= "test_adder" (cl-agent.chat:tool-callback-name cb)))))
 
-(defun response-with-calls (&rest name-args-pairs)
-  "构造携带多个 tool-call 的 chat-response"
-  (cl-agent.chat:make-chat-response
-   (cl-agent.chat:make-generation
-    (cl-agent.chat:assistant-message
-     ""
-     :tool-calls (loop for (name args id) in name-args-pairs
-                       collect (cl-agent.chat:make-tool-call
-                                :id id :name name :arguments args)))
-    :finish-reason :tool-call)))
-
-(defun result-first-tool-text (result)
-  "取 tool-execution-result 末尾工具消息的首条结果文本"
-  (cl-agent.chat:tool-response-text
-   (first (cl-agent.chat:tool-responses
-           (cl-agent.chat:tool-execution-last-message result)))))
-
-(test manager-executes-calls
-  "Manager 执行工具并返回 tool-execution-result（含完整会话历史）"
-  (let* ((manager (cl-agent.chat:make-default-tool-calling-manager))
-         (prompt (cl-agent.chat:make-prompt
-                  "算一下"
-                  :options (cl-agent.chat:make-chat-options
-                            :tool-callbacks (cl-agent.chat:resolve-tool-callbacks
-                                             '(test-adder)))))
-         (response (response-with-calls
-                    (list "test_adder" '(:a 1 :b 2) "id-1")))
-         (result (cl-agent.chat:execute-tool-calls manager prompt response)))
-    (is (typep result 'cl-agent.chat:tool-execution-result))
-    (is-false (cl-agent.chat:tool-execution-return-direct-p result))
-    (is (string= "3" (result-first-tool-text result)))
-    ;; 会话历史 = 原 prompt 消息 + assistant(tool-calls) + tool 消息
-    (let ((history (cl-agent.chat:tool-execution-conversation-history result)))
-      (is (= 3 (length history)))
-      (is (equal '(:user :assistant :tool)
-                 (mapcar #'cl-agent.chat:message-role history))))))
-
-(test manager-return-direct
-  ":return-direct 工具触发直接返回标记"
-  (let* ((manager (cl-agent.chat:make-default-tool-calling-manager))
-         (prompt (cl-agent.chat:make-prompt
-                  "test"
-                  :options (cl-agent.chat:make-chat-options
-                            :tool-callbacks (cl-agent.chat:resolve-tool-callbacks
-                                             '(test-direct-tool)))))
-         (response (response-with-calls
-                    (list "test_direct_tool" '(:text "hi") "id-1")))
-         (result (cl-agent.chat:execute-tool-calls manager prompt response)))
-    (is-true (cl-agent.chat:tool-execution-return-direct-p result))
-    (is (string= "直接结果：hi" (result-first-tool-text result)))))
-
-(test manager-tool-context-injection
-  "tool-context 只注入给声明了它的工具"
-  (let* ((manager (cl-agent.chat:make-default-tool-calling-manager))
-         (prompt (cl-agent.chat:make-prompt
-                  "test"
-                  :options (cl-agent.chat:make-chat-options
-                            :tool-context '(:tenant "acme")
-                            :tool-callbacks (cl-agent.chat:resolve-tool-callbacks
-                                             '(test-context-tool)))))
-         (response (response-with-calls
-                    (list "test_context_tool" '(:city "东京") "id-1")))
-         (result (cl-agent.chat:execute-tool-calls manager prompt response)))
-    (is (string= "东京/acme" (result-first-tool-text result)))))
-
-(test manager-unknown-tool-error-as-result
-  "未知工具不抛错，错误文本作为结果回传（模型可自纠错）"
-  (let* ((manager (cl-agent.chat:make-default-tool-calling-manager))
-         (prompt (cl-agent.chat:make-prompt "test"))
-         (response (response-with-calls
-                    (list "ghost_tool" nil "id-1")))
-         (result (cl-agent.chat:execute-tool-calls manager prompt response)))
-    (is (search "错误" (result-first-tool-text result)))))
-
-(test manager-tool-error-as-result
-  "工具执行报错时错误文本作为结果回传"
-  (let* ((manager (cl-agent.chat:make-default-tool-calling-manager))
-         (bomb (cl-agent.chat:make-tool-callback
-                (lambda (&key) (error "爆炸")) :name "bomb_tool"))
-         (prompt (cl-agent.chat:make-prompt
-                  "test"
-                  :options (cl-agent.chat:make-chat-options
-                            :tool-callbacks (list bomb))))
-         (response (response-with-calls (list "bomb_tool" nil "id-1")))
-         (result (cl-agent.chat:execute-tool-calls manager prompt response)))
-    (is (search "错误" (result-first-tool-text result)))))
-
-(test manager-custom-error-processor
-  "process-tool-execution-error 可定制（对标 ToolExecutionExceptionProcessor）"
-  (let* ((manager (make-instance 'rethrow-tool-manager))
-         (prompt (cl-agent.chat:make-prompt "test"))
-         (response (response-with-calls (list "ghost_tool" nil "id-1"))))
+(test find-callback-for-call-rejects-unexposed
+  "未暴露的工具名 → tool-not-found-error（不回退全局注册表）"
+  (let ((options (opts-exposing 'test-adder))
+        (tc (cl-agent.chat:make-tool-call :id "1" :name "test_context_tool"
+                                          :arguments '(:city "x"))))
     (signals cl-agent.chat:tool-not-found-error
-      (cl-agent.chat:execute-tool-calls manager prompt response))))
+      (cl-agent.chat:find-callback-for-call options tc))))
 
 ;;; ============================================================
 ;;; 工具暴露边界（越权回归）
@@ -270,43 +191,64 @@ defn + var 元数据，工具由 (build-kernel {:tools [#'foo]}) 显式传入。
 模型只要报出名字就会被执行（提示注入下可直接利用的越权）。
 
 参照实现同样没有回退：clj-agent 的 find-function 只查 kernel 的
-:tool-vars 并抛异常；Spring 的 ToolCallbackResolver 默认为空。"
+:tool-vars 并抛异常；Spring 的 ToolCallbackResolver 默认为空。
+
+本测试走完整 kernel 链路（旧版经已删除的 ToolCallingManager）：
+模型第一轮报出 secret_tool，第二轮给最终文本。"
   (let ((cb (cl-agent.chat:symbol-tool-callback 'secret-tool)))
     (unwind-protect
          (progn
            ;; 最坏情况：即使它进了全局表，也不该被执行
            (cl-agent.chat:register-tool-callback cb)
            (setf *secret-tool-fired* nil)
-           (let* ((manager (cl-agent.chat:make-default-tool-calling-manager))
-                  ;; 本次请求只暴露 test-adder
-                  (prompt (cl-agent.chat:make-prompt
-                           "hi"
-                           :options (cl-agent.chat:make-chat-options
-                                     :tool-callbacks
-                                     (cl-agent.chat:resolve-tool-callbacks
-                                      '(test-adder)))))
-                  (response (response-with-calls
-                             (list "secret_tool" '(:target "alice") "id-1")))
-                  (result (cl-agent.chat:execute-tool-calls
-                           manager prompt response)))
+           (let* ((provider (make-seq-provider
+                             (tool-call-response "secret_tool" '(("target" . "alice")))
+                             (text-response "done")))
+                  (model (cl-agent.chat:make-provider-chat-model provider))
+                  ;; kernel 只暴露 test-adder
+                  (k (cl-agent.kernel:build-kernel :model model
+                                                   :tools '(test-adder))))
+             (cl-agent.kernel:chat k (:user "hi"))
              (is (null *secret-tool-fired*)
-                 "未暴露的工具被执行了：越权回归")
-             ;; 错误转文本回传模型，对话不中断
-             (is (search "错误" (result-first-tool-text result)))))
+                 "未暴露的工具被执行了：越权回归")))
+      (cl-agent.chat:unregister-tool-callback "secret_tool")
+      (setf *secret-tool-fired* nil))))
+
+(test unexposed-tool-error-goes-back-to-model
+  "未暴露工具的错误转成文本回传模型，对话不中断（而非抛给调用方）"
+  (let ((cb (cl-agent.chat:symbol-tool-callback 'secret-tool)))
+    (unwind-protect
+         (progn
+           (cl-agent.chat:register-tool-callback cb)
+           (let* ((second-round-messages nil)
+                  (provider (make-seq-provider
+                             (tool-call-response "secret_tool" '(("target" . "alice")))
+                             (lambda (messages)
+                               (setf second-round-messages messages)
+                               (text-response "done"))))
+                  (model (cl-agent.chat:make-provider-chat-model provider))
+                  (k (cl-agent.kernel:build-kernel :model model
+                                                   :tools '(test-adder))))
+             ;; 不报错，正常拿到最终文本
+             (is (string= "done" (cl-agent.kernel:chat k (:user "hi"))))
+             ;; 第二轮里有一条 tool 消息，内容是错误说明
+             (let ((tool-msg (find :tool second-round-messages
+                                   :key (lambda (m) (getf m :role)))))
+               (is (not (null tool-msg)) "错误应作为 tool 结果回传模型")
+               (is (search "工具" (getf tool-msg :content))))))
       (cl-agent.chat:unregister-tool-callback "secret_tool")
       (setf *secret-tool-fired* nil))))
 
 (test exposed-tool-still-executes
   "对照：暴露了的工具正常执行（确认上面的隔离不是把功能整个关掉了）"
-  (let* ((manager (cl-agent.chat:make-default-tool-calling-manager))
-         (prompt (cl-agent.chat:make-prompt
-                  "hi"
-                  :options (cl-agent.chat:make-chat-options
-                            :tool-callbacks (cl-agent.chat:resolve-tool-callbacks
-                                             '(test-adder)))))
-         (response (response-with-calls (list "test_adder" '(:a 2 :b 3) "id-1")))
-         (result (cl-agent.chat:execute-tool-calls manager prompt response)))
-    (is (string= "5" (result-first-tool-text result)))))
+  (let* ((provider (make-seq-provider
+                    (tool-call-response "test_adder" '(("a" . 2) ("b" . 3)))
+                    (text-response "5")))
+         (model (cl-agent.chat:make-provider-chat-model provider))
+         (k (cl-agent.kernel:build-kernel :model model :tools '(test-adder))))
+    (is (string= "5" (cl-agent.kernel:chat k (:user "2+3"))))
+    ;; 两轮：一轮要工具，一轮拿结果 → 工具确实执行了
+    (is (= 2 (length (seq-provider-requests provider))))))
 
 ;;; ============================================================
 ;;; 跨包引用（符号身份带包作用域）

@@ -89,8 +89,8 @@
                   kernel
                   (cl-agent.kernel:make-tool-request
                    callback :args '(:a 3 :b 4)))))
-      (is (string= "7" (cl-agent.kernel:tool-response-result resp)))
-      (is (null (cl-agent.kernel:tool-response-error resp))))))
+      (is (string= "7" (cl-agent.kernel:tool-result-value resp)))
+      (is (null (cl-agent.kernel:tool-result-error resp))))))
 
 (test invoke-tool-with-filter
   ":tool filter 可拦截工具执行"
@@ -101,7 +101,7 @@
              :timeout
              :tool (lambda (req chain)
                      (declare (ignore chain))
-                     (cl-agent.kernel:make-tool-response
+                     (cl-agent.kernel:make-tool-result
                       :error (list :class :timeout :message "超时")))))
            (kernel2 (cl-agent.kernel:build-kernel
                      :model (kernel-model-for-test kernel)
@@ -113,10 +113,10 @@
                     kernel2
                     (cl-agent.kernel:make-tool-request
                      callback :args '(:a 1 :b 2)))))
-        (is (null (cl-agent.kernel:tool-response-result resp))
+        (is (null (cl-agent.kernel:tool-result-value resp))
             "结果被 filter 短路")
         (is (eq :timeout
-                (getf (cl-agent.kernel:tool-response-error resp) :class)))))))
+                (getf (cl-agent.kernel:tool-result-error resp) :class)))))))
 
 ;;; ============================================================
 ;;; run-tool-loop + invoke-turn
@@ -212,28 +212,10 @@
         (list (cl-agent.chat:user-message "loop")))))))
 
 ;;; ============================================================
-;;; 循环等价性：invoke-turn vs 旧 tool-calling-advisor
+;;; 循环等价性测试已移除
+;;;
+;;; 它原本比较「旧 ChatClient+advisor」与「kernel+invoke-turn」两条路径
+;;; 产出是否一致。advisor 退役后 ChatClient 本就走 kernel，该测试变成
+;;; 自己和自己比；cl-agent.client 整体删除后连对照组都不存在了。
+;;; 工具循环本身的覆盖见本文件上方各测试与 test-kernel-chat.lisp。
 ;;; ============================================================
-
-(test kernel-loop-equivalent-to-advisor
-  "同样的 mock 脚本，invoke-turn 和旧 ChatClient+advisor 产出相同文本"
-  (let* ((responses (list (tool-call-response "ki_adder" '(("a" . 3) ("b" . 4)))
-                          (text-response "3+4=7")))
-         ;; 旧路径：ChatClient + advisor
-         (provider-old (apply #'make-seq-provider (mapcar #'identity responses)))
-         (client (cl-agent.client:make-chat-client
-                  (cl-agent.chat:make-provider-chat-model provider-old)))
-         (old-text (cl-agent.client:chat client (:user "3+4=?") (:tools 'ki-adder)))
-         ;; 新路径：kernel + invoke-turn
-         (provider-new (apply #'make-seq-provider (mapcar #'identity responses)))
-         (kernel (cl-agent.kernel:build-kernel
-                  :model (cl-agent.chat:make-provider-chat-model provider-new)
-                  :tools '(ki-adder)))
-         (new-result (cl-agent.kernel:invoke-turn
-                      kernel
-                      (cl-agent.kernel:make-turn-request
-                       (list (cl-agent.chat:user-message "3+4=?")))))
-         (new-text (cl-agent.chat:chat-response-text
-                    (cl-agent.kernel:turn-result-response new-result))))
-    (is (string= old-text new-text)
-        "两条路径产出相同文本")))

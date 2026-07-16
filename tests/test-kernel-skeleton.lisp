@@ -76,17 +76,17 @@
 ;;; ============================================================
 
 (test tool-request-carriers
-  "tool-request / tool-response 构造与读取"
+  "tool-request / tool-result 构造与读取"
   (let ((req (cl-agent.kernel:make-tool-request
               'get-weather :args '(:city "北京") :context '(:user-id 1))))
     (is (eq 'get-weather (cl-agent.kernel:tool-request-function req)))
     (is (equal '(:city "北京") (cl-agent.kernel:tool-request-args req)))
     (is (equal '(:user-id 1) (cl-agent.kernel:tool-request-context req))))
-  (let ((resp (cl-agent.kernel:make-tool-response
-               :result "22°C" :writes '((:counter . 1)) :error nil)))
-    (is (equal "22°C" (cl-agent.kernel:tool-response-result resp)))
-    (is (equal '((:counter . 1)) (cl-agent.kernel:tool-response-writes resp)))
-    (is (null (cl-agent.kernel:tool-response-error resp)))))
+  (let ((resp (cl-agent.kernel:make-tool-result
+               :value "22°C" :writes '((:counter . 1)) :error nil)))
+    (is (equal "22°C" (cl-agent.kernel:tool-result-value resp)))
+    (is (equal '((:counter . 1)) (cl-agent.kernel:tool-result-writes resp)))
+    (is (null (cl-agent.kernel:tool-result-error resp)))))
 
 (test turn-request-result-carriers
   "turn-request / turn-result 构造与读取"
