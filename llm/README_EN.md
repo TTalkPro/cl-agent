@@ -324,11 +324,11 @@ Different providers have different tool schema formats, the module handles conve
 
 ;; Or adapt an existing provider
 (defvar *model*
-  (cl-agent.chat:make-provider-chat-model
+  (cl-agent.core:make-provider-chat-model
     (make-anthropic-provider)
-    :default-options (cl-agent.chat:make-chat-options :temperature 0.3)))
+    :default-options (cl-agent.core:make-chat-options :temperature 0.3)))
 
 ;; Assemble a kernel, then chat
-(defvar *kernel* (cl-agent.kernel:build-kernel :model *model*))
-(cl-agent.kernel:chat *kernel* "Hello")
+(defvar *kernel* (cl-agent.core:build-kernel :model *model*))
+(cl-agent.core:chat *kernel* "Hello")
 ```

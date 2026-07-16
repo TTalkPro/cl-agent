@@ -319,11 +319,11 @@ Service 层负责将各 Provider 返回的原始响应转换为统一的 `llm-re
 
 ;; 或从已有 provider 适配
 (defvar *model*
-  (cl-agent.chat:make-provider-chat-model
+  (cl-agent.core:make-provider-chat-model
     (make-anthropic-provider)
-    :default-options (cl-agent.chat:make-chat-options :temperature 0.3)))
+    :default-options (cl-agent.core:make-chat-options :temperature 0.3)))
 
 ;; 装配 kernel 后即可对话
-(defvar *kernel* (cl-agent.kernel:build-kernel :model *model*))
-(cl-agent.kernel:chat *kernel* "你好")
+(defvar *kernel* (cl-agent.core:build-kernel :model *model*))
+(cl-agent.core:chat *kernel* "你好")
 ```
