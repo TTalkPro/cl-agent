@@ -201,7 +201,12 @@
                  对标 Spring AI ToolContext）
 
 返回：
-  结果字符串（非字符串结果自动 format）"))
+  (values 结果文本 写意图)
+  - 结果文本：字符串（非字符串结果自动 format）
+  - 写意图：工具函数用 (values 结果 writes-plist) 声明的状态写请求；
+    只返回单值的工具此处为 nil。写意图**不在这里生效**——由批次屏障
+    （fold-batch-writes → apply-writes）按 call 原始序折叠进 context，
+    并行执行也能得到确定性的合并结果（MapReduce 的 reduce 半步）"))
 
 (defun tool-accepts-context-p (callback)
   "工具的参数规格中是否声明了 tool-context（声明才注入）"
@@ -211,17 +216,19 @@
           :test #'string-equal))
 
 (defmethod tool-callback-call ((callback tool-callback) arguments &optional tool-context)
-  (let* ((args (if (and tool-context (tool-accepts-context-p callback))
-                   (append arguments (list :tool-context tool-context))
-                   arguments))
-         (result (handler-case (apply (tool-callback-function callback) args)
-                   (error (e)
-                     (error 'tool-execution-error
-                            :tool-name (tool-callback-name callback)
-                            :cause e)))))
-    (if (stringp result)
-        result
-        (format nil "~A" result))))
+  (let ((args (if (and tool-context (tool-accepts-context-p callback))
+                  (append arguments (list :tool-context tool-context))
+                  arguments)))
+    (multiple-value-bind (result writes)
+        (handler-case (apply (tool-callback-function callback) args)
+          (error (e)
+            (error 'tool-execution-error
+                   :tool-name (tool-callback-name callback)
+                   :cause e)))
+      (values (if (stringp result)
+                  result
+                  (format nil "~A" result))
+              writes))))
 
 (defmethod print-object ((callback tool-callback) stream)
   (print-unreadable-object (callback stream :type t)

@@ -61,8 +61,14 @@
     :initarg :writes
     :initform nil
     :reader tool-result-writes
-    :documentation "状态写意图 alist（(key . value)...），
-filter 可借此提交对外部状态（计数器/缓存/记忆）的写请求")
+    :documentation "状态写意图 plist（:key value ...）。
+
+来源：工具函数返回 (values 结果 writes-plist)，或 :tool filter 自己
+构造带 :writes 的 tool-result。工具在并行中拿到的 context 是**只读
+快照**，写经此声明——批次屏障（fold-batch-writes → apply-writes）
+按 tool-call 原始序折叠进 context，合并语义由 kernel 的 :state-slots
+声明（未声明的槽 last-writer）。失败调用（error 非 nil）的写意图
+不生效。")
    (error
     :initarg :error
     :initform nil
@@ -219,7 +225,11 @@ filter 可借此提交对外部状态（计数器/缓存/记忆）的写请求")
     :initarg :tool-context
     :initform nil
     :reader turn-result-tool-context
-    :documentation "本轮工具执行上下文（tool-calls + tool-results）")
+    :documentation "折叠完全部工具批次 :writes 后的最终 context plist——
+工具经写意图累积的状态由此交还调用方。无工具/无写意图时
+是轮初 context 原样。
+（此前这个槽是装饰品：docstring 说装 tool-calls + tool-results，
+实际全库无人赋值，恒 nil。）")
    (tool-calls-made
     :initarg :tool-calls-made
     :initform nil

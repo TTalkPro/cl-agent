@@ -33,17 +33,101 @@
   "经 :chat filter 链调用 LLM（单次，不执行工具）。
 
   PROMPT 可以是 string / 消息列表 / prompt 实例（ChatModel 自动包装）。
-  返回 cl-agent.core:chat-response 实例。
+
+  返回 (values chat-response effective-prompt)：
+  - chat-response    模型响应
+  - effective-prompt **filter 改写后、真正发给模型的** prompt
+
+  为什么要把 effective-prompt 传出来：:chat filter 可以改写工具集
+  （tool-search-filter 的渐进式披露就是这么做的）。工具执行阶段必须用
+  这一份，否则「模型看到的工具集」与「可执行的工具集」会不一致——
+  filter 注入的工具模型看得见却执行不了（find-callback-for-call 只认
+  传给它的那份 options，直接报「找不到工具」）。
 
   :chat filter 钩子签名：(prompt chain) → chat-response
   - prompt  = cl-agent.core:prompt 实例
   - chain   = 下游函数 (prompt) → chat-response
   - 返回值  = chat-response"
-  (let ((chain (build-chain (kernel-filters kernel)
-                            #'filter-chat-hook
-                            (lambda (p)
-                              (chat-model-call (kernel-model kernel) p)))))
-    (funcall chain prompt)))
+  (let* ((effective nil)
+         (chain (build-chain (kernel-filters kernel)
+                             #'filter-chat-hook
+                             (lambda (p)
+                               ;; terminal 拿到的就是穿过整条链后的最终 prompt
+                               (setf effective p)
+                               (chat-model-call (kernel-model kernel) p)))))
+    (let ((response (funcall chain prompt)))
+      (values response (or effective prompt)))))
+
+;;; ============================================================
+;;; invoke-chat-stream：:chat 链 + :token-xform 组装
+;;; ============================================================
+
+(defun compose-token-xforms (filters sink)
+  "把 FILTERS 的 :token-xform 折叠成出站 token 管道，最内层是 SINK。
+
+  返回 (values emit finish)：
+  - emit   (token-plist) → nil   处理一个 token
+  - finish () → nil              流结束，让有缓冲的 xform 吐出来
+
+  token-xform 协议：(downstream-emit) → (values emit finish)
+  - downstream-emit  往更内层送 token 的函数
+  - emit             本层处理一个 token（可改写、丢弃、缓冲）
+  - finish           流结束时调用（无缓冲的 xform 给 no-op 即可）
+
+  为什么不用经典 transducer 的 arity 重载（(rf) / (rf acc) / (rf acc x)）：
+  出站 token 流没有累积器，硬套 reducing function 只会让每个 xform 都要写
+  一堆无意义的 arity 分支。此前的实现就是这么拧的——0-arity 竟然返回一个
+  函数当 step 用，两个 filter 都没人调过所以没人发现。
+
+  filters 靠前 = 靠外 = 先看到 token（与 build-chain 的洋葱方向一致）。"
+  (let ((emit sink)
+        (finishers nil))
+    ;; 从内往外套：最后一个 filter 最靠内
+    (dolist (f (reverse filters))
+      (let ((xf (filter-token-xform f)))
+        (when xf
+          (multiple-value-bind (new-emit finish) (funcall xf emit)
+            (setf emit new-emit)
+            ;; finish 按「从外往内」的顺序收集：外层 flush 时内层还活着
+            (push finish finishers)))))
+    (values emit
+            (lambda ()
+              (dolist (fin finishers)
+                (when fin (funcall fin)))))))
+
+(defun invoke-chat-stream (kernel prompt on-token)
+  "经 :chat filter 链 + :token-xform 管道的**流式**调用。
+
+  ON-TOKEN 收到 plist：(:token \"增量文本\")。
+
+  返回 (values chat-response effective-prompt)——与 invoke-chat 同形。
+
+  :chat filter 照常生效（记忆/日志/工具披露都能改写 prompt）；
+  :token-xform 则组装在流式 terminal 内侧，作用于出站 token
+  （脱敏、先审后放…）。
+
+  注意 provider 不支持流式时 chat-model-stream 会降级为一次性调用，
+  此时整段文本作为单个 token 送出——token-xform 仍然生效。"
+  (let* ((effective nil)
+         (chain (build-chain
+                 (kernel-filters kernel)
+                 #'filter-chat-hook
+                 (lambda (p)
+                   (setf effective p)
+                   (multiple-value-bind (emit finish)
+                       (compose-token-xforms (kernel-filters kernel)
+                                             (lambda (tok) (funcall on-token tok)))
+                     (let ((response
+                             (cl-agent.core:chat-model-stream
+                              (kernel-model kernel) p
+                              ;; chat-model-stream 给的是裸字符串增量，
+                              ;; 这里包成 plist 交给 xform 管道
+                              (lambda (delta) (funcall emit (list :token delta))))))
+                       ;; flush 缓冲型 xform（如 hold-release）
+                       (funcall finish)
+                       response))))))
+    (let ((response (funcall chain prompt)))
+      (values response (or effective prompt)))))
 
 ;;; ============================================================
 ;;; invoke-tool：:tool 链 → 工具执行
@@ -62,9 +146,16 @@
     (funcall chain tool-request)))
 
 (defun tool-apply-terminal (req)
-  "工具执行终端：调用 tool-callback-call，捕获异常为 :semantic 错误。
+  "工具执行终端：调用 tool-callback-call，异常经 classify-tool-error 分类。
 
-  tool-request-function 可以是 tool-callback 实例或符号（自动解析）。"
+  tool-request-function 可以是 tool-callback 实例或符号（自动解析）。
+
+  此前这里把所有异常硬编码成 :class :semantic——而这是**工具执行的
+  唯一终端**，于是三故障分类在实际链路上从不生效：工具 signal 的
+  transient-tool-failure / environment-tool-failure 全被压成 :semantic。
+  classify-tool-error 当时只在 execute-batch-parallel 的 future 包装里
+  被调用一次，那层只能兜住「逃出 :tool filter 的错误」（如 timeout-filter），
+  兜不住工具体本身。"
   (let* ((fn-spec (tool-request-function req))
          (callback (etypecase fn-spec
                      (cl-agent.core:tool-callback fn-spec)
@@ -74,15 +165,18 @@
          (args (tool-request-args req))
          (ctx (tool-request-context req)))
     (handler-case
-        (make-tool-result :value (cl-agent.core:tool-callback-call
-                                     callback args ctx))
+        (multiple-value-bind (value writes)
+            (cl-agent.core:tool-callback-call callback args ctx)
+          ;; writes = 工具用 (values 结果 writes-plist) 声明的写意图，
+          ;; 这里只装车不生效——批次屏障（fold-batch-writes）统一折叠
+          (make-tool-result :value value :writes writes))
       (cl-agent.core:tool-not-found-error (e)
         (declare (ignore e))
         (make-tool-result :error (list :class :semantic
-                                         :message "工具未找到")))
+                                       :message "工具未找到")))
       (error (e)
-        (make-tool-result :error (list :class :semantic
-                                         :message (princ-to-string e)))))))
+        (make-tool-result :error (list :class (classify-tool-error e)
+                                       :message (princ-to-string e)))))))
 
 ;;; ============================================================
 ;;; invoke-tool-batch：批量执行工具调用（委托 batch.lisp）
@@ -204,7 +298,13 @@ some+filter 那种两阶段扫描。"
         (gate (kernel-tool-gate kernel)))
     (loop for iter from iteration
           for prompt = (cl-agent.core:make-prompt messages :options options)
-          for response = (invoke-chat kernel prompt)
+          ;; exec-options = :chat 链改写后**真正发给模型**的那份。
+          ;; 工具执行必须用它，否则模型看到的工具集与可执行的不一致
+          ;; （tool-search-filter 注入的 search_tools 就会「找不到工具」）。
+          for exec-options = nil
+          for response = (multiple-value-bind (r eff) (invoke-chat kernel prompt)
+                           (setf exec-options (cl-agent.core:prompt-options eff))
+                           r)
           do (when (> iter max-iter)
                (error 'cl-agent.core:max-tool-iterations-exceeded-error
                       :limit max-iter))
@@ -229,7 +329,7 @@ some+filter 那种两阶段扫描。"
                                         :tool-calls tool-calls
                                         :pending-id (cl-agent.core:tool-call-id paused-call)
                                         :iteration iter
-                                        :options options
+                                        :options exec-options
                                         :context context)
                            :pending-tool (make-pending-tool
                                           :name (cl-agent.core:tool-call-name paused-call)
@@ -238,38 +338,57 @@ some+filter 那种两阶段扫描。"
                                           :id (cl-agent.core:tool-call-id paused-call))
                            :tool-calls-made iter))
                         ;; 放行：执行整批
-                        (multiple-value-bind (result done)
+                        (multiple-value-bind (result done new-context)
                             (%execute-and-append kernel response tool-calls
-                                                 messages options context iter)
+                                                 messages exec-options context iter)
                           (if done
                               (return result)      ; return-direct 收尾
-                              (setf messages result)))))))
+                              (progn
+                                (setf messages result)
+                                ;; 屏障折叠改了 context → 线程给下一轮：
+                                ;; 工具直接拿 context（tool-request :context），
+                                ;; :chat filter 读 options 的 tool-context，
+                                ;; 两条路都要更新，否则 filter 看到的是旧快照
+                                (unless (eq new-context context)
+                                  (setf context new-context
+                                        options (fold-context-into-tool-context
+                                                 options new-context))))))))))
                (t
-                ;; 无工具调用：最终响应
+                ;; 无工具调用：最终响应。tool-context 带出**折叠后**的
+                ;; 最终 context——工具经 :writes 累积的状态由此交还调用方
                 (return (make-turn-result :completed :response response
+                                          :tool-context context
                                           :tool-calls-made iter)))))))
 
 (defun %execute-and-append (kernel response tool-calls messages options context iteration)
   "执行一批工具并把结果追加进 messages。
 
-返回 (values X done-p)：
+返回 (values X done-p new-context)：
   - done-p = nil → X 是追加后的新 messages（继续循环）
-  - done-p = t   → X 是终局 turn-result（return-direct 收尾）"
+  - done-p = t   → X 是终局 turn-result（return-direct 收尾）
+  - new-context  = 屏障处折叠本批 :writes 后的 context（无写意图时
+                   与 CONTEXT 同一对象）——循环用它跑下一轮，
+                   下轮工具看到的就是折叠后的快照"
   (let ((tm (kernel-tool-manager kernel)))
     (if tm
         ;; === Manager 路径 ===
+        ;; execute-tool-calls 的 :context 按协议就是「应用 writes 后的
+        ;; context」——此前协议这么写、三个实现全都原样透传。
         (let* ((result (execute-tool-calls tm kernel response
                                            (list :tool-context context)))
                (tool-msg (cl-agent.core:tool-response-message (getf result :messages))))
           (values (append messages
                           (list (cl-agent.core:chat-response-message response) tool-msg))
-                  nil))
+                  nil
+                  (or (getf result :context) context)))
         ;; === 原路径（invoke-tool-batch）===
         (multiple-value-bind (tool-results return-direct)
             (invoke-tool-batch kernel tool-calls options context)
-          (let ((tool-msg (tool-results->message tool-results tool-calls)))
+          (let ((tool-msg (tool-results->message tool-results tool-calls))
+                (new-context (fold-batch-writes kernel tool-results context)))
             (if return-direct
-                ;; return-direct：工具结果即最终答案，不再回传模型
+                ;; return-direct：工具结果即最终答案，不再回传模型。
+                ;; 写意图照常折叠——工具确实执行了，状态不能丢
                 (values (make-turn-result
                          :completed
                          :response (cl-agent.core:make-chat-response
@@ -278,11 +397,14 @@ some+filter 那种两阶段扫描。"
                                       (format nil "~{~A~^~%~}"
                                               (mapcar #'tool-result-value tool-results)))
                                      :finish-reason :stop))
+                         :tool-context new-context
                          :tool-calls-made (1+ iteration))
-                        t)
+                        t
+                        new-context)
                 (values (append messages
                                 (list (cl-agent.core:chat-response-message response) tool-msg))
-                        nil)))))))
+                        nil
+                        new-context)))))))
 
 ;;; ============================================================
 ;;; resume-turn：从暂停点续跑（HITL）
@@ -355,6 +477,11 @@ some+filter 那种两阶段扫描。"
                          (multiple-value-list
                           (invoke-tool-batch kernel callable options context))))
              (results (first executed))
+             ;; 屏障折叠：真执行了的那部分照常提交写意图（callable 保持
+             ;; 原始相对序）；被拒/被答复的没执行，自然没有写
+             (context (if results
+                          (fold-batch-writes kernel results context)
+                          context))
              ;; 按**原始顺序**拼回结果——模型看到的 tool 消息顺序必须与
              ;; 它发出的 tool_calls 一致，否则 id 对不上
              (texts (mapcar
@@ -377,7 +504,9 @@ some+filter 那种两阶段扫描。"
         (%tool-loop kernel
                     (append messages
                             (list (cl-agent.core:chat-response-message response) tool-msg))
-                    options context (1+ iteration))))))
+                    ;; context 若被写意图更新，options 的 tool-context 也要跟上
+                    (fold-context-into-tool-context options context)
+                    context (1+ iteration))))))
 
 (defun resume-turn (kernel loop-state decision &key payload)
   "从暂停点续跑工具循环。

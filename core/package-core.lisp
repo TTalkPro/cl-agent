@@ -542,6 +542,7 @@
     #:kernel-default-system
     #:kernel-default-options
     #:kernel-tool-gate
+    #:kernel-state-slots
 
     ;; ==================== ToolCallingManager ====================
     #:tool-calling-manager
@@ -553,15 +554,29 @@
     #:make-virtual-thread-tool-calling-manager
     #:thread-pool-tool-calling-manager
     #:make-thread-pool-tool-calling-manager
+    #:tcm-pool-size
+    #:shutdown-tool-calling-manager
+    #:with-thread-pool-tool-calling-manager
     #:default-tool-calling-manager
 
     ;; ==================== Invoke 原语 ====================
     #:invoke-chat
     #:invoke-tool
     #:invoke-tool-batch
+    #:*tool-pool-size*
+    #:ensure-tool-pool
+    #:shutdown-tool-pool
+    ;; 故障路由（瞬态重试）
+    #:*transient-retry-attempts*
+    #:*transient-retry-base-delay*
+    ;; 写意图折叠（:writes + :state-slots 的 MapReduce 契约）
+    #:apply-writes
+    #:fold-batch-writes
     #:invoke-turn
     #:run-tool-loop
     #:resume-turn
+    #:invoke-chat-stream
+    #:compose-token-xforms
 
     ;; ==================== chat DSL（调用方入口） ====================
     #:chat

@@ -54,6 +54,16 @@
     :reader kernel-tool-manager
     :documentation "ToolCallingManager 实例（可注入执行策略）。
 nil = 走 invoke-tool-batch 原路径；非 nil = 经 execute-tool-calls 协议。")
+   (state-slots
+    :initarg :state-slots
+    :initform nil
+    :reader kernel-state-slots
+    :documentation "状态槽声明：((key :init 初值 :reduce (老值 新值)→合并值) ...)。
+
+决定工具批次 :writes 在屏障处（apply-writes）的合并语义：
+声明了 :reduce 的槽用它折叠（老值缺席时用 :init）；未声明的槽
+last-writer——后写覆盖，按 tool-call 原始序确定，与并行执行的
+实际交错无关。同批被写 ≥2 次且无 reducer 的键会告警。")
    (default-system
     :initarg :system
     :initform nil
@@ -89,7 +99,7 @@ nil = 走 invoke-tool-batch 原路径；非 nil = 经 execute-tool-calls 协议�
 ;;; =========================================================;;;
 
 (defun build-kernel (&key model tools filters eligibility-fn settings tool-manager
-                          system options tool-gate)
+                          system options tool-gate state-slots)
   "构建 Kernel 实例。
 
 参数：
@@ -106,6 +116,8 @@ nil = 走 invoke-tool-batch 原路径；非 nil = 经 execute-tool-calls 协议�
   - tool-gate      工具审批闸门 (tool-call) → :proceed | :pause | (:pause . 原因)；
                    nil（缺省）= 不审批。判 :pause → 整轮暂停，
                    用 resume-turn 续跑
+  - state-slots    状态槽声明 ((key :init v0 :reduce fn) ...)——工具批次
+                   :writes 的合并语义（未声明的槽 last-writer，按 call 序）
 
 返回值：kernel 实例。
 
@@ -124,4 +136,5 @@ nil = 走 invoke-tool-batch 原路径；非 nil = 经 execute-tool-calls 协议�
                  :tool-manager tool-manager
                  :system system
                  :options options
-                 :tool-gate tool-gate))
+                 :tool-gate tool-gate
+                 :state-slots state-slots))
