@@ -322,6 +322,8 @@ MINIMAX_API_KEY=... sbcl --script scripts/live-test.lisp
 - [API Reference](docs/API.md)
 - [Tool Calling Architecture](docs/tool-calling.md) — the filter/manager split,
   the Spring AI 2.0 mapping and known divergences
+- [CHANGELOG](CHANGELOG.md) — version-to-version changes and migration notes
+  (Keep a Changelog format)
 
 ## Migration Notes
 

@@ -299,6 +299,7 @@ MINIMAX_API_KEY=... sbcl --script scripts/live-test.lisp
 - [API 参考](docs/API_CN.md)
 - [工具调用架构](docs/tool-calling_CN.md) —— Filter 与 Manager 的分工、
   Spring AI 2.0 对应关系与已知偏差
+- [CHANGELOG](CHANGELOG.md) —— 版本变更与迁移说明（Keep a Changelog 格式）
 
 ## 迁移说明
 
