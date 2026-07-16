@@ -50,6 +50,8 @@
    #:agent-resume
 
    ;; ==================== 结果访问（归一化，不抛异常） ====================
+   #:agent-result
+   #:agent-result-p
    #:agent-result-status
    #:agent-result-text
    #:agent-result-error
