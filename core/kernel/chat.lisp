@@ -92,13 +92,51 @@
 (defun kernel-chat-stream (kernel on-chunk &rest args)
   "流式执行：每个文本增量回调 (on-chunk delta)，返回最终 chat-response。
 
-  注意：当前降级为同步调用——完整文本作为单个 chunk 回调一次。
-  真正的增量流式需要 kernel 的 invoke-chat-stream（:token-xform 组装），
-  尚未实现；真 SSE 目前只存在于 chat-model-stream 这一层。"
-  (let* ((result (apply #'kernel-chat kernel args))
-         (response (turn-result-response result)))
-    (funcall on-chunk (cl-agent.core:chat-response-text response))
-    response))
+  经 invoke-chat-stream：:chat filter 链照常生效，:token-xform 管道组装在
+  流式 terminal 内侧（脱敏、先审后放…）。ON-CHUNK 收到的是**字符串增量**。
+
+  **不支持工具**：这是单次流式调用，不跑工具循环。要流式 + 工具，得先有
+  :turn 链的流式通路（模型可能先吐文本再发 tool_call，需要边流边判定），
+  那是另一件事。
+
+  会把工具发给模型的请求会**直接报错**而不是静默跑掉工具循环——否则
+  模型发了 tool_call 却没人执行，用户拿到一段没头没尾的文本还不知道
+  为什么。带工具请用 kernel-chat。
+
+  provider 不支持流式时 chat-model-stream 会降级为一次性调用，
+  整段文本作为单个 chunk 送出——token-xform 仍生效。"
+  (let* ((plist args)
+         (system (or (getf plist :system) (kernel-default-system kernel)))
+         (user (getf plist :user))
+         (messages (getf plist :messages))
+         (msgs (append (when system (list (cl-agent.core:system-message system)))
+                       messages
+                       (when user (list (cl-agent.core:user-message user)))))
+         (options (let ((defaults (kernel-default-options kernel))
+                        (given (getf plist :options)))
+                    (if defaults
+                        (cl-agent.core:merge-chat-options given defaults)
+                        given)))
+         (ctx (getf plist :context)))
+    (unless (remove-if #'cl-agent.core:system-message-p msgs)
+      (error "请求缺少用户输入：请用 (:user ...) 或 (:messages ...) 提供"))
+    ;; 工具会被发给模型 → 模型可能发 tool_call → 但这条路径不跑工具循环。
+    ;; 宁可直接拦下：静默丢掉工具执行，用户只会看到一段没头没尾的文本。
+    (let ((tools (or (getf plist :tools) (kernel-tools kernel))))
+      (when tools
+        (error "kernel-chat-stream 不支持工具循环（它是单次流式调用），~@
+                但本次会把 ~D 个工具发给模型——模型若发 tool_call 将无人执行。~@
+                带工具的请求请用 kernel-chat / (chat k ...)；~@
+                只要流式就用一个不带 :tools 的 kernel。"
+               (length tools))))
+    ;; 把 context 折进 options 的 tool-context，:chat filter（memory 等）才读得到
+    (let* ((options (fold-context-into-tool-context
+                     (or options (cl-agent.core:make-chat-options)) ctx))
+           (prompt (cl-agent.core:make-prompt msgs :options options)))
+      (invoke-chat-stream kernel prompt
+                          (lambda (token)
+                            (let ((text (getf token :token)))
+                              (when text (funcall on-chunk text))))))))
 
 ;;; ============================================================
 ;;; chat 宏 —— 声明式请求 DSL

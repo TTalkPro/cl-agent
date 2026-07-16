@@ -612,11 +612,12 @@
     ;; RAG
     #:retrieve
     #:qa-turn-filter
-    ;; Tool-search
+    ;; Tool-search（渐进式工具披露）
     #:search-tools
     #:keyword-tool-index
     #:make-keyword-tool-index
     #:tool-search-filter
+    #:*tool-search-instruction*
     ;; Timeout
     #:timeout-filter
     ;; Approval
