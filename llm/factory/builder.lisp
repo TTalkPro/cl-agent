@@ -174,17 +174,17 @@ Usage:
   其余关键字参数透传给提供商工厂。
 
 返回：
-  cl-agent.chat:provider-chat-model 实例
+  cl-agent.core:provider-chat-model 实例
 
 用法：
   (create-chat-model :anthropic :model \"claude-sonnet-4-20250514\")
   (create-chat-model :openai :model \"gpt-4o\"
-                     :options (cl-agent.chat:make-chat-options :temperature 0.3))"
+                     :options (cl-agent.core:make-chat-options :temperature 0.3))"
   (declare (ignore model api-key api-url))
   (let* ((resolved-name (resolve-provider-name provider-name))
          (provider (apply #'create-provider resolved-name
                           (alexandria:remove-from-plist args :options))))
-    (cl-agent.chat:make-provider-chat-model provider :default-options options)))
+    (cl-agent.core:make-provider-chat-model provider :default-options options)))
 
 (defun create-chat-model-from-builder (builder &key options)
   "从 provider builder 创建 ChatModel。
@@ -194,6 +194,6 @@ Usage:
   OPTIONS - 默认 chat-options（可选）
 
 返回：
-  cl-agent.chat:provider-chat-model 实例"
-  (cl-agent.chat:make-provider-chat-model (build-provider builder)
+  cl-agent.core:provider-chat-model 实例"
+  (cl-agent.core:make-provider-chat-model (build-provider builder)
                                           :default-options options))

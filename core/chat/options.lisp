@@ -15,7 +15,7 @@
 ;;;;   与 Spring AI 的 runtime options > default options 一致。
 ;;;;   tool-callbacks / tool-names 例外：合并时取并集（Spring AI 同语义）。
 
-(in-package #:cl-agent.chat)
+(in-package #:cl-agent.core)
 
 (defparameter +chat-options-slots+
   '(model temperature max-tokens top-p top-k stop-sequences
@@ -80,7 +80,7 @@
     :documentation "透传给工具执行的上下文 plist"))
   (:documentation "可移植的 Chat 调用选项
 （对标 Spring AI 2.0 ChatOptions + ToolCallingChatOptions；
-工具执行循环本身不在这里配置——它由 cl-agent.kernel:run-tool-loop
+工具执行循环本身不在这里配置——它由 cl-agent.core:run-tool-loop
 承担，循环相关旋钮见 build-kernel 的 :settings/:tool-manager）"))
 
 (defun make-chat-options (&rest initargs

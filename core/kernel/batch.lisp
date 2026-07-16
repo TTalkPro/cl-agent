@@ -13,7 +13,7 @@
 ;;;;   | :transient    | nil            | 转文本回传模型                 |
 ;;;;   | :environment  | 任意           | 转文本回传模型（P3 暂不暂停）  |
 
-(in-package #:cl-agent.kernel)
+(in-package #:cl-agent.core)
 
 ;;; ============================================================
 ;;; 工具解析（找不到 ≠ 崩掉整轮对话）
@@ -35,9 +35,9 @@ find-callback-for-call 找不到工具时是 signal 而非返回 nil。它的调
 让它自纠（旧 ToolCallingManager 的 process-tool-execution-error 就是
 这么做的，Spring 的默认语义亦然）。安全边界不受影响——找不到就是
 找不到，绝不回退全局注册表去执行未暴露的工具。"
-  (handler-case (values (cl-agent.chat:find-callback-for-call options tool-call)
+  (handler-case (values (cl-agent.core:find-callback-for-call options tool-call)
                         nil)
-    (cl-agent.chat:tool-not-found-error (e)
+    (cl-agent.core:tool-not-found-error (e)
       (values nil (make-tool-result
                    :error (list :class :semantic
                                 :message (princ-to-string e)))))))
@@ -63,7 +63,7 @@ find-callback-for-call 找不到工具时是 signal 而非返回 nil。它的调
 解析不到的工具当作非 serial——它根本不会被执行。"
   (some (lambda (tc)
           (let ((cb (resolve-callback options tc)))
-            (and cb (cl-agent.chat:tool-callback-serial-p cb))))
+            (and cb (cl-agent.core:tool-callback-serial-p cb))))
         tool-calls))
 
 (defun execute-batch-sequential (kernel tool-calls options context)
@@ -74,15 +74,15 @@ find-callback-for-call 找不到工具时是 signal 而非返回 nil。它的调
         (errors nil))
     (dolist (tc tool-calls)
       (multiple-value-bind (callback resolve-error) (resolve-callback options tc)
-        (let* ((direct-p (and callback (cl-agent.chat:tool-callback-return-direct-p callback)))
+        (let* ((direct-p (and callback (cl-agent.core:tool-callback-return-direct-p callback)))
                ;; 解析不到就不进 :tool 链——没有工具可执行，
                ;; 直接产出语义错误结果回传模型
                (resp (or resolve-error
                          (invoke-tool kernel
                                       (make-tool-request
                                        callback
-                                       :args (cl-agent.chat:arguments->plist
-                                              (cl-agent.chat:tool-call-arguments tc))
+                                       :args (cl-agent.core:arguments->plist
+                                              (cl-agent.core:tool-call-arguments tc))
                                        :context context)))))
           (unless direct-p (setf return-direct nil))
           (push resp results)
@@ -104,14 +104,14 @@ find-callback-for-call 找不到工具时是 signal 而非返回 nil。它的调
                         (multiple-value-bind (callback resolve-error)
                             (resolve-callback options tc)
                           (let ((direct-p (and callback
-                                               (cl-agent.chat:tool-callback-return-direct-p callback))))
+                                               (cl-agent.core:tool-callback-return-direct-p callback))))
                             (list direct-p
                                   resolve-error
                                   (when callback
                                     (make-tool-request
                                      callback
-                                     :args (cl-agent.chat:arguments->plist
-                                            (cl-agent.chat:tool-call-arguments tc))
+                                     :args (cl-agent.core:arguments->plist
+                                            (cl-agent.core:tool-call-arguments tc))
                                      :context context))))))
                       tool-calls))
              ;; 并行提交（解析失败的不提交，直接用现成的错误结果）

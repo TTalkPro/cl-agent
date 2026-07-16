@@ -20,7 +20,7 @@
 (asdf:load-system :cl-agent-mock)
 
 (defpackage :kernel-examples
-  (:use :cl :cl-agent.chat :cl-agent.kernel))
+  (:use :cl :cl-agent.core))
 (in-package :kernel-examples)
 
 ;;; ============================================================

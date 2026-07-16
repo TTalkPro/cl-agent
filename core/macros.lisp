@@ -108,29 +108,9 @@
                    (/ (- end-time start-time) internal-time-units-per-second)
                    (- end-unix start-unix))))))
 
-(defmacro with-retry ((&key (max-retries 3)
-                           (backoff-base 2)
-                           (condition 'error)) &body body)
-  "带退避的重试宏"
-  (let ((retries (gensym "RETRIES"))
-        (result (gensym "RESULT")))
-    `(let ((,retries 0))
-       (loop
-         (handler-case
-             (let ((,result (progn ,@body)))
-               (when (> ,retries 0)
-                 (log:info "Retry succeeded after ~A attempts" ,retries))
-               (return ,result))
-           (,condition (condition)
-             (if (< ,retries ,max-retries)
-                 (progn
-                   (incf ,retries)
-                   (let ((wait-time (* (expt ,backoff-base ,retries) 0.1)))
-                     (log:warn "Attempt ~A/~A failed: ~A~%~
-                               Retrying after ~F seconds..."
-                              ,retries ,max-retries condition wait-time)
-                     (sleep wait-time)))
-                 (error condition))))))))
+;;; 注：此处曾有一个 with-retry (&key max-retries backoff-base condition)——
+;;; 零使用的死实现。真正在用的是 cl-agent.http 那个 (&key config)
+;;; （被 http-request-with-retry 使用）。同名不同签名，删死留活。
 
 (defmacro with-temp-file ((var &key (prefix "lia") (suffix "tmp")) &body body)
   "创建临时文件的上下文管理器"

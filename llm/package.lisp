@@ -97,6 +97,11 @@
   (:use #:common-lisp
         #:cl-agent.core)
   (:nicknames #:cla.llm #:llm)
+  ;; chat：cl-agent.core 有一个同名的 **宏**（kernel 的声明式 DSL，
+  ;; (chat kernel (:user ...))），本包的是低层 client **函数**
+  ;; ((chat client messages &key ...))。语义与调用形态都不同，必须 shadow——
+  ;; 否则本包的 defun 会试图把 core 的宏重定义成函数。
+  (:shadow #:chat)
   ;; 门面层：这些符号的实现属于 cl-agent.llm.providers，此处引入*同一符号*
   ;; 再导出，而不是在本包另立同名符号。
   ;;

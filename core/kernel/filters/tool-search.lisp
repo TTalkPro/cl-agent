@@ -10,7 +10,7 @@
 ;;;;   2. IToolIndex 协议：用户注入的检索器
 ;;;;   3. :chat filter：把 :tools 改写为 [search_tools] + 已发现工具
 
-(in-package #:cl-agent.kernel)
+(in-package #:cl-agent.core)
 
 ;;; ============================================================
 ;;; IToolIndex 协议
@@ -40,9 +40,9 @@
   (let* ((query-words (split-and-tokenize query))
          (scored
           (mapcar (lambda (cb)
-                    (let* ((name (cl-agent.chat:tool-callback-name cb))
-                           (desc (cl-agent.chat:tool-definition-description
-                                  (cl-agent.chat:tool-callback-definition cb)))
+                    (let* ((name (cl-agent.core:tool-callback-name cb))
+                           (desc (cl-agent.core:tool-definition-description
+                                  (cl-agent.core:tool-callback-definition cb)))
                            (name-words (split-and-tokenize name))
                            (desc-words (split-and-tokenize desc))
                            ;; 名称匹配权重 2，描述匹配权重 1
@@ -96,22 +96,22 @@
   (make-filter
    :tool-search
    :chat (lambda (prompt chain)
-             (let* ((options (cl-agent.chat:prompt-options prompt))
-                    (ctx (cl-agent.chat:chat-options-tool-context options))
+             (let* ((options (cl-agent.core:prompt-options prompt))
+                    (ctx (cl-agent.core:chat-options-tool-context options))
                     (discovered (getf ctx :discovered-tools)))
                (if discovered
                    ;; 有已发现集合 → 改写 tools
                    (let* ((found-callbacks
                            (mapcar (lambda (name)
-                                     (cl-agent.chat:find-callback-for-call
+                                     (cl-agent.core:find-callback-for-call
                                       options
-                                      (cl-agent.chat:make-tool-call
+                                      (cl-agent.core:make-tool-call
                                        :id "search" :name name
                                        :arguments (make-hash-table :test #'equal))))
                                    discovered))
-                          (new-options (cl-agent.chat:chat-options-with-tools
+                          (new-options (cl-agent.core:chat-options-with-tools
                                         options found-callbacks))
-                          (new-prompt (cl-agent.chat:prompt-copy prompt :options new-options)))
+                          (new-prompt (cl-agent.core:prompt-copy prompt :options new-options)))
                      (funcall chain new-prompt))
                    ;; 无发现集合 → 不改写（模型看到全部工具）
                    (funcall chain prompt))))))

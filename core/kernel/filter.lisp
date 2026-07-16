@@ -21,7 +21,7 @@
 ;;;;     槽（make-NAME 通过 let 绑定 self，闭包捕获）。比 defadvisor
 ;;;;     更简单——不需要泛型方法分发。
 
-(in-package #:cl-agent.kernel)
+(in-package #:cl-agent.core)
 
 ;;; ============================================================
 ;;; Filter CLOS 类

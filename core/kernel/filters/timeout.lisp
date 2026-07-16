@@ -4,7 +4,7 @@
 ;;;; 概述（对标 clj-agent timeout-filter）：
 ;;;;   工具执行超时 → 返回 :transient 错误（可触发 :retry）。
 
-(in-package #:cl-agent.kernel)
+(in-package #:cl-agent.core)
 
 (defun timeout-filter (milliseconds)
   "创建 timeout-filter（:tool 链）。

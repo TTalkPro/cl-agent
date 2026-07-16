@@ -190,7 +190,7 @@ CALLBACK 收到 chunk plist：
                provider
                (cl-agent.llm:provider-chat-endpoint provider)))
          (state (make-openai-stream-state)))
-    (cl-agent.http:http-stream-sse
+    (cl-agent.core:http-stream-sse
      url
      :headers (provider-auth-headers provider)
      :body (cl-agent.core:json-stringify request-body)

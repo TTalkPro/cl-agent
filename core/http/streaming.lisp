@@ -14,7 +14,7 @@
 ;;;;     :on-event (lambda (event)
 ;;;;                 (format t "收到事件: ~A~%" event)))
 
-(in-package #:cl-agent.http)
+(in-package #:cl-agent.core)
 
 ;;; ============================================================
 ;;; 流式上下文

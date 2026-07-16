@@ -16,7 +16,7 @@
 ;;;;                                      :delay 1.0
 ;;;;                                      :backoff :exponential))
 
-(in-package #:cl-agent.http)
+(in-package #:cl-agent.core)
 
 ;;; ============================================================
 ;;; 重试配置

@@ -5,7 +5,7 @@
 ;;;;   校验最终回答，不合格 → 把原因作为反馈重入整个循环。
 ;;;;   闭包链天然支持递归重入：多次 (chain req) = 多次完整循环。
 
-(in-package #:cl-agent.kernel)
+(in-package #:cl-agent.core)
 
 ;;; ============================================================
 ;;; validation-turn-filter
@@ -46,7 +46,7 @@
                                       (try (1+ attempt)
                                            (make-turn-request
                                             (append (turn-request-messages req)
-                                                    (list (cl-agent.chat:user-message feedback)))
+                                                    (list (cl-agent.core:user-message feedback)))
                                             :context (turn-request-context req)
                                             :resume-p (turn-request-resume-p req))))))))))
              (try 0 req)))))
@@ -74,7 +74,7 @@
   4. 解析成功            → 按 schema 校验，错误逐条回喂"
 
   (lambda (response)
-    (let ((text (cl-agent.chat:chat-response-text response)))
+    (let ((text (cl-agent.core:chat-response-text response)))
       (cond
         ;; 1. 空文本
         ((or (null text)

@@ -6,7 +6,7 @@
 ;;;;   Advisor 通过 prompt-copy 产生增强副本（不可变风格），
 ;;;;   原 prompt 不被修改。
 
-(in-package #:cl-agent.chat)
+(in-package #:cl-agent.core)
 
 (defclass prompt ()
   ((messages

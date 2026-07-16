@@ -22,9 +22,9 @@ CHAIN-KEY 为 :chat / :tool / :turn。"
                   (push (list :after tag) (car log-cell))
                   resp))))
     (case chain-key
-      (:chat (cl-agent.kernel:make-filter tag :chat hook))
-      (:tool (cl-agent.kernel:make-filter tag :tool hook))
-      (:turn (cl-agent.kernel:make-filter tag :turn hook))
+      (:chat (cl-agent.core:make-filter tag :chat hook))
+      (:tool (cl-agent.core:make-filter tag :tool hook))
+      (:turn (cl-agent.core:make-filter tag :turn hook))
       (t (error "未知 chain-key ~A" chain-key)))))
 
 ;;; ============================================================
@@ -40,9 +40,9 @@ CHAIN-KEY 为 :chat / :tool / :turn。"
           (terminal (lambda (req)
                       (push :terminal (car log))
                       (list :response req))))
-      (let ((chain (cl-agent.kernel:build-chain
+      (let ((chain (cl-agent.core:build-chain
                     (list f-outer f-mid f-inner)
-                    #'cl-agent.kernel:filter-chat-hook
+                    #'cl-agent.core:filter-chat-hook
                     terminal)))
         (funcall chain "test-req"))
     ;; 日志（新→旧）：(:after :outer) (:after :mid) (:after :inner) :terminal
@@ -64,14 +64,14 @@ CHAIN-KEY 为 :chat / :tool / :turn。"
   "短路：filter 不调 chain 时下游不执行"
   (let ((terminal-called nil)
         (short-circuit-filter
-          (cl-agent.kernel:make-filter
+          (cl-agent.core:make-filter
            :short
            :chat (lambda (req chain)
                    (declare (ignore chain))
                    (list :short-circuited req)))))
-    (let ((chain (cl-agent.kernel:build-chain
+    (let ((chain (cl-agent.core:build-chain
                   (list short-circuit-filter)
-                  #'cl-agent.kernel:filter-chat-hook
+                  #'cl-agent.core:filter-chat-hook
                   (lambda (req)
                     (setf terminal-called t)
                     (list :terminal req)))))
@@ -86,7 +86,7 @@ CHAIN-KEY 为 :chat / :tool / :turn。"
 (test filter-around-shared-state
   "around filter：before/after 共享闭包局部状态"
   (let ((timing-filter
-          (cl-agent.kernel:make-filter
+          (cl-agent.core:make-filter
            :timing
            :chat (lambda (req chain)
                    (let ((start 42))
@@ -95,9 +95,9 @@ CHAIN-KEY 为 :chat / :tool / :turn。"
                        (is (= 42 start) "after 段可访问 before 段的局部变量")
                        resp)))))
         (terminal (lambda (req) (list :ok req))))
-    (let ((chain (cl-agent.kernel:build-chain
+    (let ((chain (cl-agent.core:build-chain
                   (list timing-filter)
-                  #'cl-agent.kernel:filter-chat-hook
+                  #'cl-agent.core:filter-chat-hook
                   terminal)))
       (funcall chain "test"))))
 
@@ -109,7 +109,7 @@ CHAIN-KEY 为 :chat / :tool / :turn。"
   "递归重入：validation filter 调 chain 两次——terminal 被调用 2 次"
   (let ((call-count 0))
     (let ((validation-filter
-           (cl-agent.kernel:make-filter
+           (cl-agent.core:make-filter
             :validation
             :chat (lambda (req chain)
                     (let ((resp-1 (funcall chain req)))
@@ -122,9 +122,9 @@ CHAIN-KEY 为 :chat / :tool / :turn。"
                       (if (= call-count 1)
                           (list :quality :bad :req req)
                           (list :quality :good :req req)))))
-      (let ((chain (cl-agent.kernel:build-chain
+      (let ((chain (cl-agent.core:build-chain
                     (list validation-filter)
-                    #'cl-agent.kernel:filter-chat-hook
+                    #'cl-agent.core:filter-chat-hook
                     terminal)))
         (let ((result (funcall chain "original")))
           (is (= 2 call-count) "terminal 被调用 2 次")
@@ -141,7 +141,7 @@ CHAIN-KEY 为 :chat / :tool / :turn。"
   (let ((chat-log nil)
         (tool-log nil))
     (let ((dual-filter
-           (cl-agent.kernel:make-filter
+           (cl-agent.core:make-filter
             :dual
             :chat (lambda (req chain)
                     (push :chat-invoked chat-log)
@@ -150,16 +150,16 @@ CHAIN-KEY 为 :chat / :tool / :turn。"
                     (push :tool-invoked tool-log)
                     (funcall chain req)))))
       ;; 构建 :chat 链
-      (let ((chat-chain (cl-agent.kernel:build-chain
+      (let ((chat-chain (cl-agent.core:build-chain
                          (list dual-filter)
-                         #'cl-agent.kernel:filter-chat-hook
+                         #'cl-agent.core:filter-chat-hook
                          (lambda (req) (list :chat-terminal req)))))
         (funcall chat-chain "chat-req")
         (is (equal '(:chat-invoked) chat-log) ":chat 钩子被调用"))
       ;; 构建 :tool 链
-      (let ((tool-chain (cl-agent.kernel:build-chain
+      (let ((tool-chain (cl-agent.core:build-chain
                          (list dual-filter)
-                         #'cl-agent.kernel:filter-tool-hook
+                         #'cl-agent.core:filter-tool-hook
                          (lambda (req) (list :tool-terminal req)))))
         (funcall tool-chain "tool-req")
         (is (equal '(:tool-invoked) tool-log) ":tool 钩子被调用")))))
@@ -171,12 +171,12 @@ CHAIN-KEY 为 :chat / :tool / :turn。"
 (test filter-without-hook-skipped
   "filter 只有 :tool 钩子，构建 :chat 链时自动跳过"
   (let ((chat-called nil)
-        (tool-only (cl-agent.kernel:make-filter
+        (tool-only (cl-agent.core:make-filter
                     :tool-only
                     :tool (lambda (req chain) (funcall chain req)))))
-    (let ((chain (cl-agent.kernel:build-chain
+    (let ((chain (cl-agent.core:build-chain
                   (list tool-only)
-                  #'cl-agent.kernel:filter-chat-hook
+                  #'cl-agent.core:filter-chat-hook
                   (lambda (req)
                     (push :terminal chat-called)
                     req))))
@@ -187,7 +187,7 @@ CHAIN-KEY 为 :chat / :tool / :turn。"
 ;;; defilter 宏基本展开
 ;;; ============================================================
 
-(cl-agent.kernel:defilter test-timing-filter
+(cl-agent.core:defilter test-timing-filter
     ((store :initarg :store :initform nil :reader test-filter-store))
   (:chat (self req chain)
     (let ((resp (funcall chain req)))
@@ -197,18 +197,18 @@ CHAIN-KEY 为 :chat / :tool / :turn。"
 (test defilter-generates-class-and-constructor
   "defilter 生成 filter 子类 + make- 构造函数"
   (let ((f (make-test-timing-filter)))
-    (is (typep f 'cl-agent.kernel:filter))
-    (is (not (null (cl-agent.kernel:filter-chat-hook f)))
+    (is (typep f 'cl-agent.core:filter))
+    (is (not (null (cl-agent.core:filter-chat-hook f)))
         ":chat 钩子存在")
-    (is (null (cl-agent.kernel:filter-tool-hook f))
+    (is (null (cl-agent.core:filter-tool-hook f))
         ":tool 钩子不存在")))
 
 (test defilter-hook-invocable
   "defilter 生成的钩子可调用且可访问实例槽"
   (let ((f (make-test-timing-filter)))
-    (let ((chain (cl-agent.kernel:build-chain
+    (let ((chain (cl-agent.core:build-chain
                   (list f)
-                  #'cl-agent.kernel:filter-chat-hook
+                  #'cl-agent.core:filter-chat-hook
                   (lambda (req) (list :ok req)))))
       (funcall chain "round-1")
       (funcall chain "round-2"))

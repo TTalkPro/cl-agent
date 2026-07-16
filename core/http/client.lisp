@@ -16,7 +16,7 @@
 ;;;;              :body '(("name" . "Alice"))
 ;;;;              :content-type :json)
 
-(in-package #:cl-agent.http)
+(in-package #:cl-agent.core)
 
 ;;; ============================================================
 ;;; 全局配置

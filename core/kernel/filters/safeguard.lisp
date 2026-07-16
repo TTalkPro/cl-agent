@@ -6,7 +6,7 @@
 ;;;;   大小写不敏感（比 Spring 原版更严格）。
 ;;;;   被拦的输入与拒答都不落库（短路在 :turn 层，:chat memory 不执行）。
 
-(in-package #:cl-agent.kernel)
+(in-package #:cl-agent.core)
 
 (defun safeguard-turn-filter (keywords &key (failure-response "抱歉，无法处理该请求。"))
   "创建 safeguard-turn-filter（:turn 链，最外层守卫）。
@@ -30,7 +30,7 @@
      :turn (lambda (req chain)
              (let ((texts (mapcar (lambda (m)
                                     (string-downcase
-                                     (or (cl-agent.chat:message-text m) "")))
+                                     (or (cl-agent.core:message-text m) "")))
                                   (turn-request-messages req))))
                ;; 检查任一消息是否包含任一敏感词
                (if (some (lambda (kw)
@@ -39,9 +39,9 @@
                    ;; 命中：短路
                    (make-turn-result
                     :cancelled
-                    :response (cl-agent.chat:make-chat-response
-                               (cl-agent.chat:make-generation
-                                (cl-agent.chat:assistant-message failure-response)
+                    :response (cl-agent.core:make-chat-response
+                               (cl-agent.core:make-generation
+                                (cl-agent.core:assistant-message failure-response)
                                 :finish-reason :stop)))
                    ;; 未命中：正常进入循环
                    (funcall chain req)))))))

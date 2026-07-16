@@ -8,7 +8,7 @@
 ;;;;   transducer 形态：(fn [rf] -> rf')，其中 rf 是 reducing function。
 ;;;;   在流式 terminal 内组装，不在 build-chain 中。
 
-(in-package #:cl-agent.kernel)
+(in-package #:cl-agent.core)
 
 ;;; ============================================================
 ;;; token-redact-filter（无状态脱敏）

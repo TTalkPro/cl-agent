@@ -6,7 +6,7 @@
 ;;;;   不引任何检索依赖（IRetriever 协议由用户注入）。
 ;;;;   检索为空时不注入（偏离 Spring 的严格 grounding 语义）。
 
-(in-package #:cl-agent.kernel)
+(in-package #:cl-agent.core)
 
 ;;; ============================================================
 ;;; IRetriever 协议
@@ -52,10 +52,10 @@
                (let* ((messages (turn-request-messages req))
                       ;; 找最后一条 user 消息
                       (last-user (find-if (lambda (m)
-                                            (typep m 'cl-agent.chat:user-message))
+                                            (typep m 'cl-agent.core:user-message))
                                           messages :from-end t)))
                  (if (and last-user (not (turn-request-resume-p req)))
-                     (let* ((query (cl-agent.chat:message-text last-user))
+                     (let* ((query (cl-agent.core:message-text last-user))
                             (docs (retrieve retriever query :top-k top-k)))
                        (if (or docs inject-when-empty)
                            ;; let*：new-messages 的初值引用 enhanced
@@ -63,7 +63,7 @@
                                   (new-messages
                                     (loop for m in messages
                                           collect (if (eq m last-user)
-                                                      (cl-agent.chat:user-message enhanced)
+                                                      (cl-agent.core:user-message enhanced)
                                                       m))))
                              (funcall chain
                                       (make-turn-request new-messages

@@ -14,7 +14,7 @@
 ;;;;     P2 循环逻辑用它判断是否继续工具迭代
 ;;;;   - settings 是 alist：(:max-tool-iterations . 10) 等任意键值
 
-(in-package #:cl-agent.kernel)
+(in-package #:cl-agent.core)
 
 ;;; ============================================================
 ;;; Kernel CLOS 类
@@ -64,7 +64,17 @@ nil = 走 invoke-tool-batch 原路径；非 nil = 经 execute-tool-calls 协议�
     :initform nil
     :reader kernel-default-options
     :documentation "默认 chat-options。请求级 (:options ...) 优先，
-按 merge-chat-options 语义合并（工具列表取并集）。"))
+按 merge-chat-options 语义合并（工具列表取并集）。")
+   (tool-gate
+    :initarg :tool-gate
+    :initform nil
+    :reader kernel-tool-gate
+    :documentation "工具审批闸门（HITL）：(tool-call) → :proceed | :pause
+| (:pause . 原因)。nil = 不审批，全部直接执行。
+
+在**批执行之前**对本批每个 tool-call 恰好评估一次；任一判 :pause 则整轮
+暂停（工具一个都不执行），run-tool-loop 返回 turn-result(:paused)，
+调用方审批后用 resume-turn 续跑。"))
   (:documentation "Kernel 聚合（model/tools/filters/settings/tool-manager +
 默认 system/options）——无 memory（记忆是 memory-filter 的事）。"))
 
@@ -79,7 +89,7 @@ nil = 走 invoke-tool-batch 原路径；非 nil = 经 execute-tool-calls 协议�
 ;;; =========================================================;;;
 
 (defun build-kernel (&key model tools filters eligibility-fn settings tool-manager
-                          system options)
+                          system options tool-gate)
   "构建 Kernel 实例。
 
 参数：
@@ -93,6 +103,9 @@ nil = 走 invoke-tool-batch 原路径；非 nil = 经 execute-tool-calls 协议�
                    (make-sequential-tool-calling-manager)）
   - system         默认系统提示文本；请求级 (:system ...) 覆盖它
   - options        默认 chat-options；请求级 (:options ...) 优先合并
+  - tool-gate      工具审批闸门 (tool-call) → :proceed | :pause | (:pause . 原因)；
+                   nil（缺省）= 不审批。判 :pause → 整轮暂停，
+                   用 resume-turn 续跑
 
 返回值：kernel 实例。
 
@@ -110,4 +123,5 @@ nil = 走 invoke-tool-batch 原路径；非 nil = 经 execute-tool-calls 协议�
                  :settings (or settings nil)
                  :tool-manager tool-manager
                  :system system
-                 :options options))
+                 :options options
+                 :tool-gate tool-gate))

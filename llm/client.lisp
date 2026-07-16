@@ -299,8 +299,8 @@
   - 无状态码的网络层失败、超时可重试"
   (typecase condition
     ;; 裸 HTTP 错误（cl-agent.http 条件，不在 core 体系内）
-    (cl-agent.http:http-error
-     (let ((status (cl-agent.http:http-error-status condition)))
+    (cl-agent.core:http-error
+     (let ((status (cl-agent.core:http-error-status condition)))
        (or (null status)
            (cl-agent.core:transient-status-p status))))
     ;; core 条件体系：统一分类

@@ -1,33 +1,36 @@
 ;;;; cl-agent-core.asd
-;;;; CL-Agent Core - Infrastructure + Chat Model API + Kernel/Filter
+;;;; CL-Agent Core - 框架本体（单包）
 ;;;;
-;;;; Version: 9.0.0
+;;;; Version: 10.0.0
 ;;;; Author: David
 ;;;;
 ;;;; Overview:
-;;;;   CL-Agent 核心模块：
+;;;;   CL-Agent 框架本体，全部装在**单一包 cl-agent.core** 里：
 ;;;;
-;;;;   - 基础设施：条件系统、工具函数、HTTP 客户端（SSE 流式）
+;;;;   - 基础设施：条件系统、宏、工具函数、数据转换、JSON Schema 生成与校验
+;;;;   - HTTP 客户端 + SSE 流式 + 重试
 ;;;;   - LLM Provider SPI：llm-chat 协议 + 统一 llm-response
-;;;;   - cl-agent.chat（对标 org.springframework.ai.chat.*）：
-;;;;     CLOS 消息体系 / Prompt / ChatOptions / ChatResponse /
+;;;;   - Chat Model API：CLOS 消息体系 / Prompt / ChatOptions / ChatResponse /
 ;;;;     deftool 工具体系 / ChatModel 协议 / ChatMemory
-;;;;   - cl-agent.kernel（执行内核，唯一执行路径）：
-;;;;     Filter 三链 / build-chain / defilter / Kernel / build-kernel /
-;;;;     invoke-chat|tool|turn / run-tool-loop / ToolCallingManager /
-;;;;     10 个内置 filter / chat 宏 DSL
+;;;;   - Kernel + Filter（唯一执行路径）：Filter 三链 / build-chain / defilter /
+;;;;     Kernel / build-kernel / invoke-chat|tool|turn / run-tool-loop /
+;;;;     ToolCallingManager / 10 个内置 filter / chat 宏 DSL
+;;;;
+;;;; v10.0.0 包合并：cl-agent.http / cl-agent.chat / cl-agent.kernel 三个包
+;;;; 并入 cl-agent.core，对齐 clj-agent 的 core/provider/client 三模块分层。
+;;;; 合并前先清掉了三处死代码，否则会正面撞名：
+;;;;   - types.lisp 整个文件（34 个零调用符号，与 chat 的 CLOS 消息体系撞 11 个）
+;;;;   - core 的 build-url（零调用，与 http 的活实现撞名）
+;;;;   - core 的 with-retry（零使用，与 http 的活实现撞名）
 ;;;;
 ;;;; v9.0.0 移除了 cl-agent.client（Spring AI 的 ChatClient + Builder +
-;;;; fluent RequestSpec 移植）。Builder 与链式 spec 是 Java 的表达习惯，
-;;;; 在 Lisp 里 build-kernel 的关键字参数 + 声明式 chat 宏覆盖得更直接。
-;;;; 迁移：make-kernel-client → build-kernel；(chat client ...) 原样可用，
-;;;; 只是符号来自 cl-agent.kernel。
+;;;; fluent RequestSpec 移植）。该名字在 v10 被复用为 SimpleAgent 层。
 
 (asdf:defsystem #:cl-agent-core
-  :description "CL-Agent Core - Infrastructure + Chat Model API + Kernel/Filter"
+  :description "CL-Agent Core - 框架本体（基础设施 + HTTP + Chat API + Kernel/Filter）"
   :author "David"
   :license "MIT"
-  :version "9.0.0"
+  :version "10.0.0"
 
   :depends-on (#:alexandria
                #:serapeum
@@ -58,7 +61,11 @@
    ;; ============================================================
    (:file "conditions")           ; Condition system
    (:file "macros")               ; Utility macros
-   (:file "types")                ; Core data types
+   ;; 注：曾有 types.lisp（旧消息/ToolCall/Response/Usage/InvokeResult
+   ;; + 5 个从未实现的 plugin-* defgeneric，共 34 个符号）。SBCL 调用图
+   ;; 显示全部零调用——只有文件内部的自闭环，没有外部入口。它与
+   ;; cl-agent.chat 在用的 CLOS 消息体系有 11 个同名符号，是合并的正面
+   ;; 障碍。已整体删除。
    ;; 注：曾有 documentation.lisp（「文档宏系统」：defsection /
    ;; defun-documented / defstruct-documented 等 11 个宏与函数）。
    ;; 11 个符号全部零使用，也没有任何文档生成器消费它们，而且其中
@@ -97,8 +104,7 @@
    ;; ============================================================
    (:module "http"
     :components
-    ((:file "package-http")
-     (:file "conditions")
+    ((:file "conditions")
      (:file "client")
      (:file "async")
      (:file "retry")
@@ -109,8 +115,7 @@
    ;; ============================================================
    (:module "chat"
     :components
-    ((:file "package")
-     (:file "message")            ; CLOS 消息体系 + 中立 plist 互转
+    ((:file "message")            ; CLOS 消息体系 + 中立 plist 互转
      (:file "options")            ; ChatOptions（合并语义）
      (:file "prompt")             ; Prompt
      (:file "response")           ; ChatResponse / Generation / 元数据
@@ -123,8 +128,7 @@
    ;; ============================================================
      (:module "kernel"
       :components
-      ((:file "package")              ; cl-agent.kernel 包定义
-       (:file "carriers")             ; 三链请求/响应载体
+      ((:file "carriers")             ; 三链请求/响应载体
        (:file "filter")               ; filter CLOS 类 + build-chain + defilter
        (:file "kernel")               ; kernel CLOS 类 + build-kernel
       (:file "conditions")           ; 工具故障分类条件体系

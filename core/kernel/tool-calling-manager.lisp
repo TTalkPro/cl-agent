@@ -15,7 +15,7 @@
 ;;;;   - virtual-thread-tool-calling-manager：并行默认（lparallel:future，尊重 :serial）
 ;;;;   - thread-pool-tool-calling-manager：线程池（限流场景，可配 pool-size）
 
-(in-package #:cl-agent.kernel)
+(in-package #:cl-agent.core)
 
 ;;; ============================================================
 ;;; ToolExecutionResult（plain plist，键名冻结）
@@ -72,27 +72,27 @@
 
 (defmethod execute-tool-calls ((manager sequential-tool-calling-manager)
                                 kernel response options)
-  (let* ((tool-calls (cl-agent.chat:chat-response-tool-calls response))
+  (let* ((tool-calls (cl-agent.core:chat-response-tool-calls response))
          (options-ctx (getf options :tool-context))
          (resolved-options (resolve-kernel-tools kernel)))
     ;; 顺序执行每个 tool-call
     (let (messages errors)
       (dolist (tc tool-calls)
-        (let* ((callback (cl-agent.chat:find-callback-for-call resolved-options tc))
+        (let* ((callback (cl-agent.core:find-callback-for-call resolved-options tc))
                (req (make-tool-request
                      callback
-                     :args (cl-agent.chat:arguments->plist
-                            (cl-agent.chat:tool-call-arguments tc))
+                     :args (cl-agent.core:arguments->plist
+                            (cl-agent.core:tool-call-arguments tc))
                      :context options-ctx))
                (resp (invoke-tool kernel req)))
-        (push (cl-agent.chat:make-tool-response
-               :id (cl-agent.chat:tool-call-id tc)
-               :name (cl-agent.chat:tool-call-name tc)
+        (push (cl-agent.core:make-tool-response
+               :id (cl-agent.core:tool-call-id tc)
+               :name (cl-agent.core:tool-call-name tc)
                :text (tool-result->text resp))
               messages)
         (when (tool-result-error resp)
-          (push (list :id (cl-agent.chat:tool-call-id tc)
-                      :name (cl-agent.chat:tool-call-name tc)
+          (push (list :id (cl-agent.core:tool-call-id tc)
+                      :name (cl-agent.core:tool-call-name tc)
                       :class (getf (tool-result-error resp) :class)
                       :message (getf (tool-result-error resp) :message))
                 errors))))
@@ -118,7 +118,7 @@
 
 (defmethod execute-tool-calls ((manager virtual-thread-tool-calling-manager)
                                 kernel response options)
-  (let* ((tool-calls (cl-agent.chat:chat-response-tool-calls response))
+  (let* ((tool-calls (cl-agent.core:chat-response-tool-calls response))
          (options-ctx (getf options :tool-context))
          (resolved-options (resolve-kernel-tools kernel)))
     ;; 委托给 invoke-tool-batch（已有并行/:serial/故障路由逻辑）
@@ -126,9 +126,9 @@
         (invoke-tool-batch kernel tool-calls resolved-options options-ctx)
       (declare (ignore return-direct errors))
       (let ((messages (mapcar (lambda (tr tc)
-                                (cl-agent.chat:make-tool-response
-                                 :id (cl-agent.chat:tool-call-id tc)
-                                 :name (cl-agent.chat:tool-call-name tc)
+                                (cl-agent.core:make-tool-response
+                                 :id (cl-agent.core:tool-call-id tc)
+                                 :name (cl-agent.core:tool-call-name tc)
                                  :text (tool-result->text tr)))
                               tool-results tool-calls)))
         (make-tool-execution-result

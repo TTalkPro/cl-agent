@@ -98,25 +98,25 @@
 (test reasoning-blocks-reach-assistant-metadata
   "llm-response->chat-response 把推理块放进 assistant-message 的 metadata"
   (let* ((blocks (list (ht "type" "thinking" "thinking" "想" "signature" "s1")))
-         (response (cl-agent.chat:llm-response->chat-response
+         (response (cl-agent.core:llm-response->chat-response
                     (cl-agent.core:make-llm-response
                      :content "答案"
                      :reasoning "想"
                      :reasoning-blocks blocks)))
-         (msg (cl-agent.chat:chat-response-message response)))
-    (is (eq blocks (getf (cl-agent.chat:message-metadata msg) :reasoning-blocks)))
+         (msg (cl-agent.core:chat-response-message response)))
+    (is (eq blocks (getf (cl-agent.core:message-metadata msg) :reasoning-blocks)))
     ;; 展示用文本仍在
-    (is (string= "想" (getf (cl-agent.chat:message-metadata msg) :reasoning)))))
+    (is (string= "想" (getf (cl-agent.core:message-metadata msg) :reasoning)))))
 
 (test message->neutral-carries-reasoning-blocks
   "message->neutral 把推理块带过中立层——此前这里丢失，导致回传无从谈起"
   (let* ((blocks (list (ht "type" "thinking" "thinking" "想" "signature" "s1")))
-         (msg (cl-agent.chat:assistant-message
+         (msg (cl-agent.core:assistant-message
                "答案"
-               :tool-calls (list (cl-agent.chat:make-tool-call
+               :tool-calls (list (cl-agent.core:make-tool-call
                                   :id "c1" :name "t" :arguments (ht)))
                :metadata (list :reasoning-blocks blocks)))
-         (neutral (first (cl-agent.chat:message->neutral msg))))
+         (neutral (first (cl-agent.core:message->neutral msg))))
     (is (eq blocks (getf neutral :reasoning-blocks)))
     (is (string= "答案" (getf neutral :content)))
     (is (= 1 (length (getf neutral :tool-calls))))))
@@ -124,11 +124,11 @@
 (test neutral->message-roundtrips-reasoning-blocks
   "CLOS ↔ 中立往返不丢推理块"
   (let* ((blocks (list (ht "type" "thinking" "thinking" "想" "signature" "s1")))
-         (msg (cl-agent.chat:assistant-message
+         (msg (cl-agent.core:assistant-message
                "答案" :metadata (list :reasoning-blocks blocks)))
-         (back (cl-agent.chat:neutral->message
-                (first (cl-agent.chat:message->neutral msg)))))
-    (is (eq blocks (getf (cl-agent.chat:message-metadata back) :reasoning-blocks)))))
+         (back (cl-agent.core:neutral->message
+                (first (cl-agent.core:message->neutral msg)))))
+    (is (eq blocks (getf (cl-agent.core:message-metadata back) :reasoning-blocks)))))
 
 ;;; ============================================================
 ;;; 最后一层：写进 Anthropic 请求体
@@ -383,24 +383,24 @@ client 层的取值链是 (or 调用点温度 (client-temperature client))——
 
 (test thinking-flows-from-chat-options
   "thinking 是 chat-options 的一等槽位，经 options->spi-args 下发到 provider"
-  (let ((options (cl-agent.chat:make-chat-options
+  (let ((options (cl-agent.core:make-chat-options
                   :thinking '(:enabled :budget-tokens 2048))))
     (is (equal '(:enabled :budget-tokens 2048)
-               (cl-agent.chat:chat-options-thinking options)))
+               (cl-agent.core:chat-options-thinking options)))
     ;; 未设置时读出 NIL（保持「未设置」语义）
-    (is (null (cl-agent.chat:chat-options-thinking
-               (cl-agent.chat:make-chat-options :temperature 0.3))))))
+    (is (null (cl-agent.core:chat-options-thinking
+               (cl-agent.core:make-chat-options :temperature 0.3))))))
 
 (test thinking-merge-semantics
   "thinking 参与 merge-chat-options 的运行时 > 默认覆盖链"
-  (let* ((defaults (cl-agent.chat:make-chat-options :thinking :disabled))
-         (runtime (cl-agent.chat:make-chat-options
+  (let* ((defaults (cl-agent.core:make-chat-options :thinking :disabled))
+         (runtime (cl-agent.core:make-chat-options
                    :thinking '(:enabled :budget-tokens 2048)))
-         (merged (cl-agent.chat:merge-chat-options runtime defaults)))
+         (merged (cl-agent.core:merge-chat-options runtime defaults)))
     (is (equal '(:enabled :budget-tokens 2048)
-               (cl-agent.chat:chat-options-thinking merged))))
+               (cl-agent.core:chat-options-thinking merged))))
   ;; 运行时未设置 → 沿用默认
-  (let ((merged (cl-agent.chat:merge-chat-options
-                 (cl-agent.chat:make-chat-options :temperature 0.3)
-                 (cl-agent.chat:make-chat-options :thinking :disabled))))
-    (is (eq :disabled (cl-agent.chat:chat-options-thinking merged)))))
+  (let ((merged (cl-agent.core:merge-chat-options
+                 (cl-agent.core:make-chat-options :temperature 0.3)
+                 (cl-agent.core:make-chat-options :thinking :disabled))))
+    (is (eq :disabled (cl-agent.core:chat-options-thinking merged)))))

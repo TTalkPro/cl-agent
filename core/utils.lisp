@@ -173,26 +173,11 @@
   "从属性列表中获取值"
   (getf plist key default))
 
-(defun build-url (base-url params)
-  "构建带有查询参数的 URL
 
-  参数：
-    BASE-URL - 基础 URL
-    PARAMS   - 参数列表 ((\"key\" . \"value\") ...)
-
-  返回：
-    完整 URL 字符串"
-  (let ((query-strings
-         (loop for (key . value) in params
-               when (and key (string-not-equal value ""))
-               collect (format nil "~A=~A"
-                              (cl-ppcre:regex-replace-all " " key "%20")
-                              (cl-ppcre:regex-replace-all " " value "%20")))))
-    (if query-strings
-        (format nil "~A?~A"
-                base-url
-                (format nil "~{~A~^&~}" query-strings))
-        base-url)))
+;;; 注：此处曾有一个 build-url (base-url params)——零调用的死实现。
+;;; 真正在用的是 cl-agent.http 那个 (base-url &optional path query-params)
+;;; （被 http-get / http-get-async 调用）。两者同名不同签名，
+;;; 合并 http 进 core 时必然撞车；删死留活。
 
 ;;; ============================================================
 ;;; 字符串工具

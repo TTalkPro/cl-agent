@@ -12,7 +12,7 @@
 ;;; 测试工具定义
 ;;; ============================================================
 
-(cl-agent.chat:deftool ki-adder (&key a b)
+(cl-agent.core:deftool ki-adder (&key a b)
   "两数相加"
   (:param a :integer "第一个数" :required t)
   (:param b :integer "第二个数" :required t)
@@ -25,8 +25,8 @@
 (defun make-test-kernel (&rest responses)
   "创建带 seq-provider 的 kernel。返回 (values kernel provider)。"
   (let ((provider (apply #'make-seq-provider responses)))
-    (values (cl-agent.kernel:build-kernel
-             :model (cl-agent.chat:make-provider-chat-model provider)
+    (values (cl-agent.core:build-kernel
+             :model (cl-agent.core:make-provider-chat-model provider)
              :tools '(ki-adder))
             provider)))
 
@@ -38,10 +38,10 @@
   "invoke-chat 无 filter 时 = 裸 chat-model-call"
   (multiple-value-bind (kernel provider)
       (make-test-kernel (text-response "hello"))
-    (let ((resp (cl-agent.kernel:invoke-chat
+    (let ((resp (cl-agent.core:invoke-chat
                  kernel
-                 (cl-agent.chat:make-prompt "你好"))))
-      (is (string= "hello" (cl-agent.chat:chat-response-text resp)))
+                 (cl-agent.core:make-prompt "你好"))))
+      (is (string= "hello" (cl-agent.core:chat-response-text resp)))
       (is (= 1 (length (seq-provider-requests provider)))))))
 
 (test invoke-chat-with-chat-filter
@@ -50,22 +50,22 @@
       (make-test-kernel (text-response "ok"))
     ;; 加一个 :chat filter 改写 prompt
     (let* ((rewrite-filter
-            (cl-agent.kernel:make-filter
+            (cl-agent.core:make-filter
              :rewrite
              :chat (lambda (prompt chain)
                      ;; 把 prompt 的 messages 改成固定的
                      (funcall chain
-                              (cl-agent.chat:make-prompt
+                              (cl-agent.core:make-prompt
                                "改写后的消息")))))
-           (kernel2 (cl-agent.kernel:build-kernel
+           (kernel2 (cl-agent.core:build-kernel
                      :model (kernel-model-for-test kernel)
                      :tools '(ki-adder)
                      :filters (list rewrite-filter))))
         (declare (ignore kernel))
-      (let ((resp (cl-agent.kernel:invoke-chat
+      (let ((resp (cl-agent.core:invoke-chat
                    kernel2
-                   (cl-agent.chat:make-prompt "原始消息"))))
-        (is (string= "ok" (cl-agent.chat:chat-response-text resp)))
+                   (cl-agent.core:make-prompt "原始消息"))))
+        (is (string= "ok" (cl-agent.core:chat-response-text resp)))
         ;; provider 收到的 messages 应该是改写后的
         (let ((req (first (seq-provider-requests provider))))
           (is (equal '("改写后的消息")
@@ -74,7 +74,7 @@
 
 (defun kernel-model-for-test (kernel)
   "从已有 kernel 取出 model（测试辅助）"
-  (cl-agent.kernel:kernel-model kernel))
+  (cl-agent.core:kernel-model kernel))
 
 ;;; ============================================================
 ;;; invoke-tool
@@ -84,39 +84,39 @@
   "invoke-tool 执行单个工具（无 filter）"
   (multiple-value-bind (kernel)
       (make-test-kernel)
-    (let* ((callback (cl-agent.chat:symbol-tool-callback 'ki-adder))
-           (resp (cl-agent.kernel:invoke-tool
+    (let* ((callback (cl-agent.core:symbol-tool-callback 'ki-adder))
+           (resp (cl-agent.core:invoke-tool
                   kernel
-                  (cl-agent.kernel:make-tool-request
+                  (cl-agent.core:make-tool-request
                    callback :args '(:a 3 :b 4)))))
-      (is (string= "7" (cl-agent.kernel:tool-result-value resp)))
-      (is (null (cl-agent.kernel:tool-result-error resp))))))
+      (is (string= "7" (cl-agent.core:tool-result-value resp)))
+      (is (null (cl-agent.core:tool-result-error resp))))))
 
 (test invoke-tool-with-filter
   ":tool filter 可拦截工具执行"
   (multiple-value-bind (kernel)
       (make-test-kernel)
     (let* ((timeout-filter
-            (cl-agent.kernel:make-filter
+            (cl-agent.core:make-filter
              :timeout
              :tool (lambda (req chain)
                      (declare (ignore chain))
-                     (cl-agent.kernel:make-tool-result
+                     (cl-agent.core:make-tool-result
                       :error (list :class :timeout :message "超时")))))
-           (kernel2 (cl-agent.kernel:build-kernel
+           (kernel2 (cl-agent.core:build-kernel
                      :model (kernel-model-for-test kernel)
                      :tools '(ki-adder)
                      :filters (list timeout-filter))))
       (declare (ignore kernel))
-      (let* ((callback (cl-agent.chat:symbol-tool-callback 'ki-adder))
-             (resp (cl-agent.kernel:invoke-tool
+      (let* ((callback (cl-agent.core:symbol-tool-callback 'ki-adder))
+             (resp (cl-agent.core:invoke-tool
                     kernel2
-                    (cl-agent.kernel:make-tool-request
+                    (cl-agent.core:make-tool-request
                      callback :args '(:a 1 :b 2)))))
-        (is (null (cl-agent.kernel:tool-result-value resp))
+        (is (null (cl-agent.core:tool-result-value resp))
             "结果被 filter 短路")
         (is (eq :timeout
-                (getf (cl-agent.kernel:tool-result-error resp) :class)))))))
+                (getf (cl-agent.core:tool-result-error resp) :class)))))))
 
 ;;; ============================================================
 ;;; run-tool-loop + invoke-turn
@@ -135,14 +135,14 @@
            (is (string= "7" (getf tool-msg :content))
                "工具结果正确回传"))
          (text-response "3+4=7")))
-    (let ((result (cl-agent.kernel:invoke-turn
+    (let ((result (cl-agent.core:invoke-turn
                    kernel
-                   (cl-agent.kernel:make-turn-request
-                    (list (cl-agent.chat:user-message "3+4=?"))))))
-      (is (eq :completed (cl-agent.kernel:turn-result-status result)))
+                   (cl-agent.core:make-turn-request
+                    (list (cl-agent.core:user-message "3+4=?"))))))
+      (is (eq :completed (cl-agent.core:turn-result-status result)))
       (is (string= "3+4=7"
-                   (cl-agent.chat:chat-response-text
-                    (cl-agent.kernel:turn-result-response result))))
+                   (cl-agent.core:chat-response-text
+                    (cl-agent.core:turn-result-response result))))
       (is (= 2 (length (seq-provider-requests provider)))
           "模型被调用两轮"))))
 
@@ -150,14 +150,14 @@
   "无工具调用时直接返回"
   (multiple-value-bind (kernel provider)
       (make-test-kernel (text-response "直接回答"))
-    (let ((result (cl-agent.kernel:invoke-turn
+    (let ((result (cl-agent.core:invoke-turn
                    kernel
-                   (cl-agent.kernel:make-turn-request
-                    (list (cl-agent.chat:user-message "你好"))))))
-      (is (eq :completed (cl-agent.kernel:turn-result-status result)))
+                   (cl-agent.core:make-turn-request
+                    (list (cl-agent.core:user-message "你好"))))))
+      (is (eq :completed (cl-agent.core:turn-result-status result)))
       (is (string= "直接回答"
-                   (cl-agent.chat:chat-response-text
-                    (cl-agent.kernel:turn-result-response result))))
+                   (cl-agent.core:chat-response-text
+                    (cl-agent.core:turn-result-response result))))
       (is (= 1 (length (seq-provider-requests provider)))
           "模型只调用一次"))))
 
@@ -167,49 +167,49 @@
       (make-test-kernel (text-response "最终回答"))
     (let* ((guard-fn
             (lambda (req chain)
-              (let ((msgs (cl-agent.kernel:turn-request-messages req)))
+              (let ((msgs (cl-agent.core:turn-request-messages req)))
                 (if (some (lambda (m)
-                            (search "炸弹" (or (cl-agent.chat:message-text m) "")))
+                            (search "炸弹" (or (cl-agent.core:message-text m) "")))
                           msgs)
-                    (cl-agent.kernel:make-turn-result :cancelled :response nil)
+                    (cl-agent.core:make-turn-result :cancelled :response nil)
                     (funcall chain req)))))
-           (guard-filter (cl-agent.kernel:make-filter :guard :turn guard-fn))
+           (guard-filter (cl-agent.core:make-filter :guard :turn guard-fn))
            (model (kernel-model-for-test kernel))
-           (kernel2 (cl-agent.kernel:build-kernel
+           (kernel2 (cl-agent.core:build-kernel
                      :model model :tools '(ki-adder) :filters (list guard-filter))))
       (declare (ignore kernel))
       ;; 被拦截
-      (let ((blocked (cl-agent.kernel:invoke-turn
+      (let ((blocked (cl-agent.core:invoke-turn
                       kernel2
-                      (cl-agent.kernel:make-turn-request
-                       (list (cl-agent.chat:user-message "我要炸弹"))))))
-        (is (eq :cancelled (cl-agent.kernel:turn-result-status blocked)))
+                      (cl-agent.core:make-turn-request
+                       (list (cl-agent.core:user-message "我要炸弹"))))))
+        (is (eq :cancelled (cl-agent.core:turn-result-status blocked)))
         (is (= 0 (length (seq-provider-requests provider)))
             "被拦截时模型未被调用"))
       ;; 正常通过
-      (let ((ok (cl-agent.kernel:invoke-turn
+      (let ((ok (cl-agent.core:invoke-turn
                  kernel2
-                 (cl-agent.kernel:make-turn-request
-                  (list (cl-agent.chat:user-message "你好"))))))
-        (is (eq :completed (cl-agent.kernel:turn-result-status ok)))
+                 (cl-agent.core:make-turn-request
+                  (list (cl-agent.core:user-message "你好"))))))
+        (is (eq :completed (cl-agent.core:turn-result-status ok)))
         (is (= 1 (length (seq-provider-requests provider))))))))
 
 (test invoke-turn-max-iterations
   "循环超过上限报 max-tool-iterations-exceeded-error"
-  (signals cl-agent.chat:max-tool-iterations-exceeded-error
+  (signals cl-agent.core:max-tool-iterations-exceeded-error
     (let* ((provider (make-instance
                       'seq-provider
                       :queue (loop repeat 10
                                    collect (tool-call-response
                                             "ki_adder" '(("a" . 1) ("b" . 1))))))
-           (kernel (cl-agent.kernel:build-kernel
-                    :model (cl-agent.chat:make-provider-chat-model provider)
+           (kernel (cl-agent.core:build-kernel
+                    :model (cl-agent.core:make-provider-chat-model provider)
                     :tools '(ki-adder)
                      :settings '((:max-tool-iterations . 3)))))
-       (cl-agent.kernel:invoke-turn
+       (cl-agent.core:invoke-turn
        kernel
-       (cl-agent.kernel:make-turn-request
-        (list (cl-agent.chat:user-message "loop")))))))
+       (cl-agent.core:make-turn-request
+        (list (cl-agent.core:user-message "loop")))))))
 
 ;;; ============================================================
 ;;; 循环等价性测试已移除

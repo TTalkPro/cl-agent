@@ -274,12 +274,12 @@ SSE 格式：
               (close body-stream))))
 
       ;; HTTP 错误处理
-      (cl-agent.http:http-error (condition)
+      (cl-agent.core:http-error (condition)
         (cl-agent.core:signal-error 'cl-agent.core:llm-error
                                     :message (format nil "HTTP 流式请求失败: ~A"
-                                                     (cl-agent.http:http-error-status condition))
+                                                     (cl-agent.core:http-error-status condition))
                                     :provider provider-type
-                                    :status-code (cl-agent.http:http-error-status condition)
+                                    :status-code (cl-agent.core:http-error-status condition)
                                     :url request-url
                                     :cause condition))
 

@@ -4,7 +4,7 @@
 ;;;; 概述（对标 clj-agent logging-chat-filter / logging-filter）：
 ;;;;   记录请求/响应摘要，不影响行为。
 
-(in-package #:cl-agent.kernel)
+(in-package #:cl-agent.core)
 
 ;;; ============================================================
 ;;; logging-chat-filter (:chat)
@@ -21,11 +21,11 @@
     (make-filter
      :logging-chat
      :chat (lambda (prompt chain)
-             (let ((n (length (cl-agent.chat:prompt-messages prompt))))
+             (let ((n (length (cl-agent.core:prompt-messages prompt))))
                (funcall fn (format nil "→ messages=~A" n)))
              (let ((resp (funcall chain prompt)))
-               (let ((text (cl-agent.chat:chat-response-text resp))
-                     (n-tools (length (cl-agent.chat:chat-response-tool-calls resp))))
+               (let ((text (cl-agent.core:chat-response-text resp))
+                     (n-tools (length (cl-agent.core:chat-response-tool-calls resp))))
                  (funcall fn (format nil "← ~A~@[ tools=~A~]"
                                      (if (> (length text) preview)
                                          (subseq text 0 preview)
@@ -44,7 +44,7 @@
     (make-filter
      :logging-tool
      :tool (lambda (req chain)
-             (let ((name (cl-agent.chat:tool-callback-name
+             (let ((name (cl-agent.core:tool-callback-name
                           (tool-request-function req))))
                (funcall fn (format nil "→ ~A" name))
                (let ((resp (funcall chain req)))

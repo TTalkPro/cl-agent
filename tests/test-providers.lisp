@@ -247,12 +247,12 @@
 (test chat-model-passes-sampling-options
   "chat-options 的采样选项完整下发到 llm-chat SPI"
   (let* ((provider (make-seq-provider (text-response "ok")))
-         (model (cl-agent.chat:make-provider-chat-model provider)))
-    (cl-agent.chat:chat-model-call
+         (model (cl-agent.core:make-provider-chat-model provider)))
+    (cl-agent.core:chat-model-call
      model
-     (cl-agent.chat:make-prompt
+     (cl-agent.core:make-prompt
       "hi"
-      :options (cl-agent.chat:make-chat-options
+      :options (cl-agent.core:make-chat-options
                 :top-p 0.9
                 :top-k 50
                 :stop-sequences '("END")
@@ -270,8 +270,8 @@
 (test chat-model-omits-unset-options
   "未设置的选项不下发（SPI 收到 NIL）"
   (let* ((provider (make-seq-provider (text-response "ok")))
-         (model (cl-agent.chat:make-provider-chat-model provider)))
-    (cl-agent.chat:chat-model-call model "hi")
+         (model (cl-agent.core:make-provider-chat-model provider)))
+    (cl-agent.core:chat-model-call model "hi")
     (let ((request (first (seq-provider-requests provider))))
       (is (null (getf request :top-p)))
       (is (null (getf request :stop)))
@@ -279,12 +279,12 @@
 
 (test chat-options-extra-params-merge
   "extra-params 参与选项合并（运行时覆盖默认）"
-  (let ((merged (cl-agent.chat:merge-chat-options
-                 (cl-agent.chat:make-chat-options :extra-params '(:seed 1))
-                 (cl-agent.chat:make-chat-options :extra-params '(:seed 9)
+  (let ((merged (cl-agent.core:merge-chat-options
+                 (cl-agent.core:make-chat-options :extra-params '(:seed 1))
+                 (cl-agent.core:make-chat-options :extra-params '(:seed 9)
                                                   :temperature 0.5))))
-    (is (equal '(:seed 1) (cl-agent.chat:chat-options-extra-params merged)))
-    (is (= 0.5 (cl-agent.chat:chat-options-temperature merged)))))
+    (is (equal '(:seed 1) (cl-agent.core:chat-options-extra-params merged)))
+    (is (= 0.5 (cl-agent.core:chat-options-temperature merged)))))
 
 ;;; ============================================================
 ;;; alist-get（响应解析的取值原语）

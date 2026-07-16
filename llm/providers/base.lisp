@@ -155,19 +155,19 @@
 错误：
   如果请求失败，发出 cl-agent.core:llm-error"
   (handler-case
-      (let ((response (cl-agent.http:http-request url
+      (let ((response (cl-agent.core:http-request url
                                                    :method :post
                                                    :body body
                                                    :headers headers
                                                    :timeout timeout
                                                    :parse-json nil)))
-        (cl-agent.http:http-response-body response))
+        (cl-agent.core:http-response-body response))
     ;; HTTP 错误
-    (cl-agent.http:http-error (condition)
+    (cl-agent.core:http-error (condition)
       (cl-agent.core:signal-error 'cl-agent.core:llm-error
                                   :message (format nil "HTTP 请求失败: ~A"
-                                                   (cl-agent.http:http-error-status condition))
-                                  :status-code (cl-agent.http:http-error-status condition)
+                                                   (cl-agent.core:http-error-status condition))
+                                  :status-code (cl-agent.core:http-error-status condition)
                                   :request-url url
                                   :cause condition))
     ;; 其他错误

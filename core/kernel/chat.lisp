@@ -18,7 +18,7 @@
 ;;;; 链是 Java 的表达习惯，在 Lisp 里由 build-kernel 的关键字参数和这个
 ;;;; 声明式宏覆盖得更直接，故整层退役，只把宏搬到 kernel。
 
-(in-package #:cl-agent.kernel)
+(in-package #:cl-agent.core)
 
 ;;; ============================================================
 ;;; kernel-chat：函数形态入口（chat 宏展开到它）
@@ -40,25 +40,25 @@
   难懂的 400。"
   (let* ((system (or system (kernel-default-system kernel)))
          (msgs (append
-                (when system (list (cl-agent.chat:system-message system)))
+                (when system (list (cl-agent.core:system-message system)))
                 messages
-                (when user (list (cl-agent.chat:user-message user)))))
+                (when user (list (cl-agent.core:user-message user)))))
          ;; 请求级 options 盖 kernel 默认 options（merge 的 primary 优先）
          (options (let ((defaults (kernel-default-options kernel)))
                     (if defaults
-                        (cl-agent.chat:merge-chat-options options defaults)
+                        (cl-agent.core:merge-chat-options options defaults)
                         options)))
          ;; 请求级工具并进 options 的 tool-callbacks；
          ;; run-tool-loop 里 merge-chat-options 对 tool-callbacks 取并集，
          ;; 于是请求级工具与 kernel :tools 自然叠加。
          (options (if tools
-                      (cl-agent.chat:merge-chat-options
-                       (cl-agent.chat:make-chat-options
-                        :tool-callbacks (cl-agent.chat:resolve-tool-callbacks tools))
+                      (cl-agent.core:merge-chat-options
+                       (cl-agent.core:make-chat-options
+                        :tool-callbacks (cl-agent.core:resolve-tool-callbacks tools))
                        options)
                       options))
          (ctx context))
-    (unless (remove-if #'cl-agent.chat:system-message-p msgs)
+    (unless (remove-if #'cl-agent.core:system-message-p msgs)
       (error "请求缺少用户输入：请用 (:user ...) 或 (:messages ...) 提供"))
     ;; caller-options 经 context 传给 run-tool-loop，由它合并到每轮调用
     (when options
@@ -68,7 +68,7 @@
 (defun kernel-chat-text (kernel &rest args)
   "kernel-chat 的取文本快捷式：返回最终回复文本。"
   (let ((result (apply #'kernel-chat kernel args)))
-    (cl-agent.chat:chat-response-text (turn-result-response result))))
+    (cl-agent.core:chat-response-text (turn-result-response result))))
 
 (defun kernel-chat-entity (kernel &rest args)
   "kernel-chat 的结构化输出快捷式：把回复解析为 JSON 值。
@@ -84,7 +84,7 @@
   (let ((messages (getf args :messages)))
     (append (list :messages
                   (append messages
-                          (list (cl-agent.chat:system-message
+                          (list (cl-agent.core:system-message
                                  "请只输出 JSON，不要任何多余说明或 markdown 代码围栏。"))))
             (loop for (k v) on args by #'cddr
                   unless (eq k :messages) append (list k v)))))
@@ -97,7 +97,7 @@
   尚未实现；真 SSE 目前只存在于 chat-model-stream 这一层。"
   (let* ((result (apply #'kernel-chat kernel args))
          (response (turn-result-response result)))
-    (funcall on-chunk (cl-agent.chat:chat-response-text response))
+    (funcall on-chunk (cl-agent.core:chat-response-text response))
     response))
 
 ;;; ============================================================
@@ -160,7 +160,7 @@
                             (not (keywordp (second clause))))
                        ;; 单个非关键字实参 = 现成的 chat-options
                        (second clause)
-                       `(cl-agent.chat:make-chat-options ,@(rest clause)))))
+                       `(cl-agent.core:make-chat-options ,@(rest clause)))))
             (:tools (setf tools (append tools (rest clause))))
             (:context (setf context (append context (list (second clause)
                                                           (third clause)))))

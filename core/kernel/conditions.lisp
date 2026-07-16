@@ -10,7 +10,7 @@
 ;;;;   classify-tool-error 把任意 condition 映射到三类之一。
 ;;;;   屏障路由（barrier routing）在 invoke-tool-batch 中按分类决定策略。
 
-(in-package #:cl-agent.kernel)
+(in-package #:cl-agent.core)
 
 ;;; ============================================================
 ;;; 条件层次
@@ -54,8 +54,8 @@
   4. 其他 → :semantic（保守默认，不重试）"
   (etypecase condition
     (tool-failure (tool-failure-class condition))
-    (cl-agent.chat:tool-not-found-error :semantic)
-    (cl-agent.chat:tool-execution-error :semantic)
+    (cl-agent.core:tool-not-found-error :semantic)
+    (cl-agent.core:tool-execution-error :semantic)
     (error
      ;; 启发式分类：检查错误消息中的关键词
      (let ((msg (princ-to-string condition)))

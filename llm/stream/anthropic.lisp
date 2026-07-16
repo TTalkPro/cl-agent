@@ -271,7 +271,7 @@ CALLBACK 收到 chunk plist：
          (state (make-anthropic-stream-state)))
     ;; 启用流式
     (setf (gethash "stream" request-body) t)
-    (cl-agent.http:http-stream-sse
+    (cl-agent.core:http-stream-sse
      url
      :headers (build-anthropic-headers provider)
      :body (cl-agent.core:json-stringify request-body)

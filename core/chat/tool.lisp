@@ -46,7 +46,7 @@
 ;;;;   LLM 的工具参数是命名参数（JSON object），因此 deftool 的
 ;;;;   lambda-list 必须为空或全为 &key 参数。
 
-(in-package #:cl-agent.chat)
+(in-package #:cl-agent.core)
 
 ;;; ============================================================
 ;;; 条件
@@ -302,7 +302,7 @@
   "取 SYMBOL 上由 deftool 挂载的 tool-callback（未定义返回 NIL）。
 
 这是工具身份的正规取法——符号属性名是本包内部符号，调用方不该写
-(get 'foo 'cl-agent.chat::tool-callback)。
+(get 'foo 'cl-agent.core:tool-callback)。
 
   (symbol-tool-callback 'get-weather)  ; => #<tool-callback get_weather>
 
@@ -475,7 +475,7 @@ register-tool-callback 把它放进全局注册表——那是 opt-in 的逃生�
 ;;; 曾长在 ToolCallingManager 区块里。那套 manager（对标 Spring 的
 ;;; ToolCallingManager，(execute-tool-calls manager prompt response)）
 ;;; 已随 Advisor / ChatClient 一并退役——工具执行循环现在唯一住在
-;;; cl-agent.kernel:run-tool-loop，批执行在 kernel/batch.lisp，
+;;; cl-agent.core:run-tool-loop，批执行在 kernel/batch.lisp，
 ;;; 执行策略在 kernel/tool-calling-manager.lisp。
 ;;; 本函数与 manager 无关（它只是「按名找工具」），且 kernel 的
 ;;; batch / manager / tool-search filter 都依赖它，故保留在 chat 层。

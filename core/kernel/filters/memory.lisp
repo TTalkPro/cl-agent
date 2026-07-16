@@ -9,45 +9,70 @@
 ;;;;   **刻意放循环内**（与 Spring 放循环外不同）：每轮落完整 transcript，
 ;;;;   heal-dangling、暂停恢复、timeline 全依赖完整历史。
 
-(in-package #:cl-agent.kernel)
+(in-package #:cl-agent.core)
 
 (defun memory-filter (store &key (window 20))
   "创建 memory-filter（:chat 链首位，循环内）。
 
   参数：
-  - store   chat-memory 实例（cl-agent.chat:message-window-chat-memory 等）
+  - store   chat-memory 实例（cl-agent.core:message-window-chat-memory 等）
   - window  滑动窗口大小（传给 memory-messages 裁剪；缺省 20）
 
   行为：
   - 从 prompt options 的 tool-context 取 :conversation-id
   - 无 conversation-id → 直接 passthrough（不记不读）
   - 有 conversation-id → 存 delta / 展开历史 / 存回复
+  - **system 消息不进历史**：它每轮由 prompt 重新提供，存进去会随轮次
+    线性累积。展开时把本轮的 system 置顶，window 只裁历史不碰 system。
 
   使用：应注册为 filters 列表的首位（其他 filter 看到完整历史）。"
   (make-filter
    :memory
    :chat (lambda (prompt chain)
-           (let* ((options (cl-agent.chat:prompt-options prompt))
-                  (ctx (cl-agent.chat:chat-options-tool-context options))
+           (let* ((options (cl-agent.core:prompt-options prompt))
+                  (ctx (cl-agent.core:chat-options-tool-context options))
                   (conv-id (getf ctx :conversation-id)))
              (if conv-id
                  ;; 有会话 ID：存 delta → 展开历史 → 调下游 → 存回复
-                 (progn
-                   ;; before: 存本轮新消息（delta）
-                   (dolist (msg (cl-agent.chat:prompt-messages prompt))
-                     (cl-agent.chat:memory-add store conv-id msg))
-                   ;; 用完整历史替换 prompt
-                   (let* ((history (cl-agent.chat:memory-messages store conv-id))
+                 (let* ((msgs (cl-agent.core:prompt-messages prompt))
+                        (system-msgs (remove-if-not #'cl-agent.core:system-message-p msgs)))
+                   ;; before: 只存**尚未存过的非 system** 消息。
+                   ;;
+                   ;; 两条规则，各修一个真实 bug：
+                   ;;
+                   ;; 1. system 不进历史——它由每轮的 prompt 重新提供（kernel 的
+                   ;;    :system 默认值或请求级 (:system ...)）。此前存了全部
+                   ;;    prompt 消息，于是每轮的 system 都被追加一份，历史里
+                   ;;    system 随轮次线性累积。
+                   ;;
+                   ;; 2. eq 幂等——run-tool-loop 传的是**本轮累积的完整 messages**
+                   ;;    （不是 delta），而本 filter 挂在 :chat 链、工具循环每轮
+                   ;;    都会过一遍。不去重的话，第 2 轮会把 user/assistant 再存
+                   ;;    一份：历史变成 (user assistant user assistant tool ...)，
+                   ;;    发给模型的序列直接非法（Anthropic 格式要求 user/assistant
+                   ;;    交替、tool_result 紧跟 tool_use）——实测 MiniMax 返回 400。
+                   ;;    循环用 append 累积，同一条消息在各轮是**同一个对象**，
+                   ;;    所以 eq 就能准确判断「这条存过没有」。
+                   (let ((seen (cl-agent.core:memory-messages store conv-id)))
+                     (dolist (msg msgs)
+                       (unless (or (cl-agent.core:system-message-p msg)
+                                   (member msg seen :test #'eq))
+                         (cl-agent.core:memory-add store conv-id msg))))
+                   ;; 用「本轮 system 置顶 + 裁剪后的历史」替换 prompt。
+                   ;; window 只裁历史，不碰 system——否则长对话里 system
+                   ;; 会先被裁掉，模型直接失忆人设。
+                   (let* ((history (cl-agent.core:memory-messages store conv-id))
                           (cropped (if (> (length history) window)
                                        (subseq history (- (length history) window))
                                        history))
-                          (new-prompt (cl-agent.chat:prompt-copy prompt :messages cropped))
+                          (new-prompt (cl-agent.core:prompt-copy
+                                       prompt :messages (append system-msgs cropped)))
                           ;; 调下游（LLM）
                           (response (funcall chain new-prompt)))
                      ;; after: 存 assistant 回复
-                     (cl-agent.chat:memory-add
+                     (cl-agent.core:memory-add
                       store conv-id
-                      (cl-agent.chat:chat-response-message response))
+                      (cl-agent.core:chat-response-message response))
                      response))
                  ;; 无会话 ID：直接透传
                  (funcall chain prompt))))))

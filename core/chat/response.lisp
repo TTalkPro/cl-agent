@@ -11,7 +11,7 @@
 ;;;;   底层 provider 产出统一的 cl-agent.core:llm-response，
 ;;;;   由 llm-response->chat-response 在 ChatModel 适配层转换。
 
-(in-package #:cl-agent.chat)
+(in-package #:cl-agent.core)
 
 ;;; ============================================================
 ;;; Generation

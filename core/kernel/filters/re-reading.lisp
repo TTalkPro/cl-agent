@@ -6,7 +6,7 @@
 ;;;;   只改写入口消息（挂 :chat 会把循环内每轮的历史都重读，无意义又污染）。
 ;;;;   :resume-p 时跳过（恢复时入口消息已在首次进入时改写）。
 
-(in-package #:cl-agent.kernel)
+(in-package #:cl-agent.core)
 
 (defun re-reading-filter (&key (template nil))
   "创建 re-reading-filter（:turn 链）。
@@ -31,15 +31,15 @@
                  (let* ((messages (turn-request-messages req))
                         ;; 找最后一条 user 消息
                         (last-user (find-if (lambda (m)
-                                              (typep m 'cl-agent.chat:user-message))
+                                              (typep m 'cl-agent.core:user-message))
                                             messages :from-end t)))
                    (if last-user
-                       (let* ((original (cl-agent.chat:message-text last-user))
+                       (let* ((original (cl-agent.core:message-text last-user))
                               (enhanced (funcall fn original))
                               (new-messages
                                 (loop for m in messages
                                       collect (if (eq m last-user)
-                                                  (cl-agent.chat:user-message enhanced)
+                                                  (cl-agent.core:user-message enhanced)
                                                   m))))
                          (funcall chain
                                   (make-turn-request new-messages
