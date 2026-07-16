@@ -14,7 +14,7 @@
 
 (require :asdf)
 (let ((root (merge-pathnames "../" (directory-namestring *load-truename*))))
-  (dolist (dir '("" "core/" "llm/" "mock/"))
+  (dolist (dir '("" "core/" "llm/" "mock/" "client/"))
     (pushnew (truename (merge-pathnames dir root))
              asdf:*central-registry* :test #'equal)))
 (let ((ql (merge-pathnames "quicklisp/setup.lisp" (user-homedir-pathname))))
@@ -23,7 +23,7 @@
   (asdf:load-system :cl-agent))
 
 (defpackage :cl-agent/live
-  (:use :cl :cl-agent.chat :cl-agent.kernel))
+  (:use :cl :cl-agent.core))
 (in-package :cl-agent/live)
 
 ;;; ============================================================
@@ -89,13 +89,13 @@
 ;;; 检查项
 ;;; ============================================================
 
-(deflive check-single-turn "[1/5] 单次问答"
+(deflive check-single-turn "[1/8] 单次问答"
   (let* ((k (build-kernel :model *model*))
          (text (chat k (:user "只回答一个词，不要标点：法国的首都是？"))))
     (values (and (stringp text) (search "巴黎" text))
             (string-trim '(#\Space #\Newline) text))))
 
-(deflive check-tool-loop "[2/5] 真实工具循环（模型自主决定调用）"
+(deflive check-tool-loop "[2/8] 真实工具循环（模型自主决定调用）"
   (let ((*tool-hits* 0))
     (let* ((k (build-kernel :model *model* :tools '(live-counted-weather)))
            (text (chat k
@@ -105,7 +105,7 @@
       (values (and (> *tool-hits* 0) (search "22" text))
               (format nil "工具被调用 ~A 次" *tool-hits*)))))
 
-(deflive check-memory-multi-turn "[3/5] memory-filter 多轮记忆"
+(deflive check-memory-multi-turn "[3/8] memory-filter 多轮记忆"
   (let* ((mem (make-message-window-chat-memory))
          (k (build-kernel :model *model* :filters (list (memory-filter mem)))))
     (chat k (:user "记住：我的幸运数字是 42。") (:conversation "live-1"))
@@ -117,7 +117,7 @@
                       (length (memory-messages mem "live-1"))
                       (string-trim '(#\Space #\Newline) text))))))
 
-(deflive check-structured-output "[4/5] 结构化输出 + schema 校验"
+(deflive check-structured-output "[4/8] 结构化输出 + schema 校验"
   (let* ((schema "{\"type\":\"object\",
                    \"properties\":{\"name\":{\"type\":\"string\"},
                                   \"population\":{\"type\":\"integer\"}},
@@ -137,7 +137,56 @@
             (format nil "name=~A population=~A"
                     (gethash "name" entity) (gethash "population" entity)))))
 
-(deflive check-streaming "[5/5] 真实 SSE 流式（chat-model-stream）"
+(defvar *hitl-fired* nil)
+
+(deftool live-rm-file (&key path)
+  "删除指定文件"
+  (:param path :string "文件路径" :required t)
+  (setf *hitl-fired* path)
+  (format nil "已删除 ~A" path))
+
+(defun make-hitl-agent ()
+  (cl-agent.client:make-agent
+   :model *model* :tools '(live-rm-file)
+   :system "你是运维助手。删除文件必须用 live-rm-file 工具。"
+   :callbacks (list :on-tool-call
+                    (lambda (n args)
+                      (when (string= n "live_rm_file")
+                        (cons :interrupt (format nil "删除 ~A 需审批" (getf args :path))))))))
+
+(deflive check-hitl-pause "[5/8] HITL 暂停（工具不得执行）"
+  (let ((*hitl-fired* nil))
+    (let* ((a (make-hitl-agent))
+           (r (cl-agent.client:agent-chat-result a "删除 /tmp/report.log")))
+      ;; 关键不变量：暂停 ≠ 执行后再问
+      (values (and (eq :paused (cl-agent.client:agent-result-status r))
+                   (null *hitl-fired*))
+              (format nil "status=~S 工具已执行=~A"
+                      (cl-agent.client:agent-result-status r)
+                      (if *hitl-fired* "是（BUG）" "否"))))))
+
+(deflive check-hitl-approve "[6/8] HITL :approved → 执行并续跑"
+  (let ((*hitl-fired* nil))
+    (let ((a (make-hitl-agent)))
+      (cl-agent.client:agent-chat-result a "删除 /tmp/report.log")
+      (let ((r (cl-agent.client:agent-resume a :approved)))
+        (values (and (eq :completed (cl-agent.client:agent-result-status r))
+                     (equal *hitl-fired* "/tmp/report.log"))
+                (format nil "已删除=~S" *hitl-fired*))))))
+
+(deflive check-hitl-reject "[7/8] HITL :rejected → 不执行，理由回模型"
+  (let ((*hitl-fired* nil))
+    (let ((a (make-hitl-agent)))
+      (cl-agent.client:agent-chat-result a "删除 /tmp/prod.db")
+      (let ((r (cl-agent.client:agent-resume a :rejected
+                                             :payload '(:message "生产库禁止删除"))))
+        (values (and (eq :completed (cl-agent.client:agent-result-status r))
+                     (null *hitl-fired*))
+                (format nil "status=~S 未执行=~A"
+                        (cl-agent.client:agent-result-status r)
+                        (if (null *hitl-fired*) "✓" "✗")))))))
+
+(deflive check-streaming "[8/8] 真实 SSE 流式（chat-model-stream）"
   ;; 提示要够长才能可靠地分片——「数到 5」这种模型一口就吐完了，
   ;; 断言 >1 分片会假失败（问的是回答长度，不是流式实现）。
   (let ((chunks nil))
@@ -166,6 +215,9 @@
   (check-tool-loop)
   (check-memory-multi-turn)
   (check-structured-output)
+  (check-hitl-pause)
+  (check-hitl-approve)
+  (check-hitl-reject)
   (check-streaming)
   (format t "~%--- 通过 ~A，失败 ~A ---~%" *pass* *fail*)
   (uiop:quit (if (zerop *fail*) 0 1)))
