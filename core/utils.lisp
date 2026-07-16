@@ -4,7 +4,43 @@
 (in-package :cl-agent.core)
 
 ;;; ============================================================
-;;; 协议默认实现
+;;; ID 生成器 / 时间戳提供者
+;;; ============================================================
+;;;
+;;; 这两个工厂原先住在独立的 cl-agent.core.protocols 包里（core/protocols/
+;;; protocols.lisp）。那个包统共只导出这两个符号，却占着 `protocols` 这个
+;;; 极宽泛的昵称——还容易与 protocols/ 子系统（A2A，另一回事）混淆。
+;;; 它排在 utils 之后加载，于是下面的默认实现只能靠 find-package +
+;;; find-symbol 动态查找来绕开加载顺序。合并进 core 后这层间接可以直接去掉。
+
+(declaim (ftype (function () function) make-standard-id-generator))
+
+(defun make-standard-id-generator ()
+  "创建标准 ID 生成器（UUID v4）。
+
+  返回一个无参函数，调用得到唯一 ID 字符串：
+
+    (defparameter *id-gen* (make-standard-id-generator))
+    (funcall *id-gen*)  ; => \"550e8400-e29b-41d4-a716-446655440000\""
+  (lambda ()
+    (princ-to-string (uuid:make-v4-uuid))))
+
+(declaim (ftype (function () function) make-standard-timestamp-provider))
+
+(defun make-standard-timestamp-provider ()
+  "创建标准时间戳提供者（Unix 时间戳，整数秒）。
+
+  返回一个无参函数，调用得到当前 Unix 时间戳：
+
+    (defparameter *ts* (make-standard-timestamp-provider))
+    (funcall *ts*)  ; => 1704067200
+
+  整数存储，时区无关，便于序列化与比较。"
+  (lambda ()
+    (local-time:timestamp-to-unix (local-time:now))))
+
+;;; ============================================================
+;;; 协议默认实现（可替换：setf 这两个 defparameter 即可注入自定义实现）
 ;;; ============================================================
 
 (defparameter *default-id-generator* nil
@@ -13,21 +49,16 @@
 (defparameter *default-timestamp-provider* nil
   "默认时间戳提供者实例（延迟初始化）")
 
-;; 延迟初始化函数
 (defun init-default-id-generator ()
   "初始化默认 ID 生成器"
   (unless *default-id-generator*
-    (setf *default-id-generator*
-          (funcall (find-symbol (string :make-standard-id-generator)
-                                (find-package :cl-agent.core.protocols)))))
+    (setf *default-id-generator* (make-standard-id-generator)))
   *default-id-generator*)
 
 (defun init-default-timestamp-provider ()
   "初始化默认时间戳提供者"
   (unless *default-timestamp-provider*
-    (setf *default-timestamp-provider*
-          (funcall (find-symbol (string :make-standard-timestamp-provider)
-                                (find-package :cl-agent.core.protocols)))))
+    (setf *default-timestamp-provider* (make-standard-timestamp-provider)))
   *default-timestamp-provider*)
 
 ;;; ============================================================
@@ -68,11 +99,8 @@
 (defun generate-uuid ()
   "生成 UUID 字符串（兼容性函数）
 
-  这是默认实现，使用标准 ID 生成器。
-  新代码建议直接使用协议接口：
-    (funcall (cl-agent.core.protocols:make-standard-id-generator))
-
-  保持向后兼容：现有代码无需修改"
+  默认实现，走标准 ID 生成器。要自定义，setf *default-id-generator*
+  或直接 (funcall (make-standard-id-generator))。"
   (funcall (init-default-id-generator)))
 
 (defun generate-short-id (&optional (length 8))
@@ -86,12 +114,9 @@
 (defun timestamp-now ()
   "获取当前时间戳（兼容性函数）
 
-  返回 Unix 时间戳（整数秒）。
-  这是默认实现，使用标准时间戳提供者。
-  新代码建议直接使用协议接口：
-    (funcall (cl-agent.core.protocols:make-standard-timestamp-provider))
-
-  保持向后兼容：现有代码无需修改"
+  返回 Unix 时间戳（整数秒）。默认实现，走标准时间戳提供者。
+  要自定义，setf *default-timestamp-provider*
+  或直接 (funcall (make-standard-timestamp-provider))。"
   (funcall (init-default-timestamp-provider)))
 
 (defun format-timestamp (timestamp &optional (format :rfc3339))

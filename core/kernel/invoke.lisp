@@ -20,7 +20,7 @@
 ;;;;       └── else: return turn-result(:completed)
 ;;;;
 ;;;;   Chat 链请求/响应 = prompt / chat-response（最简，不加包装层）。
-;;;;   Tool 链请求/响应 = tool-request / tool-response（kernel 载体）。
+;;;;   Tool 链请求/响应 = tool-request / tool-result（kernel 载体）。
 ;;;;   Turn 链请求/响应 = turn-request / turn-result（kernel 载体）。
 
 (in-package #:cl-agent.kernel)
@@ -52,10 +52,10 @@
 (defun invoke-tool (kernel tool-request)
   "经 :tool filter 链执行单个工具。
 
-  :tool filter 钩子签名：(tool-request chain) → tool-response
+  :tool filter 钩子签名：(tool-request chain) → tool-result
   - tool-request  = kernel:tool-request 实例
   - chain         = 下游函数
-  - 返回值        = kernel:tool-response 实例"
+  - 返回值        = kernel:tool-result 实例"
   (let ((chain (build-chain (kernel-filters kernel)
                             #'filter-tool-hook
                             (lambda (req) (tool-apply-terminal req)))))
@@ -74,14 +74,14 @@
          (args (tool-request-args req))
          (ctx (tool-request-context req)))
     (handler-case
-        (make-tool-response :result (cl-agent.chat:tool-callback-call
+        (make-tool-result :value (cl-agent.chat:tool-callback-call
                                      callback args ctx))
       (cl-agent.chat:tool-not-found-error (e)
         (declare (ignore e))
-        (make-tool-response :error (list :class :semantic
+        (make-tool-result :error (list :class :semantic
                                          :message "工具未找到")))
       (error (e)
-        (make-tool-response :error (list :class :semantic
+        (make-tool-result :error (list :class :semantic
                                          :message (princ-to-string e)))))))
 
 ;;; ============================================================
@@ -102,6 +102,31 @@
         (cl-agent.chat:make-chat-options
          :tool-callbacks (cl-agent.chat:resolve-tool-callbacks tools))
         nil)))
+
+(defparameter +internal-context-keys+ '(:caller-options)
+  "turn context 里的内部管道键，不外泄到 prompt 的 tool-context。")
+
+(defun fold-context-into-tool-context (options context)
+  "返回 OPTIONS 的副本，把 CONTEXT（turn context plist，剔除内部键）
+折进它的 tool-context——CONTEXT 的键覆盖同名的既有 tool-context 键。
+
+存在的理由：:chat 链的 filter 只拿得到 prompt，读的是 prompt options
+的 tool-context；而 (:conversation ...) / prompt-context 写的是 turn
+context。不桥接则二者各说各话（memory-filter 的 :conversation-id 读不到）。"
+  (let ((extra (loop for (k v) on context by #'cddr
+                     unless (member k +internal-context-keys+)
+                       append (list k v))))
+    (if (null extra)
+        (or options (cl-agent.chat:make-chat-options))
+        (let* ((base (or options (cl-agent.chat:make-chat-options)))
+               (existing (cl-agent.chat:chat-options-tool-context base))
+               ;; 先放 extra，再放既有——同名键 extra 胜出（getf 取首个匹配）
+               (merged-ctx (append extra existing)))
+          ;; 只覆盖 tool-context 一个槽：primary 仅绑定 tool-context，
+          ;; merge 把 base 其余槽（含 tool-callbacks）原样保留。
+          (cl-agent.chat:merge-chat-options
+           (cl-agent.chat:make-chat-options :tool-context merged-ctx)
+           base)))))
 
 ;;; ============================================================
 ;;; run-tool-loop：工具调用循环（:turn 链的 terminal）
@@ -124,9 +149,16 @@
           (context (turn-request-context turn-request))
           (caller-options (getf context :caller-options))
           (kernel-options (resolve-kernel-tools kernel))
-          (options (if caller-options
-                       (cl-agent.chat:merge-chat-options caller-options kernel-options)
-                       kernel-options))
+          (merged (if caller-options
+                      (cl-agent.chat:merge-chat-options caller-options kernel-options)
+                      kernel-options))
+          ;; 把 turn context 折进 options 的 tool-context——:chat 链的 filter
+          ;; （memory-filter 等）只拿得到 prompt，读的是 prompt options 的
+          ;; tool-context，而 (:conversation ...) / prompt-context 写的是
+          ;; turn context。不桥接的话 (:conversation "id") 到不了
+          ;; memory-filter，多轮记忆会静默失效。:caller-options 是内部
+          ;; 管道，剔除不外泄。
+          (options (fold-context-into-tool-context merged context))
           (eligibility (kernel-eligibility-fn kernel)))
     (loop for iteration from 0
           with messages = (turn-request-messages turn-request)
@@ -161,14 +193,13 @@
                                                (cl-agent.chat:make-tool-response
                                                 :id (cl-agent.chat:tool-call-id tc)
                                                 :name (cl-agent.chat:tool-call-name tc)
-                                                :text (or (tool-response-result tr)
-                                                          "（执行失败）")))
+                                                :text (tool-result->text tr)))
                                              tool-results tool-calls))))
                       (if return-direct
                           ;; return-direct：工具结果即最终答案，不再回传模型
                           (let ((final-text
                                   (format nil "~{~A~^~%~}"
-                                          (mapcar #'tool-response-result tool-results))))
+                                          (mapcar #'tool-result-value tool-results))))
                             (return (make-turn-result
                                      :completed
                                      :response (cl-agent.chat:make-chat-response

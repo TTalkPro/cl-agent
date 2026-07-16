@@ -37,12 +37,12 @@
     :initarg :tool
     :initform nil
     :reader filter-tool-hook
-    :documentation ":tool 钩子：(tool-request chain) → tool-response 或 nil")
+    :documentation ":tool 钩子：(tool-request chain) → tool-result 或 nil")
    (chat
     :initarg :chat
     :initform nil
     :reader filter-chat-hook
-    :documentation ":chat 钩子：(client-request chain) → client-response 或 nil")
+    :documentation ":chat 钩子：(prompt chain) → chat-response 或 nil")
    (turn
     :initarg :turn
     :initform nil

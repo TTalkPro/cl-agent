@@ -5,12 +5,9 @@
 ;;;;   定义核心基础设施包
 ;;;;
 ;;;; 模块说明：
-;;;;   - 核心工具：条件系统、工具函数、实用宏
-;;;;   - 协议接口：ID 生成器、时间戳提供者、序列化器
-;;;;
-;;;; 注意：
-;;;;   - LLM 服务包已移至 llm/package-llm.lisp
-;;;;   - Checkpoint（流程状态快照/时间旅行）位于 cl-agent-extra（cl-agent.checkpoint）
+;;;;   - 核心工具：条件系统、工具函数、实用宏、ID 生成器/时间戳提供者
+;;;;   - 数据转换、JSON Schema 生成与校验
+;;;;   - LLM Provider SPI（llm-chat）+ 统一 llm-response
 
 ;;; ============================================================
 ;;; Core Infrastructure Package
@@ -87,6 +84,8 @@
 
    ;; === Utility Functions ===
    #:get-env
+   #:make-standard-id-generator
+   #:make-standard-timestamp-provider
    #:generate-uuid
    #:timestamp-now
    ;; 注：alist-get 已移除（原实现是伪装成 alist 访问器的 plist 访问器，
@@ -158,7 +157,7 @@
    #:type-to-json-type
    #:params->json-schema
    #:schema-to-hash-table
-   ;; JSON Schema 校验（structured-output-validation-advisor 使用）
+   ;; JSON Schema 校验（cl-agent.kernel:validation-turn-filter 使用）
    #:validate-json-schema
    #:validate-json-text
    #:ensure-json-schema

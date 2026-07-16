@@ -53,8 +53,20 @@
     :initform nil
     :reader kernel-tool-manager
     :documentation "ToolCallingManager 实例（可注入执行策略）。
-nil = 走 invoke-tool-batch 原路径；非 nil = 经 execute-tool-calls 协议。"))
-  (:documentation "Kernel 聚合（model/tools/filters/settings/tool-manager）——无 memory。"))
+nil = 走 invoke-tool-batch 原路径；非 nil = 经 execute-tool-calls 协议。")
+   (default-system
+    :initarg :system
+    :initform nil
+    :reader kernel-default-system
+    :documentation "默认系统提示文本。请求级 (:system ...) 覆盖它。")
+   (default-options
+    :initarg :options
+    :initform nil
+    :reader kernel-default-options
+    :documentation "默认 chat-options。请求级 (:options ...) 优先，
+按 merge-chat-options 语义合并（工具列表取并集）。"))
+  (:documentation "Kernel 聚合（model/tools/filters/settings/tool-manager +
+默认 system/options）——无 memory（记忆是 memory-filter 的事）。"))
 
 (defmethod print-object ((kernel kernel) stream)
   (print-unreadable-object (kernel stream :type t)
@@ -66,7 +78,8 @@ nil = 走 invoke-tool-batch 原路径；非 nil = 经 execute-tool-calls 协议�
 ;;; build-kernel
 ;;; =========================================================;;;
 
-(defun build-kernel (&key model tools filters eligibility-fn settings tool-manager)
+(defun build-kernel (&key model tools filters eligibility-fn settings tool-manager
+                          system options)
   "构建 Kernel 实例。
 
 参数：
@@ -78,12 +91,23 @@ nil = 走 invoke-tool-batch 原路径；非 nil = 经 execute-tool-calls 协议�
   - tool-manager   ToolCallingManager 实例（缺省 nil = 走原路径；
                    推荐 (make-virtual-thread-tool-calling-manager) 或
                    (make-sequential-tool-calling-manager)）
+  - system         默认系统提示文本；请求级 (:system ...) 覆盖它
+  - options        默认 chat-options；请求级 (:options ...) 优先合并
 
-返回值：kernel 实例。"
+返回值：kernel 实例。
+
+示例：
+  (build-kernel :model m
+                :system \"你是一个天气助手\"
+                :options (make-chat-options :temperature 0.3)
+                :filters (list (memory-filter mem))
+                :tools '(get-weather))"
   (make-instance 'kernel
                  :model model
                  :tools (or tools nil)
                  :filters (or filters nil)
                  :eligibility-fn (or eligibility-fn (constantly t))
                  :settings (or settings nil)
-                 :tool-manager tool-manager))
+                 :tool-manager tool-manager
+                 :system system
+                 :options options))

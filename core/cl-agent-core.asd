@@ -1,29 +1,33 @@
 ;;;; cl-agent-core.asd
-;;;; CL-Agent Core - Infrastructure + Chat Model API + ChatClient/Advisor
+;;;; CL-Agent Core - Infrastructure + Chat Model API + Kernel/Filter
 ;;;;
-;;;; Version: 8.0.0
+;;;; Version: 9.0.0
 ;;;; Author: David
 ;;;;
 ;;;; Overview:
-;;;;   CL-Agent 核心模块，对标 Spring AI 2.0 的分层设计：
+;;;;   CL-Agent 核心模块：
 ;;;;
 ;;;;   - 基础设施：条件系统、工具函数、HTTP 客户端（SSE 流式）
 ;;;;   - LLM Provider SPI：llm-chat 协议 + 统一 llm-response
 ;;;;   - cl-agent.chat（对标 org.springframework.ai.chat.*）：
 ;;;;     CLOS 消息体系 / Prompt / ChatOptions / ChatResponse /
 ;;;;     deftool 工具体系 / ChatModel 协议 / ChatMemory
-;;;;   - cl-agent.kernel（Phase P1：Filter 机制 + Kernel 骨架）：
-;;;;     Filter CLOS / build-chain / defilter / Kernel CLOS /
-;;;;     三链请求/响应载体（不连接 ChatClient，P2 才接入）
-;;;;   - cl-agent.client（对标 org.springframework.ai.chat.client.*）：
-;;;;     Advisor 协议与洋葱链 / defadvisor 宏 / 内置 Advisor /
-;;;;     ChatClient + Builder + chat 宏 DSL
+;;;;   - cl-agent.kernel（执行内核，唯一执行路径）：
+;;;;     Filter 三链 / build-chain / defilter / Kernel / build-kernel /
+;;;;     invoke-chat|tool|turn / run-tool-loop / ToolCallingManager /
+;;;;     10 个内置 filter / chat 宏 DSL
+;;;;
+;;;; v9.0.0 移除了 cl-agent.client（Spring AI 的 ChatClient + Builder +
+;;;; fluent RequestSpec 移植）。Builder 与链式 spec 是 Java 的表达习惯，
+;;;; 在 Lisp 里 build-kernel 的关键字参数 + 声明式 chat 宏覆盖得更直接。
+;;;; 迁移：make-kernel-client → build-kernel；(chat client ...) 原样可用，
+;;;; 只是符号来自 cl-agent.kernel。
 
 (asdf:defsystem #:cl-agent-core
-  :description "CL-Agent Core - Infrastructure + ChatClient/Advisor (Spring AI style, v8.0.0)"
+  :description "CL-Agent Core - Infrastructure + Chat Model API + Kernel/Filter"
   :author "David"
   :license "MIT"
-  :version "8.0.0"
+  :version "9.0.0"
 
   :depends-on (#:alexandria
                #:serapeum
@@ -64,7 +68,13 @@
    ;; 无人调用 → 无人执行 → 无人发现。它们还都被 export 出去，
    ;; 照导出列表使用的人会直接撞上。已整体删除。
    ;; 文档请写在各自的 docstring 里，包导出用 defpackage 的 :export。
-   (:file "utils")                ; Utility functions
+   (:file "utils")                ; 工具函数 + ID 生成器/时间戳提供者
+   ;; 注：曾有独立的 cl-agent.core.protocols 包（core/protocols/protocols.lisp），
+   ;; 统共只导出 make-standard-id-generator / make-standard-timestamp-provider
+   ;; 两个符号，却占着 `protocols` 这个极宽泛的昵称，还容易与 protocols/
+   ;; 子系统（A2A，另一回事）混淆。它排在 utils 之后加载，逼得 utils 里的
+   ;; 默认实现只能用 find-package + find-symbol 动态查找绕开加载顺序。
+   ;; 已并入 utils.lisp，那层间接随之消失。
    (:file "validation")           ; Data validation
    ;; DI container：独立设施，库内部不使用（protocols 也不用——此前这里
    ;; 注明「protocols 系统使用」是错的）。作为公开设施提供，
@@ -81,12 +91,6 @@
     ((:file "response")           ; Unified LLM Response Schema
      (:file "provider")))         ; ILLMProvider protocol
 
-   ;; ============================================================
-   ;; Protocol Layer
-   ;; ============================================================
-   (:module "protocols"
-    :components
-    ((:file "protocols")))
 
    ;; ============================================================
    ;; HTTP Client
@@ -139,18 +143,10 @@
          (:file "tool-search")        ; tool-search-filter (:chat) + IToolIndex
          (:file "timeout")            ; timeout-filter (:tool)
          (:file "approval")           ; approval-filter (:tool)
-         (:file "token-xform")))))   ; token-redact/hold-release (:token-xform)
-
-    ;; ============================================================
-    ;; ChatClient（对标 org.springframework.ai.chat.client.*）
-    ;; ============================================================
-    ;; Advisor 系统已退役——保留 advisor.lisp 的 client-request/response 载体
-    ;; 定义（chat-client 依赖），删除协议/链/内置 advisor 实现。
-    (:module "client"
-     :components
-     ((:file "package")
-      (:file "advisor")            ; 载体定义 only（client-request/response/context）
-      (:file "chat-client")))))    ; ChatClient + Builder + chat 宏（kernel-backed）
+         (:file "token-xform")))     ; token-redact/hold-release (:token-xform)
+       ;; chat 宏排在 filters 之后：kernel-chat-entity 用 filters/validation
+       ;; 里定义的 strip-json-fences。
+       (:file "chat")))))           ; chat 宏 DSL + kernel-chat* 调用方入口
 
 ;; ============================================================
 ;; Changelog

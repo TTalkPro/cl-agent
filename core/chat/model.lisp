@@ -11,9 +11,10 @@
 ;;;;
 ;;;; 2.0 架构变更（对齐 Spring AI 2.0 GA）：
 ;;;;   ChatModel 只负责单次模型调用——解析工具引用并向模型注入工具
-;;;;   schema，但**不执行工具**。工具执行循环上移为 Advisor 链中的
-;;;;   cl-agent.client:tool-calling-advisor（递归 Advisor，由 ChatClient
-;;;;   自动注册）。1.x 的 internal-tool-execution-enabled 选项已随之移除。
+;;;;   schema，但**不执行工具**。工具执行循环上移到
+;;;;   cl-agent.kernel:run-tool-loop（由 invoke-turn 驱动，ChatClient
+;;;;   经 kernel 自动走到）。1.x 的 internal-tool-execution-enabled
+;;;;   选项已随之移除。
 ;;;;
 ;;;;   直接使用 chat-model-call 且响应携带 tool-calls 时，调用方自行
 ;;;;   决定处理方式（对标 user-controlled tool execution）：
@@ -49,7 +50,7 @@
 
 返回：
   chat-response 实例（可能携带 tool-calls，由上层
-  tool-calling-advisor 或调用方处理）"))
+  cl-agent.kernel:run-tool-loop 或调用方处理）"))
 
 (defgeneric chat-model-stream (model prompt on-chunk)
   (:documentation "流式调用模型（单次，不执行工具）。

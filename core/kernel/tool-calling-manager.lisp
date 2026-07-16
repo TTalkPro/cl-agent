@@ -78,7 +78,7 @@
     ;; 顺序执行每个 tool-call
     (let (messages errors)
       (dolist (tc tool-calls)
-        (let* ((callback (cl-agent.chat::find-callback-for-call resolved-options tc))
+        (let* ((callback (cl-agent.chat:find-callback-for-call resolved-options tc))
                (req (make-tool-request
                      callback
                      :args (cl-agent.chat:arguments->plist
@@ -88,13 +88,13 @@
         (push (cl-agent.chat:make-tool-response
                :id (cl-agent.chat:tool-call-id tc)
                :name (cl-agent.chat:tool-call-name tc)
-               :text (or (tool-response-result resp) "（执行失败）"))
+               :text (tool-result->text resp))
               messages)
-        (when (tool-response-error resp)
+        (when (tool-result-error resp)
           (push (list :id (cl-agent.chat:tool-call-id tc)
                       :name (cl-agent.chat:tool-call-name tc)
-                      :class (getf (tool-response-error resp) :class)
-                      :message (getf (tool-response-error resp) :message))
+                      :class (getf (tool-result-error resp) :class)
+                      :message (getf (tool-result-error resp) :message))
                 errors))))
       (make-tool-execution-result
        :messages (nreverse messages)
@@ -129,7 +129,7 @@
                                 (cl-agent.chat:make-tool-response
                                  :id (cl-agent.chat:tool-call-id tc)
                                  :name (cl-agent.chat:tool-call-name tc)
-                                 :text (or (tool-response-result tr) "（执行失败）")))
+                                 :text (tool-result->text tr)))
                               tool-results tool-calls)))
         (make-tool-execution-result
          :messages messages

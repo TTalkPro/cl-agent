@@ -60,39 +60,63 @@
 
   参数：
   - schema    JSON Schema（hash-table 或 plist）
-  - parse-fn  JSON 解析函数（如 #'cl-agent.core:json-parse）；缺省不解析
+  - parse-fn  JSON 解析函数（如 #'cl-agent.core:json-parse）；
+              缺省 NIL = 不解析，此时无从校验结构，一律放行
 
-  返回：(lambda (response) → (values ok-p feedback))"
+  返回：(lambda (response) → (values ok-p feedback))
+
+  判定顺序（三种「解析不出值」的情形必须分开——曾经它们被挤在一个
+  (if parsed ...) 里，结果「给了解析器但模型吐的不是 JSON」也照样放行，
+  正是这个 filter 该拦的头号情况）：
+  1. 文本为空            → 不合格
+  2. 无 parse-fn         → 放行（拿不到结构化值，无从谈校验）
+  3. 有 parse-fn 但解析失败 → 不合格（要的就是让模型重出合法 JSON）
+  4. 解析成功            → 按 schema 校验，错误逐条回喂"
 
   (lambda (response)
-    (let* ((text (cl-agent.chat:chat-response-text response))
-           (stripped (strip-json-fences text))
-           (parsed (when parse-fn
-                     (handler-case (funcall parse-fn stripped)
-                       (error () nil)))))
-      (if parsed
-          (multiple-value-bind (ok path)
-              (cl-agent.core:validate-json-schema parsed schema)
-            (if ok
-                (values t nil)
-                (values nil (format nil "输出不符合 Schema 要求（~A），请修正后重新输出。"
-                                    path))))
-          ;; 无解析器或解析失败 → 检查是否是空文本
-          (if (or (null text) (string= text ""))
-              (values nil "响应文本为空，请输出符合要求的 JSON。")
-              (values t nil))))))  ; 无解析器 → 放行
+    (let ((text (cl-agent.chat:chat-response-text response)))
+      (cond
+        ;; 1. 空文本
+        ((or (null text)
+             (string= (string-trim '(#\Space #\Tab #\Newline #\Return) text) ""))
+         (values nil "响应文本为空，请输出符合要求的 JSON。"))
+        ;; 2. 无解析器 → 放行
+        ((null parse-fn) (values t nil))
+        (t
+         (multiple-value-bind (parsed parsed-ok)
+             (handler-case (values (funcall parse-fn (strip-json-fences text)) t)
+               (error () (values nil nil)))
+           (if (not parsed-ok)
+               ;; 3. 解析失败
+               (values nil "输出不是合法 JSON，请只输出 JSON 本身，不要任何多余说明或 markdown 代码围栏。")
+               ;; 4. 校验：validate-json-schema 返回的是「错误消息列表」，
+               ;;    NIL 才代表通过——不是 ok-p。
+               (let ((errors (cl-agent.core:validate-json-schema parsed schema)))
+                 (if (null errors)
+                     (values t nil)
+                     (values nil (format nil "输出不符合 Schema 要求（~{~A~^；~}），请修正后重新输出。"
+                                         errors)))))))))))
 
 (defun strip-json-fences (text)
-  "剥离 markdown 代码围栏（```json ... ```）。"
-  (let ((trimmed (string-trim '(#\Space #\Tab #\Newline #\Return) text)))
-    (if (and (> (length trimmed) 7)
-             (string= trimmed "```json" :end1 7))
-        ;; 去掉 ```json 头和 ``` 尾
-        (let ((after-header (subseq trimmed 7)))
+  "剥离 markdown 代码围栏：```json ... ``` 与裸 ``` ... ``` 都吃。
+无围栏时只做首尾空白裁剪。
+
+注意 :start1 —— 要判的是「TEXT 的结尾是不是 ```」，start 索引属于
+被切片的那一侧。这里曾写成 :start2（去 \"```\" 这个长度 3 的字面量里
+取第 N 位），于是任何带 ```json 围栏的输入都直接报 bounding index 错。
+而 LLM 恰恰最爱吐带围栏的 JSON。"
+  (let* ((trimmed (string-trim '(#\Space #\Tab #\Newline #\Return) text))
+         (header (cond ((and (>= (length trimmed) 7)
+                             (string= trimmed "```json" :end1 7)) 7)
+                       ((and (>= (length trimmed) 3)
+                             (string= trimmed "```" :end1 3)) 3)
+                       (t nil))))
+    (if (null header)
+        trimmed
+        (let ((body (string-trim '(#\Space #\Tab #\Newline #\Return)
+                                 (subseq trimmed header))))
           (string-trim '(#\Space #\Tab #\Newline #\Return)
-                       (if (and (> (length after-header) 3)
-                                (string= after-header "```"
-                                         :start2 (- (length after-header) 3)))
-                           (subseq after-header 0 (- (length after-header) 3))
-                           after-header)))
-        trimmed)))
+                       (if (and (>= (length body) 3)
+                                (string= body "```" :start1 (- (length body) 3)))
+                           (subseq body 0 (- (length body) 3))
+                           body))))))

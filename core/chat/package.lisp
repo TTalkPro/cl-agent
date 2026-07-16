@@ -10,9 +10,11 @@
 ;;;;   - ChatOptions：可移植的模型调用选项（含工具执行选项）
 ;;;;   - ChatResponse：chat-response / generation / 元数据
 ;;;;   - 工具体系：tool-definition / tool-callback / deftool 宏 /
-;;;;     tool-calling-manager（对标 @Tool / ToolCallback / ToolCallingManager）
+;;;;     find-callback-for-call（对标 @Tool / ToolCallback）
+;;;;     —— 只管「工具是什么」；执行循环在 cl-agent.kernel
 ;;;;   - ChatModel 协议：chat-model-call / chat-model-stream +
-;;;;     provider-chat-model 适配器（内部工具执行循环）
+;;;;     provider-chat-model 适配器（**单次调用**：注入工具 schema 但
+;;;;     不执行工具；循环见 cl-agent.kernel:run-tool-loop）
 ;;;;   - ChatMemory：chat-memory-repository 协议 +
 ;;;;     message-window-chat-memory（对标 ChatMemory/ChatMemoryRepository）
 ;;;;
@@ -175,27 +177,14 @@
    #:find-tool-callback
    #:list-tool-callbacks
    #:resolve-tool-callbacks
-   ;; ToolCallingManager
-   #:tool-calling-manager
-   #:default-tool-calling-manager
-   #:make-default-tool-calling-manager
-   #:execute-tool-calls
-   #:execute-one-tool-call
-   #:process-tool-execution-error
-   ;; ConcurrentToolCallingManager（并行工具执行）
-   #:concurrent-tool-calling-manager
-   #:make-concurrent-tool-calling-manager
-   #:manager-pool-size
-   #:manager-timeout
-   #:manager-inherit-specials
-   #:shutdown-tool-calling-manager
-   #:with-concurrent-tool-calling-manager
-   #:*inherited-special-variables*
-   #:with-inherited-specials
-   #:tool-execution-result
-   #:tool-execution-conversation-history
-   #:tool-execution-return-direct-p
-   #:tool-execution-last-message
+   ;; 工具解析（kernel 的 batch / manager / tool-search filter 依赖）
+   #:find-callback-for-call
+   ;; 注：ToolCallingManager（tool-calling-manager / execute-tool-calls /
+   ;; concurrent-tool-calling-manager / tool-execution-result ...）已删除。
+   ;; 工具执行循环唯一住在 cl-agent.kernel:run-tool-loop，执行策略见
+   ;; cl-agent.kernel 的 sequential/virtual-thread/thread-pool 三个 manager。
+   ;; *inherited-special-variables* / with-inherited-specials 属于
+   ;; cl-agent.core（见 core/utils.lisp），需要时从那里取。
    #:arguments->plist
    ;; 条件
    #:tool-execution-error

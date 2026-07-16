@@ -1,19 +1,19 @@
 ;;;; cl-agent.asd
 ;;;; CL-Agent - Unified AI Agent Framework (Meta-System)
 ;;;;
-;;;; Version: 8.0.0 (Spring AI 2.0 Architecture)
+;;;; Version: 9.0.0 (Kernel + Filter Architecture)
 ;;;; Author: David
 ;;;;
 ;;;; Overview:
 ;;;;   CL-Agent 元系统，聚合全部子系统。
-;;;;   架构全面对标 Spring AI 2.0：ChatClient + Advisor 为核心编程模型，
-;;;;   ChatModel 协议解耦多提供商实现。
+;;;;   核心编程模型：Kernel + Filter 三链；ChatModel 协议解耦多提供商实现。
 ;;;;
 ;;;; Architecture:
 ;;;;   Layer 1 - Core: cl-agent-core
 ;;;;     基础设施 + cl-agent.chat（消息/Prompt/ChatOptions/ChatResponse/
 ;;;;     deftool 工具体系/ChatModel/ChatMemory）
-;;;;     + cl-agent.client（Advisor + ChatClient + chat 宏 DSL）
+;;;;     + cl-agent.kernel（Filter 三链 + Kernel + invoke-* +
+;;;;       run-tool-loop + 10 个内置 filter + chat 宏 DSL）
 ;;;;   Layer 2 - LLM: cl-agent-llm
 ;;;;     提供商实现（Anthropic/OpenAI/智谱/Ollama/DashScope/MiniMax...），
 ;;;;     实现 core 的 llm-chat SPI，经 provider-chat-model 适配为 ChatModel
@@ -22,6 +22,10 @@
 ;;;;   (asdf:load-system :cl-agent)
 ;;;;
 ;;;; Changelog:
+;;;;   v9.0.0 - 移除 cl-agent.client（Spring AI 的 ChatClient + Builder +
+;;;;            fluent RequestSpec 移植）；chat 宏搬入 cl-agent.kernel。
+;;;;            至此 Spring AI 的两大移植层（Advisor、ChatClient）全部退役，
+;;;;            kernel+filter 成为唯一编程模型。
 ;;;;   v8.0.0 - Spring AI 2.0 对标重构：删除 Process/Checkpoint/Kernel/
 ;;;;            SimpleAgent 体系（cl-agent-extra 移除），新增 ChatClient +
 ;;;;            Advisor + ChatModel + ChatMemory + deftool/defadvisor 宏
@@ -32,13 +36,13 @@
 ;;;;   v3.0.0 - Initial modular design
 
 (asdf:defsystem #:cl-agent
-  :description "Unified AI Agent Framework - Meta System (Spring AI 2.0 style)"
+  :description "Unified AI Agent Framework - Meta System (Kernel + Filter)"
   :author "David"
   :license "MIT"
-  :version "8.0.0"
+  :version "9.0.0"
 
   ;; Meta-system contains no components, only declares dependencies
-  :depends-on (;; Layer 1: Core (Infrastructure + Chat + Client)
+  :depends-on (;; Layer 1: Core (Infrastructure + Chat + Kernel)
                #:cl-agent-core
 
                ;; Layer 2: LLM (Provider implementations)
@@ -54,7 +58,7 @@
   :description "CL-Agent Complete Test Suite"
   :author "David"
   :license "MIT"
-  :version "8.0.0"
+  :version "9.0.0"
 
   :depends-on (#:cl-agent
                #:cl-agent-mock
@@ -82,8 +86,10 @@
                (:file "tests/test-kernel-invoke")   ; invoke 原语 + 工具循环
                (:file "tests/test-spring-ai-alignment") ; P5 对齐审计
 
-               ;; ChatClient + Advisor 测试（advisor 系统已退役, 测试保留验证 chat 宏）
-               (:file "tests/test-chat-client") ; ChatClient / chat 宏 / 集成
+               ;; kernel chat 宏 DSL + 端到端集成
+               ;; （前身 test-chat-client：Builder / fluent spec 随
+               ;;   cl-agent.client 一并退役）
+               (:file "tests/test-kernel-chat")
 
                ;; LLM provider tests
                (:file "tests/test-llm")

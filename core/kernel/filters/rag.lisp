@@ -58,12 +58,13 @@
                      (let* ((query (cl-agent.chat:message-text last-user))
                             (docs (retrieve retriever query :top-k top-k)))
                        (if (or docs inject-when-empty)
-                           (let ((enhanced (funcall tmpl query docs))
-                                 (new-messages
-                                   (loop for m in messages
-                                         collect (if (eq m last-user)
-                                                     (cl-agent.chat:user-message enhanced)
-                                                     m))))
+                           ;; let*：new-messages 的初值引用 enhanced
+                           (let* ((enhanced (funcall tmpl query docs))
+                                  (new-messages
+                                    (loop for m in messages
+                                          collect (if (eq m last-user)
+                                                      (cl-agent.chat:user-message enhanced)
+                                                      m))))
                              (funcall chain
                                       (make-turn-request new-messages
                                                           :context (turn-request-context req))))

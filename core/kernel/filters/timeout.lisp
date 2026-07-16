@@ -14,7 +14,7 @@
 
   行为：
   - 用 bordeaux-threads 在独立线程执行工具
-  - 超时 → 返回 tool-response(:error :class :transient)
+  - 超时 → 返回 tool-result(:error :class :transient)
   - 未超时 → 正常返回结果"
   (make-filter
    :timeout
@@ -38,7 +38,7 @@
                  (unless (car result-box)
                    (setf timed-out t))))
              (if timed-out
-                 (make-tool-response
+                 (make-tool-result
                   :error (list :class :transient
                                :message (format nil "工具执行超时（~Ams）" milliseconds)))
                  (car result-box))))))

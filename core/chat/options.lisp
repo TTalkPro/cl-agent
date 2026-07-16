@@ -80,8 +80,8 @@
     :documentation "透传给工具执行的上下文 plist"))
   (:documentation "可移植的 Chat 调用选项
 （对标 Spring AI 2.0 ChatOptions + ToolCallingChatOptions；
-工具执行循环选项已随 2.0 架构上移到
-cl-agent.client:tool-calling-advisor）"))
+工具执行循环本身不在这里配置——它由 cl-agent.kernel:run-tool-loop
+承担，循环相关旋钮见 build-kernel 的 :settings/:tool-manager）"))
 
 (defun make-chat-options (&rest initargs
                           &key model temperature max-tokens top-p top-k

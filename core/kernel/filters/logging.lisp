@@ -48,9 +48,9 @@
                           (tool-request-function req))))
                (funcall fn (format nil "→ ~A" name))
                (let ((resp (funcall chain req)))
-                 (if (tool-response-error resp)
+                 (if (tool-result-error resp)
                      (funcall fn (format nil "← ~A ERROR: ~A"
                                          name
-                                         (getf (tool-response-error resp) :message)))
+                                         (getf (tool-result-error resp) :message)))
                      (funcall fn (format nil "← ~A ok" name)))
                  resp))))))

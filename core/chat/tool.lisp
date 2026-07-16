@@ -9,8 +9,12 @@
 ;;;;                        —— 对标 ToolCallback / FunctionToolCallback
 ;;;;   deftool 宏           声明式定义工具
 ;;;;                        —— 对标 @Tool / @ToolParam 注解
-;;;;   tool-calling-manager 解析响应中的 tool-calls 并执行
-;;;;                        —— 对标 ToolCallingManager
+;;;;   find-callback-for-call 按名在本次请求暴露的工具里定位 callback
+;;;;
+;;;; 工具的**执行**不在本层：解析响应中的 tool-calls 并执行是
+;;;; cl-agent.kernel 的事（run-tool-loop / invoke-tool-batch /
+;;;; sequential|virtual-thread|thread-pool 三个 ToolCallingManager）。
+;;;; 本层只负责「工具是什么」——定义、注册、schema、按名解析。
 ;;;;
 ;;;; 工具的身份是**符号**：
 ;;;;   deftool 生成一个普通函数，并把 tool-callback 挂在符号属性上，
@@ -463,72 +467,18 @@ register-tool-callback 把它放进全局注册表——那是 opt-in 的逃生�
       ((and (listp raw) (keywordp (first raw))) raw)
       (t nil))))
 
-;;; ============================================================
-;;; ToolExecutionResult
-;;; ============================================================
-
-(defclass tool-execution-result ()
-  ((conversation-history
-    :initarg :conversation-history
-    :initform nil
-    :reader tool-execution-conversation-history
-    :documentation "执行工具后的完整会话消息列表：
-原 prompt 消息 + assistant(tool-calls) 消息 + tool-response 消息")
-   (return-direct
-    :initarg :return-direct
-    :initform nil
-    :reader tool-execution-return-direct-p
-    :documentation "任一工具声明 :return-direct 时为 T"))
-  (:documentation "一轮工具执行的结果（对标 Spring AI ToolExecutionResult）"))
-
-(defun tool-execution-last-message (result)
-  "取会话历史末尾的 tool-response-message（本轮工具结果）"
-  (car (last (tool-execution-conversation-history result))))
 
 ;;; ============================================================
-;;; ToolCallingManager
+;;; 工具解析：从本次请求的 options 定位 callback
 ;;; ============================================================
-
-(defclass tool-calling-manager ()
-  ()
-  (:documentation "工具调用执行器协议基类（对标 ToolCallingManager）"))
-
-(defclass default-tool-calling-manager (tool-calling-manager)
-  ()
-  (:documentation "默认实现：按名解析 callback，执行并收集结果；
-工具异常经 process-tool-execution-error 处理（默认转错误文本回传模型）。"))
-
-(defun make-default-tool-calling-manager ()
-  (make-instance 'default-tool-calling-manager))
-
-(defgeneric process-tool-execution-error (manager condition tool-call)
-  (:documentation "处理工具执行期的条件（对标 ToolExecutionExceptionProcessor）。
-
-参数：
-  MANAGER   - tool-calling-manager 实例
-  CONDITION - tool-execution-error / tool-not-found-error 条件
-  TOOL-CALL - 引发错误的 tool-call
-
-返回：
-  错误结果文本（回传模型，模型可自纠错）；
-  也可选择直接重新 signal，让错误冒泡给调用方。"))
-
-(defmethod process-tool-execution-error ((manager tool-calling-manager) condition tool-call)
-  "默认：错误文本作为工具结果回传模型（Spring AI 默认语义）"
-  (declare (ignore tool-call))
-  (format nil "错误：~A" condition))
-
-(defgeneric execute-tool-calls (manager prompt response)
-  (:documentation "执行 RESPONSE 中的全部工具调用。
-
-参数：
-  MANAGER  - tool-calling-manager 实例
-  PROMPT   - 本轮 prompt（从其 options 解析可用工具与 tool-context；
-             其消息列表作为会话历史前缀）
-  RESPONSE - 携带 tool-calls 的 chat-response
-
-返回：
-  tool-execution-result（conversation-history + return-direct-p）"))
+;;;
+;;; 曾长在 ToolCallingManager 区块里。那套 manager（对标 Spring 的
+;;; ToolCallingManager，(execute-tool-calls manager prompt response)）
+;;; 已随 Advisor / ChatClient 一并退役——工具执行循环现在唯一住在
+;;; cl-agent.kernel:run-tool-loop，批执行在 kernel/batch.lisp，
+;;; 执行策略在 kernel/tool-calling-manager.lisp。
+;;; 本函数与 manager 无关（它只是「按名找工具」），且 kernel 的
+;;; batch / manager / tool-search filter 都依赖它，故保留在 chat 层。
 
 (defun find-callback-for-call (options tool-call)
   "为一次 tool-call 定位 callback：只认本次请求 OPTIONS 里的工具。
@@ -543,9 +493,10 @@ register-tool-callback 把它放进全局注册表——那是 opt-in 的逃生�
 kernel 的 :tool-vars，找不到即抛；Spring 的 ToolCallbackResolver
 是 manager 的实例字段，默认为空。
 
-找不到时发 tool-not-found-error——调用方的
-process-tool-execution-error 会把它转成文本回传模型（行为友好，
-不中断对话）。"
+找不到时发 tool-not-found-error。调用方要负责把它转成文本回传模型
+（行为友好，不中断对话）——kernel 侧由 batch.lisp 的 resolve-callback
+捕获、经 tool-result->text 渲染成「错误：找不到工具 xxx」喂回模型，
+让它自纠。直接调用本函数的代码若不捕获，条件会冒泡出整轮对话。"
   (let ((name (normalize-tool-name (tool-call-name tool-call))))
     (or (find name (append (chat-options-tool-callbacks options)
                            (ignore-errors
@@ -554,213 +505,3 @@ process-tool-execution-error 会把它转成文本回传模型（行为友好，
               :key #'tool-callback-name
               :test #'string=)
         (error 'tool-not-found-error :tool-name name))))
-
-(defun execute-one-tool-call (manager options tool-context tool-call)
-  "执行单个 tool-call，返回 (values tool-response return-direct-p)。
-
-错误经 process-tool-execution-error 处理（默认转文本回传模型）。
-不依赖任何动态绑定的特殊变量（tool-context 显式传入），
-因而可安全用于并行 manager 的 worker 线程。"
-  (multiple-value-bind (text direct-p)
-      (handler-case
-          (let ((callback (find-callback-for-call options tool-call)))
-            (values (tool-callback-call callback
-                                        (arguments->plist
-                                         (tool-call-arguments tool-call))
-                                        tool-context)
-                    (tool-callback-return-direct-p callback)))
-        (tool-not-found-error (e)
-          (values (process-tool-execution-error manager e tool-call) nil))
-        (tool-execution-error (e)
-          (values (process-tool-execution-error manager e tool-call) nil)))
-    (values (make-tool-response :id (tool-call-id tool-call)
-                                :name (tool-call-name tool-call)
-                                :text text)
-            direct-p)))
-
-(defun build-tool-execution-result (prompt response responses return-direct)
-  "由工具结果列表组装 tool-execution-result（会话历史 = 原消息 +
-assistant(tool-calls) + tool-response 消息）"
-  (make-instance 'tool-execution-result
-                 :conversation-history (append (prompt-messages prompt)
-                                               (list (chat-response-message response)
-                                                     (tool-response-message responses)))
-                 :return-direct return-direct))
-
-(defmethod execute-tool-calls ((manager default-tool-calling-manager) prompt response)
-  "顺序执行全部工具调用（默认实现）"
-  (let* ((options (prompt-options prompt))
-         (tool-context (chat-options-tool-context options))
-         (return-direct nil)
-         (responses
-           (mapcar
-            (lambda (tc)
-              (multiple-value-bind (resp direct-p)
-                  (execute-one-tool-call manager options tool-context tc)
-                (when direct-p (setf return-direct t))
-                resp))
-            (chat-response-tool-calls response))))
-    (build-tool-execution-result prompt response responses return-direct)))
-
-;;; ============================================================
-;;; ConcurrentToolCallingManager（并行工具执行）
-;;; ============================================================
-;;; 对标 Spring AI 2.0 DefaultToolCallingManager 的并行执行模式
-;;; （issue #5195）：多个工具调用在线程池上并发执行，适合工具体
-;;; 以 I/O 为主（HTTP / DB / 外部服务）的场景。
-;;;
-;;; 语义与顺序执行完全一致（结果按 tool-call 原序、return-direct
-;;; 取并集、错误经 process-tool-execution-error 隔离），只是并发。
-;;;
-;;; 动态绑定：未列入继承名单的特殊变量，其在工具体内的可见性是
-;;; **不确定的**——lparallel:force 遇到尚未被 worker 领走的任务时，
-;;; 会由提交线程就地执行（task stealing），此时工具能看到调用方的
-;;; let 绑定；被 worker 领走时则只能看到全局值。哪种发生取决于调度
-;;; 竞争，同一份代码两次运行可以不同。
-;;;
-;;; 把符号列入 *inherited-special-variables*（或 manager 的
-;;; :inherit-specials）即可消除这种不确定性：值在提交线程快照，在
-;;; 执行处经 progv 重建，无论任务落在 worker 还是被窃取回提交线程，
-;;; 工具看到的都是调用方的绑定。
-;;;
-;;; 工具参数本身仍应走 tool-context 显式传参（与 Spring 的
-;;; ToolContext 同语义）；继承机制是给日志级别、request-id 这类
-;;; 环境上下文用的。
-
-;;; 机制本身（*inherited-special-variables* / with-inherited-specials /
-;;; capture-special-bindings）定义在 cl-agent.core（utils.lisp），
-;;; 与 cl-agent.http 的异步请求共用同一份名单。
-
-(defclass concurrent-tool-calling-manager (default-tool-calling-manager)
-  ((kernel
-    :initform nil
-    :accessor manager-kernel
-    :documentation "lparallel 内核（懒创建，实例私有）")
-   (kernel-lock
-    :initform (bt:make-lock "tool-manager-kernel")
-    :reader manager-kernel-lock)
-   (pool-size
-    :initarg :pool-size
-    :initform 4
-    :reader manager-pool-size
-    :documentation "线程池大小")
-   (timeout
-    :initarg :timeout
-    :initform nil
-    :reader manager-timeout
-    :documentation "单工具执行超时（秒，NIL 不限；超时结果转错误文本）")
-   (inherit-specials
-    :initarg :inherit-specials
-    :initform :default
-    :reader manager-inherit-specials
-    :documentation "worker 继承的特殊变量名列表；:default 表示每次
-提交时读 *inherited-special-variables*（可被调用方 let 覆盖）"))
-  (:documentation "并行工具执行 manager（对标 Spring AI 并行 DefaultToolCallingManager）"))
-
-(defun manager-inherited-specials* (manager)
-  "解析 MANAGER 实际要继承的特殊变量名：显式 :inherit-specials 优先，
-:default 时取动态绑定的 *inherited-special-variables*。"
-  (let ((declared (manager-inherit-specials manager)))
-    (if (eq declared :default)
-        *inherited-special-variables*
-        declared)))
-
-(defun make-concurrent-tool-calling-manager (&key (pool-size 4) timeout
-                                                  (inherit-specials :default))
-  "创建并行工具执行 manager。
-
-参数：
-  POOL-SIZE        - 线程池大小（默认 4）
-  TIMEOUT          - 单工具超时秒数（默认 NIL 不限）
-  INHERIT-SPECIALS - worker 继承的特殊变量名列表；默认 :default
-                     表示每次提交时读 *inherited-special-variables*
-
-线程池在首次执行时懒创建；用完后调用
-shutdown-tool-calling-manager 释放。"
-  (make-instance 'concurrent-tool-calling-manager
-                 :pool-size pool-size
-                 :timeout timeout
-                 :inherit-specials inherit-specials))
-
-(defun ensure-manager-kernel (manager)
-  "取（或懒创建）manager 的 lparallel 内核（双检锁）"
-  (or (manager-kernel manager)
-      (bt:with-lock-held ((manager-kernel-lock manager))
-        (or (manager-kernel manager)
-            (setf (manager-kernel manager)
-                  (lparallel:make-kernel (manager-pool-size manager)
-                                         :name "tool-exec-pool"))))))
-
-(defun shutdown-tool-calling-manager (manager)
-  "关闭并行 manager 的线程池（幂等）。返回 T 表示有释放。"
-  (bt:with-lock-held ((manager-kernel-lock manager))
-    (when (manager-kernel manager)
-      (let ((lparallel:*kernel* (manager-kernel manager)))
-        (lparallel:end-kernel :wait t))
-      (setf (manager-kernel manager) nil)
-      t)))
-
-(defmacro with-concurrent-tool-calling-manager ((var &rest options) &body body)
-  "词法作用域内绑定 VAR 为并行 manager，退出时（含非局部退出）
-自动关闭线程池——避免用全局变量持有线程池。
-
-OPTIONS 透传 make-concurrent-tool-calling-manager
-（:pool-size / :timeout / :inherit-specials）。
-
-示例：
-  (with-concurrent-tool-calling-manager (mgr :pool-size 8)
-    (let ((client (make-chat-client model
-                    :advisors (list (make-tool-calling-advisor :manager mgr)))))
-      (chat client ...)))"
-  `(let ((,var (make-concurrent-tool-calling-manager ,@options)))
-     (unwind-protect (progn ,@body)
-       (shutdown-tool-calling-manager ,var))))
-
-(defun %force-tool-future (future tool-call timeout)
-  "取 FUTURE 的值（cons: tool-response . direct-p）。
-TIMEOUT 非空且超时时返回超时错误结果（worker 仍在后台跑完，
-无法安全中断，故为 best-effort）。"
-  (if (null timeout)
-      (lparallel:force future)
-      (let ((deadline (+ (get-internal-real-time)
-                         (round (* timeout internal-time-units-per-second)))))
-        (loop
-          (when (lparallel:fulfilledp future)
-            (return (lparallel:force future)))
-          (when (>= (get-internal-real-time) deadline)
-            (return (cons (make-tool-response
-                           :id (tool-call-id tool-call)
-                           :name (tool-call-name tool-call)
-                           :text (format nil "错误：工具执行超时（~As）" timeout))
-                          nil)))
-          (sleep 0.005)))))
-
-(defmethod execute-tool-calls ((manager concurrent-tool-calling-manager) prompt response)
-  "并行执行全部工具调用。0/1 个工具时退化为顺序执行（无并发收益）。"
-  (let ((tool-calls (chat-response-tool-calls response)))
-    (if (<= (length tool-calls) 1)
-        (call-next-method)                    ; 复用顺序实现
-        (let* ((options (prompt-options prompt))
-               (tool-context (chat-options-tool-context options))
-               (timeout (manager-timeout manager))
-               ;; 必须在绑定 *kernel* 之前、于提交线程内快照，
-               ;; future 体已在别的线程求值，那里看不到这些绑定
-               (captured (capture-special-bindings
-                          (manager-inherited-specials* manager)))
-               (lparallel:*kernel* (ensure-manager-kernel manager))
-               ;; 每个工具提交为 future，worker 返回 (response . direct-p)
-               (futures (mapcar
-                         (lambda (tc)
-                           (lparallel:future
-                             (with-captured-special-bindings (captured)
-                               (multiple-value-bind (resp direct-p)
-                                   (execute-one-tool-call manager options tool-context tc)
-                                 (cons resp direct-p)))))
-                         tool-calls))
-               ;; 按原序收集结果
-               (pairs (mapcar (lambda (f tc) (%force-tool-future f tc timeout))
-                              futures tool-calls)))
-          (build-tool-execution-result
-           prompt response
-           (mapcar #'car pairs)
-           (some #'cdr pairs))))))

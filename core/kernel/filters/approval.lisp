@@ -18,7 +18,7 @@
   - 工具名不在 sensitive-names 且 sensitive-names 非空 → 直接执行
   - 否则调 approve-fn
   - approved → 执行
-  - rejected → 返回 tool-response(result=拒绝文本)，不执行"
+  - rejected → 返回 tool-result(value=拒绝文本)，不执行"
   (let ((fn (or approve-fn
                 (lambda (name args)
                   (format t "~&[审批] 工具 ~A 参数 ~S~%批准？(y/n): " name args)
@@ -47,6 +47,6 @@
                      (if approved
                          (funcall chain req)
                          ;; 拒绝：返回拒绝文本
-                         (make-tool-response
-                          :result (format nil "工具 ~A 被拒绝执行~@[：~A~]"
-                                          name reason))))))))))
+                         (make-tool-result
+                          :value (format nil "工具 ~A 被拒绝执行~@[：~A~]"
+                                         name reason))))))))))

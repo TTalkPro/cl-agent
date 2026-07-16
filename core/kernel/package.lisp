@@ -1,20 +1,23 @@
 ;;;; package.lisp
 ;;;; CL-Agent Kernel - 包定义
 ;;;;
-;;;; 概述（Phase P1：Filter 机制 + Kernel 骨架）：
+;;;; 概述：
 ;;;;
-;;;;   对标 clj-agent 的 advisor→kernel+filter 架构重构。当前阶段只落地
-;;;;   三链（chat / tool / turn）的 Filter 机制与 Kernel 骨架，不接入
-;;;;   真实 LLM 调用；ChatClient/Advisor 仍走原 advisor 链，零影响。
+;;;;   cl-agent 的唯一执行路径与调用方入口（对标 clj-agent 的 kernel+filter
+;;;;   架构）。Spring AI 的两个移植层——Advisor 与 ChatClient——都已退役。
 ;;;;
 ;;;;   关键抽象：
 ;;;;   - filter         CLOS 类，四个钩子槽（:tool/:chat/:turn/:token-xform）
-;;;;   - build-chain    洋葱折叠函数（reduce → 嵌套闭包），对标 clj-agent
-;;;;   - defilter       宏，对标 defadvisor：定义 filter 类 + 构造函数
-;;;;   - kernel         CLOS 类（model / tools / filters / settings，无 memory）
-;;;;   - build-kernel   构造函数
-;;;;   - 载体类         tool-request/response、turn-request/result（chat 链
-;;;;                    复用现有的 client-request/client-response）
+;;;;   - build-chain    洋葱折叠函数（reduce → 嵌套闭包）
+;;;;   - defilter       宏：定义 filter 类 + 构造函数
+;;;;   - kernel         CLOS 类（model/tools/filters/settings/tool-manager +
+;;;;                    默认 system/options，无 memory）
+;;;;   - build-kernel   构造函数（装配）
+;;;;   - invoke-chat/tool/turn + run-tool-loop（执行）
+;;;;   - chat 宏 / kernel-chat*（调用方入口）
+;;;;   - 载体类         tool-request/tool-result、turn-request/turn-result
+;;;;                    （chat 链不用专门载体：请求是 prompt，响应是
+;;;;                     chat-response）
 ;;;;
 ;;;; 设计要点：
 ;;;;   1. 注册顺序 = 执行顺序：靠前的 filter 在最外层，reverse + reduce
@@ -22,20 +25,25 @@
 ;;;;   2. filter 不需要 order 字段：层级完全由 :filters 列表中的位置决定。
 ;;;;   3. 钩子是普通函数：filter 的 :chat/:tool/:turn 槽存 (req chain) → resp。
 ;;;;   4. 闭包天然"仅下游"：build-chain 折叠出的 chain 参数只含更内层
-;;;;      filter，递归重入无需特殊 API。
-;;;;   5. kernel 极简：只存 model/tools/filters/settings，不认识 memory、
-;;;;      不认识循环（invoke 是 P2 的事）。
+;;;;      filter，递归重入无需特殊 API（validation-turn-filter 的自纠即此）。
+;;;;   5. kernel 不认识 memory：记忆是 memory-filter 的事。
+;;;;
+;;;; 命名：tool 链的载体叫 tool-request / tool-result（与 turn 链的
+;;;; turn-request / turn-result 对称）。它曾叫 tool-response，与
+;;;; cl-agent.chat:tool-response（协议消息层的值对象）撞名——两者分属
+;;;; 不同层，撞名纯属巧合。
+;;;;
+;;;; 该撞名连同 execute-tool-calls（chat 的旧 ToolCallingManager 已删除）
+;;;; 一并消除后，本包不再需要任何 :shadow，下游也就不用为了同时
+;;;; :use 两个包而自己写 shadowing-import。
 
 (defpackage #:cl-agent.kernel
   (:use #:common-lisp #:cl-agent.chat)
   (:nicknames #:cla.kernel)
-  ;; 屏蔽 cl-agent.chat 导出的同名符号：
-  ;; - make-tool-response：chat 的语义是"工具响应消息"（id/name/text），
-  ;;   kernel 的语义是"工具链响应载体"（result/writes/error）
-  ;; - tool-response：同理，两个不同的类，必须 shadow 避免覆盖
-  (:shadow #:make-tool-response #:tool-response
-           #:execute-tool-calls)
+  ;; 无 :shadow —— 与 cl-agent.chat 已无同名导出，下游可放心
+  ;; (:use :cl-agent.chat :cl-agent.kernel) 而不必自己写 shadowing-import。
   (:import-from #:cl-agent.core
+                #:json-parse
                 #:log-debug
                 #:log-info
                 #:log-warn)
@@ -59,11 +67,12 @@
    #:tool-request-function
    #:tool-request-args
    #:tool-request-context
-   #:tool-response
-   #:make-tool-response
-   #:tool-response-result
-   #:tool-response-writes
-   #:tool-response-error
+   #:tool-result
+   #:make-tool-result
+   #:tool-result-value
+   #:tool-result-writes
+   #:tool-result-error
+   #:tool-result->text
 
    ;; ==================== Turn 链载体 ====================
    #:turn-request
@@ -88,6 +97,8 @@
     #:kernel-eligibility-fn
     #:kernel-settings
     #:kernel-tool-manager
+    #:kernel-default-system
+    #:kernel-default-options
 
     ;; ==================== ToolCallingManager ====================
     #:tool-calling-manager
@@ -107,6 +118,14 @@
     #:invoke-tool-batch
     #:invoke-turn
     #:run-tool-loop
+
+    ;; ==================== chat DSL（调用方入口） ====================
+    #:chat
+    #:kernel-chat
+    #:kernel-chat-text
+    #:kernel-chat-entity
+    #:kernel-chat-stream
+    #:strip-json-fences
 
     ;; ==================== 故障分类 ====================
     #:tool-failure

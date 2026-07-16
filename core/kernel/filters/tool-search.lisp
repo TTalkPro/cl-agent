@@ -103,7 +103,7 @@
                    ;; 有已发现集合 → 改写 tools
                    (let* ((found-callbacks
                            (mapcar (lambda (name)
-                                     (cl-agent.chat::find-callback-for-call
+                                     (cl-agent.chat:find-callback-for-call
                                       options
                                       (cl-agent.chat:make-tool-call
                                        :id "search" :name name

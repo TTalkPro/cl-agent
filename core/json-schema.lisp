@@ -9,8 +9,9 @@
 ;;;;        ((name type description &key required-p default) ...)
 ;;;;
 ;;;;   2. 校验：validate-json-schema 校验 JSON 值是否符合 schema。
-;;;;      供 cl-agent.client 的 structured-output-validation-advisor
-;;;;      （对标 Spring AI 2.0 StructuredOutputValidationAdvisor）使用。
+;;;;      供 cl-agent.kernel 的 validation-turn-filter
+;;;;      （对标 Spring AI 2.0 StructuredOutputValidationAdvisor）使用：
+;;;;      校验失败时带着错误信息递归重入下游，让模型自我纠正。
 
 (in-package #:cl-agent.core)
 
