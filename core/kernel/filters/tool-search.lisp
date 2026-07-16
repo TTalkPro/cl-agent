@@ -130,18 +130,21 @@
 找到后直接调用它们。不要臆造未列出的工具。"
   "挂 tool-search-filter 时追加给模型的系统提示。")
 
-(defun tool-search-filter (index &key (limit 5) (instruction *tool-search-instruction*))
+(defun tool-search-filter (index &key (limit 5) (instruction *tool-search-instruction*)
+                                 (max-sessions 256))
   "创建渐进式工具披露 filter（:chat 链）。
 
   参数：
   - index        实现 search-tools 的工具索引
   - limit        单次检索返回上限
   - instruction  追加的系统提示；nil = 不加
+  - max-sessions  会话表上限（LRU 淘汰，防长驻服务内存泄漏）；0 = 不限
 
   行为：
   - 每轮把暴露给模型的工具改写为 **[search_tools] + 本会话已发现的工具**
   - 首轮只有 search_tools 一个 schema —— 这才是省 token 的来源
   - 模型调 search_tools(query) → 检索 → 记入本会话发现集合 → 下轮可直接调
+  - instruction 系统消息**每会话只追加一次**（多轮循环里不重复膨胀）
 
   search_tools 由本函数内部创建并注入，**不要**自己往 build-kernel 的
   :tools 里加它。工具执行只认本次请求 options 里的工具
@@ -156,16 +159,41 @@
                   :filters (list (tool-search-filter
                                   (make-keyword-tool-index
                                    '(get-weather get-stock send-mail ...)))))"
-  (let ((sessions (make-hash-table :test #'equal))
-        (lock (bt:make-lock "tool-search-sessions")))
+  (let ((sessions (make-hash-table :test #'equal))   ; key -> (:discovered (names) :instructed t)
+        (lock (bt:make-lock "tool-search-sessions"))
+        (session-order nil))                          ; keys in insertion order (oldest last)
     (labels ((session-key (ctx) (or (getf ctx :conversation-id) :default))
+             (ensure-session (key)
+               "确保 KEY 在 sessions 里有一个 plist 条目；新会话时做淘汰。"
+               (or (gethash key sessions)
+                   (progn
+                     (when (and (> max-sessions 0)
+                                (>= (hash-table-count sessions) max-sessions))
+                       ;; 淘汰最旧会话
+                       (let ((old (car (last session-order))))
+                         (remhash old sessions)
+                         (setf session-order (butlast session-order))))
+                     (push key session-order)
+                     (setf (gethash key sessions) '(:discovered nil :instructed nil)))))
              (discovered (ctx)
-               (bt:with-lock-held (lock) (gethash (session-key ctx) sessions)))
+               (bt:with-lock-held (lock)
+                 (getf (gethash (session-key ctx) sessions) :discovered)))
              (record (ctx names)
                (bt:with-lock-held (lock)
-                 (setf (gethash (session-key ctx) sessions)
-                       (union (gethash (session-key ctx) sessions) names
-                              :test #'string=)))))
+                 (let ((key (session-key ctx)))
+                   (ensure-session key)
+                   (setf (getf (gethash key sessions) :discovered)
+                         (union (getf (gethash key sessions) :discovered)
+                                names :test #'string=)))))
+             (consume-instruction (ctx)
+               "返回该会话是否需要注入 instruction，并标记为已注入。首次返回 t。"
+               (bt:with-lock-held (lock)
+                 (let ((key (session-key ctx)))
+                   (ensure-session key)
+                   (let ((entry (gethash key sessions)))
+                     (cond
+                       ((getf entry :instructed) nil)
+                       (t (setf (getf entry :instructed) t) t)))))))
       (let ((search-cb
               (make-tool-callback
                (lambda (&key query tool-context)
@@ -203,9 +231,9 @@
                                   all)))
                   (new-options (chat-options-with-tools options :tool-callbacks exposed))
                   (messages (prompt-messages prompt))
-                  ;; 追加检索指令：模型得知道工具要先搜
+                  ;; instruction 每会话只追加一次（consume-instruction 标记后不再重复）
                   (new-messages
-                    (if instruction
+                    (if (and instruction (consume-instruction ctx))
                         (append messages (list (system-message instruction)))
                         messages)))
              (funcall chain (prompt-copy prompt

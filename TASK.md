@@ -3,10 +3,10 @@
 > 来源：2026-07-16 会话。advisor→kernel+filter 架构重构（P1-P5 + TCM）。
 > 参照实现为 `~/workspace/clj-agent`（Clojure kernel+filter 架构）+ Spring AI 2.0。
 >
-> 测试基线：SBCL 2.6.6 **761 checks / 0 failures**
+> 测试基线：SBCL 2.6.6 **839 checks / 0 failures**
 > （810 → 652：advisor 实现与测试一并删除；→ 693：旧 ToolCallingManager
 >  测试随该层退役，安全边界测试改写保留；→ 761：新增 SimpleAgent、
->  HITL pause/resume、消息去重等测试）。
+>  HITL pause/resume、消息去重、线程池限流、故障分类与重试等测试）。
 > 真实 provider 验证：`scripts/live-test.lisp` MiniMax **8/8**
 > （单次问答 / 工具循环 / 多轮记忆 / schema 校验 / HITL 暂停·批准·拒绝 / SSE）。
 >
@@ -456,67 +456,253 @@ cl-agent.client（面向应用的易用层，v10 新增）
 
 ### P1：注释在撒谎 —— 承诺了但代码没做
 
-#### 1.1 `thread-pool-tool-calling-manager` 的限流是假的
+#### 1.1 `thread-pool-tool-calling-manager` 的限流是假的 ✅（已修）
 
 > ToolCallingManager 的定位是 **kernel 级绑定的 Tool Call 执行模型与
 > 隔离机制**，三个实现 = 三种执行/隔离策略。thread-pool 的存在意义
-> 就是**限流隔离**——而它现在根本没实现。
+> 就是**限流隔离**。
 
-- [ ] docstring 写着「用固定大小 lparallel kernel 调度…适合需要限流的
-      场景」，有 `pool-size` 槽（initform 4）+ `tcm-pool-size` 读取器，
-      但 `execute-tool-calls` **直接委托 virtual-thread manager**，
-      pool-size 完全被忽略（`tool-calling-manager.lisp`）。
-      后果：用户配 `:pool-size 4` 以为限流到 4 并发，实际无限制——
-      **可能直接打爆下游**。三种执行模型实际只有两种。
-      修法：绑定独立的 lparallel kernel（`make-kernel :worker-count pool-size`），
-      用完 `end-kernel`；注意 kernel 的生命周期（chat 层旧
-      concurrent-manager 有 `ensure-manager-kernel` / `shutdown` 可参考）。
+- [x] **pool-size 曾完全被忽略**：docstring 写着「用固定大小 lparallel
+      kernel 调度…适合需要限流的场景」，有 `pool-size` 槽 + 读取器，
+      但 `execute-tool-calls` 直接委托 virtual-thread manager。
+      用户配 `:pool-size 4` 以为限流到 4 并发，实际无限制——可能打爆
+      下游。三种执行模型实际只有两种。
+      修法：manager 持有自己的 lparallel kernel（懒建 + 双检锁），
+      execute 时绑定 `lparallel:*kernel*`，于是 batch 的任务提交到这个池。
+      新增 `shutdown-tool-calling-manager`（幂等）与
+      `with-thread-pool-tool-calling-manager` 宏（非局部退出也回收）。
 
-#### 1.2 `batch.lisp` 的故障路由策略矩阵名不副实
+- [x] **顺带发现并修：`future + force` 根本限不住流**。
+      lparallel 的 `force` 是 speculative 的——任务没被 worker 取走时
+      **调用线程自己执行**（work-stealing，避免死锁）。实测并发上限是
+      worker+1：pool-size=1 峰值 2、pool-size=3 峰值 4。对「就是要限流」
+      的执行模型，超一个就是超。
+      改用 channel（`submit-task` + `receive-result`，无 steal 语义）：
+      实测 pool-size 1/2/3/4 → 峰值 **严格** 1/2/3/4。
+      代价：`receive-result` 不保证顺序，故任务带索引回填——工具结果
+      必须与 tool_calls 同序，否则回传给模型的 tool 消息 id 全错位
+      （已加保序测试：故意让完成顺序反转，结果仍同序）。
 
-- [ ] 文件头注释白纸黑字的矩阵：`:transient` + `:retry` → 指数退避 3 次、
-      `:environment` → 暂停。实际 `invoke-tool-batch` 从不读
-      `tool-callback-retry-p`、不退避、不暂停——三类**全部**转成文本。
-      `deftool` 记了 `(:retry t)` 但 kernel 批路径没人消费。
-- [ ] 顺带：`:environment` → 暂停 属于 HITL 的 `:env-retry`（环境类暂停）。
-      本轮只做了审批类暂停，env-retry 未做，且它依赖下面的 1.3。
+- [x] 5 个回归测试（断言**并发峰值**而非「能跑通」），验证过「回退即失败」。
 
-#### 1.3 `classify-tool-error` 基本被绕过
+#### 1.1b 【新发现】多工具并行直接崩 —— 默认路径的致命 bug ✅（已修）
 
-- [ ] `tool-apply-terminal` 捕获所有 `error` 硬编码 `:class :semantic`；
-      `classify-tool-error` 只在 `execute-batch-parallel` 的 future 包装里
-      调用一次，故实际只分类「逃出 `:tool` filter 的错误」（如
-      timeout-filter）。工具体内 signal 的 `transient-tool-failure`
-      **不会**被归为 `:transient`——三故障分类只在纸面上成立。
-      修法：让 `tool-apply-terminal` 走 `classify-tool-error`。
-      注意：这是 1.2 的前置（没有正确分类就谈不上按类路由）。
+> 修 1.1 时写「6 个工具」的测试才炸出来的。**这是本轮最严重的一个。**
+
+- [x] **模型一次发 2 个 tool_call 就 `NO-KERNEL-ERROR`**：
+      lparallel 的 `submit-task`/`future` 都作用于 `lparallel:*kernel*`，
+      而它**默认是 NIL**——lparallel 要求使用者自己 `make-kernel`。
+      本库既不建也不在文档里提。于是：
+      - 1 个 tool_call → OK（≤1 走顺序路径，不碰 lparallel）
+      - **2 个 tool_call → 直接崩**（默认路径 + 默认 manager 都崩）
+      而多工具并行是 LLM 的常见行为（Anthropic/OpenAI 都会一次返回多个）。
+      **全部既有测试与 live 脚本都只用 1 个工具**，把它盖了个严实。
+      修法：`ensure-tool-pool` 懒建进程级默认池（`*tool-pool-size*` 可配，
+      缺省 4），优先尊重调用方已绑定的 `lparallel:*kernel*`；
+      配套 `shutdown-tool-pool`。
+- [x] 3 个回归测试，**强制用 ≥2 个工具**（否则等于没测），验证过回退即失败。
+
+#### 1.2 `batch.lisp` 的故障路由策略矩阵名不副实 ✅（已修）
+
+- [x] **那张表曾是纯谎言**：文件头注释白纸黑字写着 `:transient` + `:retry`
+      → 指数退避 3 次。实际 `invoke-tool-batch` **从不读**
+      `tool-callback-retry-p`、不退避、不重试——三类故障一视同仁转文本。
+      `deftool` 认真记的 `(:retry t)` **零消费者**。
+      修法：重试落在 `%run-one-tool`——它是并行与顺序两条路径的**共同
+      执行点**（顺序路径原本直接调 invoke-tool，一并改掉：`:serial` 的
+      工具往往正是那些打外部依赖、最需要重试的）。
+      新增可配旋钮 `*transient-retry-attempts*`（缺省 3，含首次）与
+      `*transient-retry-base-delay*`（缺省 0.1s，逐次翻倍）。
+- [x] **重试是逐工具 opt-in**：只有声明 `(:retry t)` 的才重试。重试 =
+      重复副作用，框架不替工具作者决定。
+- [x] 实测四种组合全对：
+      前2次失败第3次成功 → 跑 3 次拿到结果；一直失败 → 尝试 3 次后放弃；
+      瞬态但没声明 :retry → 只跑 1 次；语义故障 + :retry → 只跑 1 次
+      （参数错了重试一万次还是错）。退避实测 0.30s = 0.1+0.2。
+- [x] 4 个回归测试，验证过「回退即失败」。
+- [x] **注释与文档同步改真**（含 CN/EN 四份 docs）——它们之前反向撒谎
+      （说「未实现」）。
+
+> 仍存的偏差（已如实标注，非谎言）：`:environment` → 暂停等人未做。
+> 它与已实现的审批类暂停切入点不同：审批切在批执行**之前**（一个工具都没跑，
+> 快照天然一致），环境类切在**屏障处**（批已执行完，有的成功有的撞上挂掉的
+> 依赖，续跑要只重跑失败的、保住成功的）——快照形状与今天的 `loop-state` 不同。
+
+#### 1.3 `classify-tool-error` 基本被绕过 ✅（已修）
+
+> 1.2 的前置：没有正确分类，按类路由无从谈起。
+
+- [x] **根因比预想的深一层**：不只是 `tool-apply-terminal` 硬编码
+      `:semantic`——`tool-callback-call` 会把工具体 signal 的**一切**包成
+      `tool-execution-error`（原件塞进 `:cause`），而 `classify-tool-error`
+      的规则里直接写着 `tool-execution-error → :semantic`。
+      **所以只修 tool-apply-terminal 根本没用**，分类在更早就丢了。
+      实测修复前：`transient-tool-failure` / `environment-tool-failure` /
+      `connection timeout` 走完真实路径**全部** `:SEMANTIC`——
+      三故障分类在实际链路上 100% 失效。
+      修法两处：`classify-tool-error` 递归解包 `cause`；
+      `tool-apply-terminal` 改用 `classify-tool-error`。
+      顺带导出 `tool-execution-error-cause` / `-tool-name`（诊断包装错误时要用）。
+- [x] 2 个回归测试；回退时连 1.2 的重试测试一起失败，印证了依赖关系。
+
+### P2：半成品 ✅
+
+- [x] **`tool-search-filter`**：三处都是废的，且互相掩护——
+      `search_tools` 只存在于注释里；`:discovered-tools` 只读不写，
+      filter 永远走 no-op；`subseq` 用**过滤前**的长度算上界，
+      命中数 < min(limit, 工具总数) 就越界（几乎必崩）；
+      注释承诺的中文二元组切分没写，中文查询恒 0 命中。
+      因为从没被真正驱动过，三处谁都没暴露。
+      重写：CJK bigram 分词、按 ranked 长度取上界、filter 内部自建
+      `search_tools` 并与发现集合共享闭包（按 conversation-id 隔离）。
+- [x] **`:chat` filter 改写的工具 ≠ 执行时认的工具**：修上一条时冒出来的——
+      filter 注入的 `search_tools` 被模型调用后报「找不到工具」。
+      `find-callback-for-call` 只认**请求 options** 里的工具（安全边界），
+      而工具循环拿的是改写**前**那份。修法：`invoke-chat` 返回
+      `(values response effective-prompt)`，工具执行按模型实际看到的那份来。
+- [x] **真流式通路**：`invoke-chat-stream` + `compose-token-xforms` 落地，
+      `kernel-chat-stream` 接真路径（此前是同步降级，整段一个 chunk）。
+- [x] **两个 token-xform filter 是三重装饰品**：没有任何代码读
+      `filter-token-xform` 去组装流；它们**返回裸 lambda 而不是 filter 实例**，
+      压根放不进 `:filters`（名字叫 xxx-filter 却不是 filter）；协议照搬
+      transducer 的 arity 重载。三条互相掩护：放不进 `:filters` → 从没被组装
+      → 没人发现协议是拧的。统一为 `(downstream) → (values emit finish)`。
+- [x] **流式带工具会静默丢掉工具执行**（我在本轮引入的）：真流式是单次调用，
+      不跑工具循环，而此前的同步降级版本跑完整 turn。模型发了 tool_call 却
+      无人执行，用户只看到一段没头没尾的文本——正是本轮一直在修的那类静默
+      失效。改为**直接报错并指路** `kernel-chat`，与 `make-agent :filters`、
+      `(chat ... (:advisors ...))` 的处理一致。
+- [x] 文档纠正：4 处「流式尚未落地」的说明已过时；`:token-xform` 协议描述
+      仍写着 transducer `(rf) → rf'`；`invoke-chat` 的第二返回值与
+      `invoke-chat-stream` 未列入 Invoke 原语清单。
+- [x] 测试基线 810 → 822；真实 MiniMax 验证：增量分片、脱敏、先审后放、
+      与 memory-filter 共存（10/10）。
 
 ---
 
-### P2：半成品
+### P3：未做的设计 ✅
 
-- [ ] **`tool-search-filter`**：`search_tools` 内联工具没接线，只有 filter
-      侧的系统消息改写——渐进式披露的「模型主动搜工具」那半没有。
-- [ ] **真流式通路**：`invoke-chat-stream` + `:token-xform` 组装未实现。
-      `kernel-chat-stream` 现在是同步降级（整段文本一个 chunk）。
-      真 SSE 只存在于 `chat-model-stream`（已验证：MiniMax 19-23 分片）。
+- [x] **`:writes` + `:state-slots` MapReduce 契约**（对标 clj-agent 的
+      context/apply-writes 屏障折叠）。动工前 `writes` 槽是装饰品：
+      有槽、有导出、有 docstring，全库**零生产者、零消费者**。顺带发现
+      `make-tool-execution-result` 的协议文档写着「:context 应用 writes 后
+      的 context」而三个 manager 全部原样透传，`turn-result-tool-context`
+      槽也从无人赋值——同一类「注释承诺、代码没做」。
+      实现（全对标 clj-agent）：
+      - 工具经 `(values 结果 writes-plist)` 声明写意图；
+        `tool-callback-call` → `tool-apply-terminal` 穿透装车
+      - `apply-writes`（纯函数）：按 tool-call **原始序**折叠，并行交错
+        不影响结果；`:reduce` 槽用 reducer（无老值用 `:init`），未声明
+        last-writer；同批多写且无 reducer → 冲突告警
+      - `fold-batch-writes`：屏障折叠入口，**失败调用的写意图不生效**
+        （事务性）
+      - 接线四处：`%tool-loop`（逐轮线程化 context + 刷新 options 的
+        tool-context）、return-direct 收尾、`%resume-continuation`
+        （HITL 续跑：真执行的提交、被拒/被答复的没有写）、三个
+        ToolCallingManager 的 `:context`（把协议承诺做实）
+      - `build-kernel :state-slots` + `kernel-state-slots`；
+        `turn-result-tool-context` 交还折叠后的最终 context
+- [x] 6 个回归测试（纯函数语义/端到端/失败作废/manager 路径/多值穿透），
+      突变验证：去掉屏障折叠 → 2 项失败。测试基线 822 → 839
+- [x] 真实 MiniMax 验证（live-test 11/11）：真模型一批发两个 tool_call，
+      折叠序正确，turn-result 交还累积状态
 
 ---
 
-### P3：未做的设计
+### 大扫除（2026-07-16：删死代码 / 消冗余 / 命名合规）✅
 
-- [ ] **`:writes` + `:state-slots` MapReduce 契约**（对标 clj-agent 的
-      context/apply-writes 屏障折叠）。`tool-result` 已有 `writes` 槽但无人消费。
+**删除（全部经使用统计确认零消费者，且多数从未编译过）**：
+- `protocols/` 全子系统（11 文件）+ `tests/test-protocols.lisp`（引用不存在的
+  包 `cl-agent-tests`）+ `examples/protocols-usage.lisp`
+- `examples/llm-usage.lisp`——`(use-package :cl-agent)` 引用不存在的包，加载即坏
+- `tests/test-provider-name.lisp`——非 fiveam 的独立脚本，从未进 asd
+- `mock/tools.lisp`——mock-tool 体系早于 deftool 架构（不是 tool-callback，
+  进不了 :tools），唯一消费者是一个括号不平衡、从未编译的化石测试
+- `llm/factory/builder.lisp`——provider-builder + 8 个 fluent 泛型，Java 式
+  Builder（与已退役的 ChatClient Builder 同一模式），零真实消费者；
+  create-chat-model 并入 registry.lisp
+- `core/validation.lisp`——13 个 validate-*/ensure-* 宏全部零调用
+- macros.lisp 杂物抽屉：20+ 工具宏只有 when-let（3 处）在用，其余全删
+  （含引用不存在的 log:info 包的 with-timing、load 时 export 的 defconfig）
+- conditions.lisp：9 个错误处理宏 + 4 个 signal-* 便捷封装 + ensure-api-key
+- utils.lisp：take/drop/group-by/plist-get/make-tool（plist 时代工具规格）/
+  truncate-string/clean-whitespace/string-empty-p/ensure-string/
+  format-timestamp/generate-short-id/compose（展开本身是坏的）/pipe
+- mock 包曾导出**没有定义**的 `*default-mock-responses*`
+
+**修复/接回**：
+- `tests/test-mock.lisp` 从未列进 asd → 一次都没跑过；按现行 API 重写并接回
+- sequential manager 绕过 resolve-callback（幻觉工具名 signal 冲出整轮）也
+  绕过 %run-one-tool（:retry 无效）——CLOS 收敛后统一走顺序批，加回归测试
+
+**冗余收敛（CLOS + 助手函数）**：
+- ToolCallingManager：`manager-run-batch` 泛型成为唯一差异点，
+  `execute-tool-calls` 共享骨架（抽 calls→执行→组装→折叠 :writes→收集错误）
+  只有一份；三份手写副本各自漂移的问题（virtual-thread 的 :errors 恒 nil）
+  一并消失
+- batch.lisp 新增 `tool-call->request` / `tool-results->responses` /
+  `batch-error-summaries`，三处调用点共用
+- chat.lisp 抽 `%assemble-messages` / `%merge-request-options`，
+  kernel-chat 与 kernel-chat-stream 不再重复组装
+
+**命名/Style 合规**：
+- 全库 **shadow 清零**：cl-agent.llm 的 `chat` 函数改名 `client-chat`，
+  唯一的 `(:shadow #:chat)` 随之删除；导出符号与 CL/SBCL 内置零冲突
+  （脚本比对过 COMMON-LISP 包全部外部符号）
+- 删泛昵称 `:core` / `:llm` / `:mock`（霸占全局包名，零使用），保留 `cla.*`
+- 4 处 load 时 `(export ...)` 收口进 defpackage（conditions/validation/DI）
+- 测试系统更名 `cl-agent-test` → `cl-agent/test`（ASDF 次级系统约定，
+  每次加载的告警消失）
+- 全量强制重编译**零警告**
+
+> 测试 847 checks / 0 failures；live-test 11/11（真实 MiniMax）。
+
+### 既有遗留 ✅（2026-07-16 大扫除中处理）
+
+- [x] **A2A / MCP 子系统（`protocols/` 目录 + `cl-agent.protocols` 包）**：
+      已整体删除（11 文件）。未完成且加载即报错——asd 列的
+      `mcp.lisp` / `mcp-client.lisp` / `mcp-server.lisp` 根本不存在，
+      不在主构建里，`tests/test-protocols.lisp` 还引用着不存在的包
+      `cl-agent-tests`。一并删除：`examples/protocols-usage.lisp`。
 
 ---
 
-### 既有遗留（非本轮引入，不建议短期推进）
+### P4：Code Review 发现（2026-07-16，5-agent review）
 
-- [ ] **A2A / MCP 子系统（`protocols/` 目录 + `cl-agent.protocols` 包）**：
-      未完成且**加载即报错**——asd 列了 `mcp.lisp` / `mcp-client.lisp` /
-      `mcp-server.lisp`，目录里根本不存在，
-      `(asdf:load-system :cl-agent-protocols)` 直接
-      `Failed to find the TRUENAME of .../protocols/mcp.lisp`。
-      不在主构建里，平时不影响。
-      注：与已并入 core 的 `cl-agent.core.protocols`（ID/时间戳工厂）
-      毫无关系，同名纯属巧合。
+> 5 个并行 review agent（Goal/QA/CodeQuality/Security/ContextMining）。
+> ContextMining 因配额失败，其余 4 个完成。QA（847/0 离线 + 11/11 live）
+> 与 Goal（P1-P3 全部达成）PASS，但 CodeQuality 发现 3 个 MAJOR。
+
+#### 4.1 `:return-direct` 在 ToolCallingManager 路径上静默失效 ❌→✅
+
+- [ ] **manager 分支恒返回 `done=nil`**：`%execute-and-append` 的 manager
+      分支无视 return-direct，`make-tool-execution-result` 也不携带它。
+      后果：配了 `:tool-manager`（README 推荐路径）的用户，`:return-direct t`
+      的工具结果被当成普通 tool 消息回传模型，而非直接返回调用方。
+      修法：共享骨架 `execute-tool-calls` 计算 return-direct
+      （`every resolve-callback → tool-callback-return-direct-p`），
+      传入 `make-tool-execution-result`；`%execute-and-append` manager
+      分支按它短路，与非 manager 分支同构。
+
+#### 4.2 `resume-turn` 绕过已配置的 ToolCallingManager ❌→✅
+
+- [ ] **续跑批直接调 `invoke-tool-batch`**：`%resume-continuation` 第 473 行
+      不检查 `(kernel-tool-manager kernel)`。后果：配了 thread-pool manager
+      限流 **又**配了 tool-gate HITL——第一批被限流，**被暂停的那批**
+      （往往是敏感工具）续跑时不限流。return-direct 在续跑上同样失效。
+      修法：续跑的 callable 批经 `manager-run-batch` 走
+      （thread-pool 绑池 = 限流生效），与非 manager 路径分支。
+
+#### 4.3 tool-search sessions 哈希表无界增长 ❌→✅
+
+- [ ] **`(make-hash-table :test #'equal)` 按 conversation-id 累积，无淘汰**：
+      长驻服务多会话 = 内存只增不减。每条目很小（工具名字符串列表），
+      是慢泄漏而非瞬间爆，但永不回收。
+      修法：加 LRU 上限（缺省 256），超出时淘汰最旧会话。
+
+#### 4.4 非阻塞（修顺手）
+
+- [ ] `filter.lisp` 的 `token-xform` 槽 docstring 仍写旧 transducer 协议
+      （应为 `(downstream) → (values emit finish)`）
+- [ ] tool-search 的 instruction 系统消息每轮追加 → 多轮循环里重复膨胀
+      （只追加一次）

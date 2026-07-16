@@ -52,7 +52,9 @@
     :initarg :token-xform
     :initform nil
     :reader filter-token-xform
-    :documentation "流式 token 变换函数：(reducing-fn) → reducing-fn（transducer 风格）"))
+    :documentation "流式 token 变换：(downstream-emit) → (values emit finish)。
+   在流式 terminal（invoke-chat-stream / compose-token-xforms）内侧组装，
+   不参与 build-chain。"))
   (:documentation "Filter 基类（四钩子：tool/chat/turn/token-xform）。
 
 钩子是普通函数，存放在槽里；不需要 defgeneric/defmethod。

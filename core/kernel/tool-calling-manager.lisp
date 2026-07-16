@@ -21,18 +21,20 @@
 ;;; ToolExecutionResult（plain plist，键名冻结）
 ;;; ============================================================
 
-(defun make-tool-execution-result (&key messages records context errors)
+(defun make-tool-execution-result (&key messages records context errors return-direct)
   "创建 tool-execution-result。
 
   键名冻结（向后兼容持久化的 pause 快照）：
-  - :messages  tool-result 消息列表（按原 call 序）
-  - :records   执行记录累积
-  - :context   应用 writes 后的 context
-  - :errors    错误信息列表"
+  - :messages       tool-response 列表（按原 call 序）
+  - :records        执行记录累积
+  - :context        应用 writes 后的 context
+  - :errors         错误信息列表
+  - :return-direct  全批工具是否都声明了 :return-direct（短路信号）"
   (list :messages messages
         :records records
         :context context
-        :errors errors))
+        :errors errors
+        :return-direct return-direct))
 
 ;;; ============================================================
 ;;; ToolCallingManager 协议
@@ -58,6 +60,50 @@
   (:messages [...] :records [...] :context ctx :errors [...])"))
 
 ;;; ============================================================
+;;; 共享骨架 + manager-run-batch（CLOS 差异点收敛）
+;;; ============================================================
+;;; 三个 manager 的差别**只有**「以何种执行模型跑这一批」——抽 tool-calls、
+;;; 组装消息、收集错误、折叠 :writes 全部相同。此前三份手写副本各自漂移：
+;;; sequential 那份绕过 resolve-callback（模型幻觉一个工具名 →
+;;; find-callback-for-call 直接 signal 冲出整轮对话）也绕过 %run-one-tool
+;;; （:retry 声明在它手下无效）；virtual-thread 那份把 :errors 恒填 nil。
+;;; 收敛后骨架只有一份，manager 只实现 manager-run-batch 一个方法。
+
+(defgeneric manager-run-batch (manager kernel tool-calls options context)
+  (:documentation "以 MANAGER 的执行模型跑一批 tool-call。
+
+  这是 manager 之间**唯一**的差异点（执行模型与隔离机制的落点）。
+  返回 tool-result 列表（必须与 TOOL-CALLS 同序）。"))
+
+(defmethod execute-tool-calls ((manager tool-calling-manager)
+                               kernel response options)
+  "共享骨架：抽 tool-calls → manager-run-batch → 组装 tool-execution-result。
+
+  :context 按协议 = 应用 writes 后的 context（fold-batch-writes 折叠，
+  失败调用的写意图不生效）。此前该承诺只写在 docstring 里，三个实现
+  全部原样透传。"
+  (let* ((tool-calls (cl-agent.core:chat-response-tool-calls response))
+         (options-ctx (getf options :tool-context))
+         (resolved-options (resolve-kernel-tools kernel))
+         (tool-results (manager-run-batch manager kernel tool-calls
+                                          resolved-options options-ctx))
+         ;; return-direct：全批工具都必须声明 :return-direct 才短路
+         ;; （与 invoke-tool-batch 的 (every #'first prepared) 同构）
+         (return-direct (every
+                         (lambda (tc)
+                           (multiple-value-bind (cb err)
+                               (resolve-callback resolved-options tc)
+                             (declare (ignore err))
+                             (and cb (cl-agent.core:tool-callback-return-direct-p cb))))
+                         tool-calls)))
+    (make-tool-execution-result
+     :messages (tool-results->responses tool-results tool-calls)
+     :records nil
+     :context (fold-batch-writes kernel tool-results options-ctx)
+     :errors (batch-error-summaries tool-results tool-calls)
+     :return-direct return-direct)))
+
+;;; ============================================================
 ;;; SequentialToolCallingManager（全串行，调试/严格副作用）
 ;;; ============================================================
 
@@ -70,40 +116,12 @@
   "创建全串行 tool-calling-manager。"
   (make-instance 'sequential-tool-calling-manager))
 
-(defmethod execute-tool-calls ((manager sequential-tool-calling-manager)
-                                kernel response options)
-  (let* ((tool-calls (cl-agent.core:chat-response-tool-calls response))
-         (options-ctx (getf options :tool-context))
-         (resolved-options (resolve-kernel-tools kernel)))
-    ;; 顺序执行每个 tool-call
-    (let (messages errors results)
-      (dolist (tc tool-calls)
-        (let* ((callback (cl-agent.core:find-callback-for-call resolved-options tc))
-               (req (make-tool-request
-                     callback
-                     :args (cl-agent.core:arguments->plist
-                            (cl-agent.core:tool-call-arguments tc))
-                     :context options-ctx))
-               (resp (invoke-tool kernel req)))
-        (push resp results)
-        (push (cl-agent.core:make-tool-response
-               :id (cl-agent.core:tool-call-id tc)
-               :name (cl-agent.core:tool-call-name tc)
-               :text (tool-result->text resp))
-              messages)
-        (when (tool-result-error resp)
-          (push (list :id (cl-agent.core:tool-call-id tc)
-                      :name (cl-agent.core:tool-call-name tc)
-                      :class (getf (tool-result-error resp) :class)
-                      :message (getf (tool-result-error resp) :message))
-                errors))))
-      (make-tool-execution-result
-       :messages (nreverse messages)
-       :records nil
-       ;; :context 按协议 = 应用 writes 后的 context。此前协议这么承诺、
-       ;; 代码原样透传——writes 全库零消费者时没人发现
-       :context (fold-batch-writes kernel (nreverse results) options-ctx)
-       :errors (nreverse errors)))))
+(defmethod manager-run-batch ((manager sequential-tool-calling-manager)
+                              kernel tool-calls options context)
+  ;; 直取顺序路径。经 execute-batch-sequential 意味着与主路径同等待遇：
+  ;; resolve-callback（幻觉工具名 → 语义错误回传，不崩整轮）与
+  ;; %run-one-tool（:retry 瞬态重试）都生效——此前这条路两者皆无。
+  (values (execute-batch-sequential kernel tool-calls options context)))
 
 ;;; ============================================================
 ;;; VirtualThreadToolCallingManager（并行默认，尊重 :serial）
@@ -112,42 +130,17 @@
 (defclass virtual-thread-tool-calling-manager (tool-calling-manager)
   ()
   (:documentation "虚拟线程并行 manager（默认）。
-  用 lparallel:future 并发执行；批内任一工具声明 :serial 则整批按序。
-  与 kernel invoke-tool-batch 行为一致。"))
+  并发执行整批；批内任一工具声明 :serial 则整批按序。
+  与 kernel 无 manager 时的 invoke-tool-batch 行为一致，
+  并发度用进程级默认池（ensure-tool-pool）。"))
 
 (defun make-virtual-thread-tool-calling-manager ()
   "创建虚拟线程并行 tool-calling-manager（默认行为）。"
   (make-instance 'virtual-thread-tool-calling-manager))
 
-(defun %execute-via-batch (kernel response options)
-  "经 invoke-tool-batch 执行整批，组装 tool-execution-result。
-
-并发度由**调用方绑定的 lparallel:*kernel*** 决定——batch 里的
-lparallel:future 提交到当前动态绑定的那个 kernel。virtual-thread manager
-不绑（用进程默认），thread-pool manager 绑自己的固定大小池，于是同一段
-代码得到两种执行模型。"
-  (let* ((tool-calls (cl-agent.core:chat-response-tool-calls response))
-         (options-ctx (getf options :tool-context))
-         (resolved-options (resolve-kernel-tools kernel)))
-    (multiple-value-bind (tool-results return-direct errors)
-        (invoke-tool-batch kernel tool-calls resolved-options options-ctx)
-      (declare (ignore return-direct errors))
-      (let ((messages (mapcar (lambda (tr tc)
-                                (cl-agent.core:make-tool-response
-                                 :id (cl-agent.core:tool-call-id tc)
-                                 :name (cl-agent.core:tool-call-name tc)
-                                 :text (tool-result->text tr)))
-                              tool-results tool-calls)))
-        (make-tool-execution-result
-         :messages messages
-         :records nil
-         ;; :context 按协议 = 应用 writes 后的 context（见 sequential 处注释）
-         :context (fold-batch-writes kernel tool-results options-ctx)
-         :errors nil)))))
-
-(defmethod execute-tool-calls ((manager virtual-thread-tool-calling-manager)
-                                kernel response options)
-  (%execute-via-batch kernel response options))
+(defmethod manager-run-batch ((manager virtual-thread-tool-calling-manager)
+                              kernel tool-calls options context)
+  (values (invoke-tool-batch kernel tool-calls options context)))
 
 ;;; ============================================================
 ;;; ThreadPoolToolCallingManager（真实线程池，限流场景）
@@ -223,17 +216,17 @@ with-thread-pool-tool-calling-manager 宏（推荐，非局部退出也能回收
      (unwind-protect (progn ,@body)
        (shutdown-tool-calling-manager ,var))))
 
-(defmethod execute-tool-calls ((manager thread-pool-tool-calling-manager)
-                                kernel response options)
-  ;; 把自己的固定大小池绑成当前 lparallel kernel——batch 里的
-  ;; lparallel:future 于是提交到这个池，并发被 pool-size 卡死。
+(defmethod manager-run-batch ((manager thread-pool-tool-calling-manager)
+                              kernel tool-calls options context)
+  ;; 把自己的固定大小池绑成当前 lparallel kernel——batch 的 channel 任务
+  ;; 提交到这个池，并发被 pool-size 卡死。
   ;;
   ;; 此前这里直接委托 virtual-thread manager，pool-size **完全没被用过**：
   ;; docstring 承诺「适合需要限流的场景」，实际和 virtual-thread 一模一样。
   ;; 用户配 :pool-size 4 以为限流到 4 并发，实际无限制——批量工具直接
   ;; 打爆下游。三种执行模型实际只有两种。
   (let ((lparallel:*kernel* (ensure-manager-pool manager)))
-    (%execute-via-batch kernel response options)))
+    (values (invoke-tool-batch kernel tool-calls options context))))
 
 ;;; ============================================================
 ;;; 默认 manager 工厂

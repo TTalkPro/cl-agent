@@ -261,12 +261,7 @@ some+filter 那种两阶段扫描。"
 (defun tool-results->message (tool-results tool-calls)
   "把一批 tool-result 转成回传模型的 tool 消息。"
   (cl-agent.core:tool-response-message
-   (mapcar (lambda (tr tc)
-             (cl-agent.core:make-tool-response
-              :id (cl-agent.core:tool-call-id tc)
-              :name (cl-agent.core:tool-call-name tc)
-              :text (tool-result->text tr)))
-           tool-results tool-calls)))
+   (tool-results->responses tool-results tool-calls)))
 
 (defun run-tool-loop (kernel turn-request)
   "工具调用循环。不是 filter——是 :turn 链的 terminal。
@@ -374,13 +369,32 @@ some+filter 那种两阶段扫描。"
         ;; === Manager 路径 ===
         ;; execute-tool-calls 的 :context 按协议就是「应用 writes 后的
         ;; context」——此前协议这么写、三个实现全都原样透传。
+        ;; :return-direct 也由共享骨架计算（全批声明才短路）。
         (let* ((result (execute-tool-calls tm kernel response
                                            (list :tool-context context)))
+               (return-direct (getf result :return-direct))
+               (new-context (or (getf result :context) context))
                (tool-msg (cl-agent.core:tool-response-message (getf result :messages))))
-          (values (append messages
-                          (list (cl-agent.core:chat-response-message response) tool-msg))
-                  nil
-                  (or (getf result :context) context)))
+          (if return-direct
+              ;; return-direct：工具结果即最终答案，不再回传模型。
+              ;; 写意图照常折叠（与非 manager 路径一致）
+              (values (make-turn-result
+                       :completed
+                       :response (cl-agent.core:make-chat-response
+                                  (cl-agent.core:make-generation
+                                   (cl-agent.core:assistant-message
+                                    (format nil "~{~A~^~%~}"
+                                            (mapcar #'cl-agent.core:tool-response-text
+                                                    (getf result :messages))))
+                                   :finish-reason :stop))
+                       :tool-context new-context
+                       :tool-calls-made (1+ iteration))
+                      t
+                      new-context)
+              (values (append messages
+                              (list (cl-agent.core:chat-response-message response) tool-msg))
+                      nil
+                      new-context)))
         ;; === 原路径（invoke-tool-batch）===
         (multiple-value-bind (tool-results return-direct)
             (invoke-tool-batch kernel tool-calls options context)
@@ -473,9 +487,14 @@ some+filter 那种两阶段扫描。"
          (gate (%resume-gate decision payload pending-id)))
     (multiple-value-bind (callable decided) (%apply-resume-gate gate tool-calls)
       ;; 真要执行的那部分走正常批执行；被拒/被答复的直接用现成文本
-      (let* ((executed (when callable
+      ;; 经 manager-run-batch 路由：若配了 thread-pool manager，续跑批也受限流
+      ;; （此前直接调 invoke-tool-batch，manager 被绕过）
+      (let* ((tm (kernel-tool-manager kernel))
+             (executed (when callable
                          (multiple-value-list
-                          (invoke-tool-batch kernel callable options context))))
+                          (if tm
+                              (manager-run-batch tm kernel callable options context)
+                              (invoke-tool-batch kernel callable options context)))))
              (results (first executed))
              ;; 屏障折叠：真执行了的那部分照常提交写意图（callable 保持
              ;; 原始相对序）；被拒/被答复的没执行，自然没有写

@@ -790,3 +790,154 @@
        (cl-agent.core:symbol-tool-callback 'ws-note) '(:text "x"))
     (is (string= "已记：x" text))
     (is (equal '(:notes ("x")) writes))))
+
+(test sequential-manager-survives-unknown-tool
+  "sequential manager 对幻觉工具名产出语义错误回传，而不是 signal 冲出整轮。
+此前它绕过 resolve-callback 直接调 find-callback-for-call（signal 路径），
+与主路径行为分叉——CLOS 收敛（manager-run-batch）后统一走顺序批。"
+  (let* ((mgr (cl-agent.core:make-sequential-tool-calling-manager))
+         (k (cl-agent.core:build-kernel :model nil :tools '(ki-adder)
+                                        :tool-manager mgr))
+         (resp (cl-agent.core:make-chat-response
+                (cl-agent.core:make-generation
+                 (cl-agent.core:assistant-message
+                  "" :tool-calls (list (cl-agent.core:make-tool-call
+                                        :id "x1" :name "no_such_tool"
+                                        :arguments nil)))
+                 :finish-reason :tool-call)))
+         (result (cl-agent.core:execute-tool-calls
+                  mgr k resp (list :tool-context nil))))
+    (is (= 1 (length (getf result :messages))))
+    (is (search "no_such_tool"
+                (cl-agent.core:tool-response-text (first (getf result :messages))))
+        "错误文本报出工具名，模型才能自纠")
+    ;; 共享骨架现在如实收集 :errors（virtual-thread 此前恒 nil）
+    (is (= 1 (length (getf result :errors))))
+    (is (eq :semantic (getf (first (getf result :errors)) :class)))))
+
+;;; ============================================================
+;;; P4 Code Review 回归测试
+;;; ============================================================
+
+(cl-agent.core:deftool rd-direct (&key x)
+  "直接返回结果的工具（return-direct）"
+  (:param x :integer "值" :required t)
+  (:return-direct t)
+  (format nil "结果是 ~A" x))
+
+(test return-direct-via-manager-skeleton
+  "execute-tool-calls 的共享骨架必须正确计算 :return-direct。
+此前 manager 路径恒返回 done=nil，return-direct 被静默吞掉。"
+  (dolist (mgr-fn (list #'cl-agent.core:make-sequential-tool-calling-manager
+                        #'cl-agent.core:make-virtual-thread-tool-calling-manager))
+    (let* ((mgr (funcall mgr-fn))
+           (k (cl-agent.core:build-kernel :model nil :tools '(rd-direct)
+                                          :tool-manager mgr))
+           (resp (cl-agent.core:make-chat-response
+                  (cl-agent.core:make-generation
+                   (cl-agent.core:assistant-message
+                    "" :tool-calls (list (cl-agent.core:make-tool-call
+                                          :id "x1" :name "rd_direct"
+                                          :arguments (let ((h (make-hash-table :test #'equal)))
+                                                       (setf (gethash "x" h) "42") h))))
+                   :finish-reason :tool-call)))
+           (result (cl-agent.core:execute-tool-calls mgr k resp (list :tool-context nil))))
+      (is (getf result :return-direct)
+          "~A 路径应返回 :return-direct = t" (type-of mgr)))))
+
+(test return-direct-via-manager-end-to-end
+  "return-direct 工具经 manager 路径短路——不回传模型，直接交结果。
+此前 manager 路径无视 return-direct，结果被当 tool 消息回传模型。"
+  (let* ((mgr (cl-agent.core:make-sequential-tool-calling-manager))
+         (provider (make-seq-provider
+                    (tool-call-response "rd_direct" '(("x" . 42)))
+                    (text-response "不应该走到第二轮")))
+         (k (cl-agent.core:build-kernel
+             :model (cl-agent.core:make-provider-chat-model provider)
+             :tools '(rd-direct) :tool-manager mgr)))
+    (let ((result (cl-agent.core:invoke-turn
+                   k
+                   (cl-agent.core:make-turn-request
+                    (list (cl-agent.core:user-message "直接给我结果"))))))
+      (is (eq :completed (cl-agent.core:turn-result-status result)))
+      (is (search "结果是 42"
+                  (cl-agent.core:chat-response-text
+                   (cl-agent.core:turn-result-response result))))
+      (is (= 1 (length (seq-provider-requests provider)))
+          "return-direct 应短路——模型只被调用一次"))))
+
+(test resume-honors-tool-manager
+  "resume-turn 的续跑批必须经过 manager-run-batch（受线程池限流）。
+此前 %resume-continuation 直接调 invoke-tool-batch，绕过 manager——
+thread-pool(1) + HITL 暂停的组合下，续跑批并发不受限。"
+  (setf *tcm-live* 0 *tcm-peak* 0)
+  (let* ((mgr (cl-agent.core:make-thread-pool-tool-calling-manager 1))
+         (gate (lambda (tc) (declare (ignore tc)) :pause))
+         (multi-tc-response
+           (lambda (messages)
+             (declare (ignore messages))
+             (cl-agent.core:make-llm-response
+              :content ""
+              :tool-calls (loop for i from 1 to 3
+                                collect (list :id (format nil "c~D" i)
+                                              :name "tcm_slow"
+                                              :arguments (let ((h (make-hash-table :test #'equal)))
+                                                           (setf (gethash "id" h) (format nil "~D" i))
+                                                           h)))
+              :finish-reason :tool-call
+              :model "seq-model")))
+         (provider (make-seq-provider
+                    multi-tc-response
+                    (text-response "done")))
+         (k (cl-agent.core:build-kernel
+             :model (cl-agent.core:make-provider-chat-model provider)
+             :tools '(tcm-slow) :tool-manager mgr :tool-gate gate)))
+    (unwind-protect
+         (let* ((turn1 (cl-agent.core:invoke-turn
+                        k
+                        (cl-agent.core:make-turn-request
+                         (list (cl-agent.core:user-message "跑3个工具")))))
+                (loop-state (cl-agent.core:turn-result-loop-state turn1)))
+           (is (eq :paused (cl-agent.core:turn-result-status turn1)))
+           ;; 续跑：3 个慢工具经 thread-pool(1) → 峰值必须 ≤ 1
+           (let ((turn2 (cl-agent.core:resume-turn k loop-state :approved)))
+             (declare (ignore turn2)))
+           (is (<= *tcm-peak* 1)
+               "续跑批经 manager-run-batch，pool-size=1 → 峰值 ~D 应 ≤ 1" *tcm-peak*))
+      (cl-agent.core:shutdown-tool-calling-manager mgr))))
+
+(test tool-search-instruction-injected-once
+  "tool-search-filter 的 instruction 系统消息每会话只追加一次。
+此前每轮都追加，多轮循环里重复膨胀。"
+  (let* ((idx (cl-agent.core:make-keyword-tool-index '(ki-adder)))
+         (ts-filter (cl-agent.core:tool-search-filter idx))
+         (instruction cl-agent.core:*tool-search-instruction*)
+         (seen-count 0)
+         (counter (cl-agent.core:make-filter
+                   :counter :chat
+                   (lambda (prompt chain)
+                     ;; 数 instruction 在 messages 里出现的次数
+                     (dolist (m (cl-agent.core:prompt-messages prompt))
+                       (when (and (cl-agent.core:system-message-p m)
+                                  (search instruction (or (cl-agent.core:message-text m) "")))
+                         (incf seen-count)))
+                     (funcall chain prompt))))
+         (provider (make-seq-provider
+                    (text-response "ok")
+                    (text-response "ok2")))
+         (k (cl-agent.core:build-kernel
+             :model (cl-agent.core:make-provider-chat-model provider)
+             :filters (list ts-filter counter))))
+    ;; 同一会话调两轮
+    (cl-agent.core:invoke-chat
+     k (cl-agent.core:make-prompt
+        (list (cl-agent.core:user-message "hi"))
+        :options (cl-agent.core:make-chat-options
+                  :tool-context (list :conversation-id "conv-once"))))
+    (cl-agent.core:invoke-chat
+     k (cl-agent.core:make-prompt
+        (list (cl-agent.core:user-message "again"))
+        :options (cl-agent.core:make-chat-options
+                  :tool-context (list :conversation-id "conv-once"))))
+    (is (= 1 seen-count)
+        "instruction 应只追加一次，实际 ~D 次" seen-count)))
