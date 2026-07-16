@@ -14,7 +14,9 @@
 (require :asdf)
 (let ((ql (merge-pathnames "quicklisp/setup.lisp" (user-homedir-pathname))))
   (when (probe-file ql) (load ql)))
-(dolist (dir '("." "core/" "llm/" "mock/"))
+;; cl-agent.asd 依赖 :cl-agent-core、:cl-agent-client、:cl-agent-llm、
+;; :cl-agent-mock，所以要注册所有同级子目录
+(dolist (dir '("." "core/" "client/" "llm/" "mock/"))
   (pushnew (truename dir) asdf:*central-registry* :test #'equal))
 (asdf:load-system :cl-agent)
 (asdf:load-system :cl-agent-mock)
@@ -195,4 +197,7 @@
                  (write-string delta *standard-output*)
                  (force-output))))))
 
-(format t "~%已加载示例。可运行 (kernel-examples::example-1) 至 example-8。~%")
+(format t "~%已加载示例：
+  REPL 流程：先 (in-package :kernel-examples)，再 (example-1)...(example-8)
+  或直接： (kernel-examples::example-1)...(kernel-examples::example-8)
+~%")
