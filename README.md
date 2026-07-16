@@ -273,16 +273,18 @@ sbcl --non-interactive --load run-tests.lisp
 MINIMAX_API_KEY=... sbcl --script scripts/live-test.lisp
 ```
 
-当前：**761 checks / 0 failures**（全 mock，离线）；live **8/8**（MiniMax）。
+当前：**855 checks / 0 failures**（全 mock，离线）；live **11/11**（MiniMax）。
 
 ## 示例
 
 见 [examples/kernel-usage.lisp](examples/kernel-usage.lisp)：
 8 个渐进示例覆盖 chat 宏、build-kernel、deftool、记忆、自定义 filter、
 函数形态入口、结构化输出校验与流式。全部用 mock，无需 API 密钥。
+（运行：`sbcl --load examples/kernel-usage.lisp`）
 
-真实 provider 的端到端验证（8 项：单次问答 / 工具循环 / 多轮记忆 /
-schema 校验 / HITL 暂停·批准·拒绝 / SSE 分片）：
+真实 provider 的端到端验证（11 项：单次问答 / 工具循环 / 多轮记忆 /
+schema 校验 / HITL 暂停·批准·拒绝 / 渐进式工具披露 / token 脱敏 /
+真实 SSE 分片 / state 折叠写入）：
 
 ```bash
 MINIMAX_API_KEY=... sbcl --script scripts/live-test.lisp

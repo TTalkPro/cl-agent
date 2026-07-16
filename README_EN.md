@@ -293,7 +293,7 @@ sbcl --non-interactive --load run-tests.lisp
 MINIMAX_API_KEY=... sbcl --script scripts/live-test.lisp
 ```
 
-Currently: **761 checks / 0 failures** (all mock, offline); live **8/8** (MiniMax).
+Currently: **855 checks / 0 failures** (all mock, offline); live **11/11** (MiniMax).
 
 ## Examples
 
@@ -301,10 +301,12 @@ See [examples/kernel-usage.lisp](examples/kernel-usage.lisp): eight progressive
 examples covering the chat macro, build-kernel, deftool, memory, custom filters,
 the functional entry point, structured-output validation and streaming. All use
 mock — no API key needed.
+(Run: `sbcl --load examples/kernel-usage.lisp`)
 
-End-to-end verification against a real provider (8 checks: single Q&A / tool
+End-to-end verification against a real provider (11 checks: single Q&A / tool
 loop / multi-turn memory / schema validation / HITL pause·approve·reject /
-SSE chunking):
+progressive tool disclosure / token redaction / real SSE chunking /
+state-folding writes):
 
 ```bash
 MINIMAX_API_KEY=... sbcl --script scripts/live-test.lisp
