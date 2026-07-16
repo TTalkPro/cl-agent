@@ -389,7 +389,7 @@ transducer:
 | `:chat` | one LLM call (every loop iteration) | `prompt` → `chat-response` |
 | `:tool` | one tool execution | `tool-request` → `tool-result` |
 | `:turn` | one whole turn (the entire tool loop) | `turn-request` → `turn-result` |
-| `:token-xform` | streaming token transformation | transducer-style function |
+| `:token-xform` | streaming token transformation | `(downstream) → (values emit finish)` |
 
 Every hook is `(lambda (req chain) ...)`: rewrite `req` on the way in, call
 `(funcall chain req)` to go downstream, post-process the return value —
@@ -542,10 +542,11 @@ without re-entry.
 Always pass `:parse-fn` to `structured-output-validate-fn` — without a parser
 it has no structured value to check and lets everything through.
 
-> **Streaming note**: `(:stream cb)` currently degrades to a synchronous call
-> (the full text arrives as a single chunk). Real SSE streaming lives at the
-> ChatModel layer (`cl-agent.core:chat-model-stream`); a streaming kernel
-> invoke is not implemented yet.
+> **Streaming note**: `(:stream cb)` really streams — both `:chat` filters and
+> `:token-xform` apply. It does **not run the tool loop** (single call): a
+> streaming request carrying tools signals an error instead of silently dropping
+> tool execution, so use `(:call :content)` when you need tools. Providers
+> without streaming degrade to one chunk holding the whole text.
 
 ## 11. Tests
 

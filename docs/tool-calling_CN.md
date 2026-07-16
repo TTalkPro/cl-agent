@@ -169,9 +169,14 @@ cl-agent 吸取的是同一个教训，但落点更靠外：循环被提到 **ke
              :message (princ-to-string e)))))
 ```
 
-分类目前的作用是**给故障贴标签并放进 `tool-result` 的 `:error` 槽**，供
-`:tool` filter 与调用方读取。已知偏差见下面第 3 条——分类到分级重试之间的路由
-尚未落地。
+分类直接驱动路由：`:transient` 且工具声明了 `(:retry t)` → 框架内部指数退避重试；
+其余一律贴标签放进 `tool-result` 的 `:error` 槽（供 `:tool` filter 与调用方读取），
+并把文本回传模型。仍缺的那一个分支（`:environment` → 暂停等人）见下面第 3 条。
+
+> 分类必须**看穿一层包装**：`tool-callback-call` 会把工具体 signal 的**一切**
+> 包成 `tool-execution-error`，原件塞进 `:cause`。`classify-tool-error` 递归解包——
+> 不解的话，工具明明 signal 了 `transient-tool-failure`，出来也只剩 `:semantic`，
+> 三类故障直接退化成一类。
 
 ## 一个安全边界
 
@@ -249,27 +254,24 @@ cl-agent 没有这个 seam：错误在 `tool-apply-terminal` 被捕获成 `tool-
 
 **代价**：定制错误文本没有「一行特化」的写法，得写 filter。
 
-### 3. 故障分类未接分级重试（未实现）
+### 3. `:environment` 不会暂停等人（部分实现）
 
-`core/kernel/batch.lisp` 的注释描绘了一张策略矩阵——`:transient` + 工具声明
-`:retry` → 指数退避重试（最多 3 次），`:environment` → 暂停等人介入。
+分级重试**已实现**：`:transient` + 工具声明 `(:retry t)` → 指数退避，
+最多 `*transient-retry-attempts*` 次（缺省 3），退避基数
+`*transient-retry-base-delay*`（缺省 0.1s）逐次翻倍。重试是逐工具 opt-in 的——
+重试意味着重复副作用，框架不替工具作者决定。
 
-**实际代码没有实现这一段**：`invoke-tool-batch` 不读 `tool-callback-retry-p`，
-不做退避重试，也不暂停；三类故障目前一律**转文本回传模型**。`(:retry t)` 子句
-会被 `deftool` 记录到 callback 上，但 kernel 批执行路径不消费它。
+**没实现的是矩阵的另一半**：clj-agent 里 `:environment` 故障会**暂停等人介入**
+（`:env-retry` 类暂停），这里仍只转文本回传模型。
 
-**后果**：网络抖动导致的 `:transient` 故障，现在靠模型「再调一次工具」来重试，
-而不是靠框架静默重试——多烧一轮 token，且模型可能选择不重试。需要真重试的工具，
-目前应在工具体内部用 `core/http/retry.lisp` 的 `with-retry` 自行处理。
+**为什么不是「加个分支」那么简单**：本仓库已实现的审批类暂停
+（`:tool-gate` + `resume-turn`）切在批执行**之前**——一个工具都没跑，
+快照天然一致。而环境类暂停切在**屏障处**：批已经执行完了，有的工具成功、
+某个撞上了挂掉的依赖。续跑意味着只重跑失败的那些、同时保住已成功的结果——
+快照形状与今天 `loop-state` 携带的不同。
 
-分类本身是**准确**的（`classify-tool-error` 有测试覆盖），缺的是分类到动作的
-路由。这是 kernel 路线图上的下一格。
-
-另有一处分类精度问题：`tool-apply-terminal` 把工具体抛出的一切 `error` 一律记为
-`:semantic`，`classify-tool-error` 只在**并行批执行的 future 外层**被调用——也就
-是说它实际只分类「从 `:tool` filter 里逃出来的」错误（如 `timeout-filter` 的超时）。
-工具体自己抛的 `transient-tool-failure` 不会被识别成 `:transient`。修法是让
-`tool-apply-terminal` 也走 `classify-tool-error`。
+**当前后果**：依赖挂了，在模型看来和普通报错没区别，它多半会道歉了事，
+而不是等人把环境修好。
 
 ### 4. 默认错误语义不同（语言差异，不可避免）
 

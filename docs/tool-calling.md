@@ -194,10 +194,18 @@ Tool authors can signal the precise condition and bypass the heuristic:
              :message (princ-to-string e)))))
 ```
 
-Today the classification's job is to **label the failure and park it in the
-`tool-result`'s `:error` slot**, where `:tool` filters and callers can read
-it. See known divergence 3 below — the routing from class to graded retry is
-not implemented yet.
+The classification drives the routing: `:transient` on a tool declaring
+`(:retry t)` gets an exponential-backoff retry inside the framework; everything
+else is labelled and parked in the `tool-result`'s `:error` slot, where `:tool`
+filters and callers can read it, and the text goes back to the model. See known
+divergence 3 below for the one branch that is still missing (`:environment` →
+pause for a human).
+
+> The classification has to see through a wrapper: `tool-callback-call` wraps
+> **everything** a tool body signals into a `tool-execution-error`, stashing the
+> original in `:cause`. `classify-tool-error` unwraps it recursively — without
+> that, a tool signalling `transient-tool-failure` would come out the other side
+> labelled `:semantic`, and all three classes would collapse into one.
 
 ## A security boundary
 
@@ -293,23 +301,27 @@ name renders as "错误：找不到工具 xxx" rather than a useless placeholder
 **The cost**: customizing error text has no one-line specialization; it takes a
 filter.
 
-### 3. Failure classes are not wired to graded retry (not implemented)
+### 3. `:environment` does not pause for a human (partial)
 
-The comments in `core/kernel/batch.lisp` describe a policy matrix —
-`:transient` + a tool declaring `:retry` → exponential backoff (up to 3
-attempts), `:environment` → pause for human intervention.
+Graded retry **is** implemented: `:transient` + a tool declaring `(:retry t)` →
+exponential backoff, up to `*transient-retry-attempts*` (default 3), with
+`*transient-retry-base-delay*` (default 0.1s) doubling per attempt. Retry is
+opt-in per tool because retrying means repeating side effects.
 
-**The code does not implement that part**: `invoke-tool-batch` never reads
-`tool-callback-retry-p`, performs no backoff retry, and never pauses. All three
-classes currently take the same action — **converted to text and returned to the
-model**. The `(:retry t)` clause is recorded on the callback by `deftool`, but
-the kernel's batch path does not consume it.
+What is **not** implemented is the other half of the matrix: in clj-agent an
+`:environment` failure **pauses for human intervention** (an `:env-retry`-class
+pause). Here it still just converts to text and goes back to the model.
 
-**Consequence**: a `:transient` failure from a network blip is retried by the
-model deciding to call the tool again, not by the framework retrying silently —
-which burns an extra round of tokens, and the model may well decide not to retry
-at all. Tools that need real retries should currently handle it inside the tool
-body with `with-retry` from `core/http/retry.lisp`.
+**Why it is not just "add a branch"**: the approval-class pause implemented here
+(`:tool-gate` + `resume-turn`) hooks in *before* the batch runs — no tool has
+executed, so the snapshot is trivially consistent. An environment-class pause
+hooks in at the **barrier**, after the batch has already executed: some tools
+succeeded, one hit a dead dependency. Resuming means re-running only the failed
+ones while keeping the successful results — a different snapshot shape from what
+`loop-state` carries today.
+
+**Consequence today**: a dead dependency looks like any other error to the model.
+It will usually apologise rather than wait for someone to fix the environment.
 
 The classification itself is **accurate** (`classify-tool-error` is covered by
 tests); what is missing is the routing from class to action. That is the next

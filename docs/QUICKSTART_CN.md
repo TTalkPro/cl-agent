@@ -388,7 +388,7 @@ Filter 是环绕执行的洋葱层（对标 Spring AI 的 Advisor API）。每�
 | `:chat` | 一次 LLM 调用（循环内每轮） | `prompt` → `chat-response` |
 | `:tool` | 一次工具执行 | `tool-request` → `tool-result` |
 | `:turn` | 一整轮对话（含整个工具循环） | `turn-request` → `turn-result` |
-| `:token-xform` | 流式 token 变换 | transducer 风格函数 |
+| `:token-xform` | 流式 token 变换 | `(downstream) → (values emit finish)` |
 
 每个钩子统一是 `(lambda (req chain) ...)`：前置改写 `req` →
 `(funcall chain req)` 进下游 → 后置加工返回值；**不调 `chain` 就是短路**。
@@ -537,9 +537,10 @@ kernel 本身**没有 memory 字段**——记忆是 filter，不是 kernel 的�
 `structured-output-validate-fn` 的 `:parse-fn` 必须给——不给解析器时它无从
 校验结构，一律放行。
 
-> **流式说明**：`(:stream cb)` 当前降级为同步调用（完整文本作为单个 chunk
-> 回调）。真 SSE 流式在 ChatModel 层（`cl-agent.core:chat-model-stream`）；
-> kernel 的流式 invoke 尚未落地。
+> **流式说明**：`(:stream cb)` 是真流式——`:chat` filter 与 `:token-xform`
+> 都生效。但它**不跑工具循环**（单次调用）：带工具的流式请求会报错而不是
+> 静默丢掉工具执行，要工具请用 `(:call :content)`。provider 不支持流式时
+> 降级为整段文本单个 chunk。
 
 ## 11. 运行测试
 
