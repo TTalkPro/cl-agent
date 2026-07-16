@@ -4,33 +4,53 @@
 
 按包组织的 API 速查。与 Spring AI 2.0 的对应关系标注在各节标题中。
 
-执行路径唯一：`chat` 宏 / `kernel-chat` → `cl-agent.kernel:invoke-turn`
-（Kernel + Filter 三链）。Advisor 与 ChatClient 两层移植物均已整体退役，
-见文末[迁移指引](#迁移)。
+两层入口：
 
-## 包与 :use —— 两个包可直接一起 :use
+- **SimpleAgent**（`cl-agent.client`）：有状态对话 + callbacks + 错误归一化
+  + HITL。见 [cl-agent.client](#cl-agentclient--simpleagent有状态对话--hitl)。
+- **Kernel + Filter**（`cl-agent.core`）：`chat` 宏 / `kernel-chat` →
+  `cl-agent.core:invoke-turn` 三链。前者是后者的薄封装。
 
-`cl-agent.chat` 与 `cl-agent.kernel` **无任何同名导出**，直接一起 `:use`
+Advisor 与 ChatClient 两层移植物均已整体退役，见文末[迁移指引](#迁移)。
+
+## 包与 :use
+
+现在只有这几个包：
+
+| 包 | 昵称 | 角色 |
+|---|---|---|
+| `cl-agent.core` | `cla.core` | 框架本体（单包）：基础设施 + HTTP/SSE + JSON Schema + `llm-chat` SPI + Chat API + Kernel/Filter 三链 + `chat` 宏 |
+| `cl-agent.client` | `cla.client` | SimpleAgent |
+| `cl-agent.llm` | `cla.llm` | 提供商实现，`create-chat-model` |
+| `cl-agent.llm.providers` | — | 9 个 provider 实现 |
+| `cl-agent.mock` | `mock` | mock provider（测试/演示） |
+
+`cl-agent.core` 与 `cl-agent.client` **无任何同名导出**，直接一起 `:use`
 即可，不需要任何 shadowing：
 
 ```lisp
 (defpackage :my-app
-  (:use :cl :cl-agent.chat :cl-agent.kernel))
+  (:use :cl :cl-agent.core :cl-agent.client))
 ```
 
 `examples/kernel-usage.lisp` 与 `scripts/live-test.lisp` 的 `defpackage`
-即是这一形式。
+即是这一形式（它们只 `:use` core）。
 
-> **曾经不行。** 两个包一度有三个同名导出：`tool-response` /
+> **`cl-agent.http` / `cl-agent.chat` / `cl-agent.kernel` 三个包已合并进
+> `cl-agent.core`**，昵称 `cla.http` / `cla.chat` / `cla.kernel` 统一为
+> `cla.core`。合并前 chat 与 kernel 有三个同名导出：`tool-response` /
 > `make-tool-response`（chat 是协议消息层的值对象，kernel 是执行链的响应
 > 载体）与 `execute-tool-calls`（两套签名不同的 manager 协议），逼得
-> `cl-agent.kernel` 必须 `:shadow`，下游还得自己写 `:shadowing-import-from`。
+> kernel 必须 `:shadow`，下游还得自己写 `:shadowing-import-from`。
 > 已从根上消除：kernel 的载体改名为 `tool-request` / `tool-result`，chat
-> 的旧 ToolCallingManager 整体删除。`cl-agent.kernel` 因此不再有任何
-> `:shadow`——旧文档里所有「必须 shadowing-import」的说法都已作废。
-> 迁移见文末[迁移指引](#迁移)。
+> 的旧 ToolCallingManager 整体删除，随后三包合并。**旧文档里所有
+> 「必须 shadowing-import」的说法都已作废。** 迁移见文末[迁移指引](#迁移)。
+>
+> 唯一还在的 `:shadow` 是 `cl-agent.llm` 的 `chat`——它的低层函数
+> `(chat client messages)` 与 core 的 `chat` 宏撞名，同时 `:use` 这两个包
+> 时才需要处理。
 
-## cl-agent.chat —— Chat Model API
+## cl-agent.core —— Chat Model API
 
 ### 消息体系（`org.springframework.ai.chat.messages`）
 
@@ -48,7 +68,7 @@
 
 > 这里的 `tool-response` 是**协议消息层**的值对象（id/name/text），放进
 > role=:tool 的消息里发回模型。它与 kernel 执行链的响应载体
-> `cl-agent.kernel:tool-result`（value/writes/error，见
+> `cl-agent.core:tool-result`（value/writes/error，见
 > [Tool 链载体](#三链载体)）是**不同层的不同东西**，现已不再同名。
 
 ### Prompt / ChatOptions（`chat.prompt`）
@@ -169,7 +189,7 @@
 ;; 防提权的安全边界：模型报出一个没暴露给它的工具名，绝不执行。
 ```
 
-> 模型幻觉工具名很常见。`cl-agent.kernel` 的 `batch.lisp` 会捕获
+> 模型幻觉工具名很常见。kernel 的 `batch.lisp` 会捕获
 > `tool-not-found-error`，转成 `:semantic` 错误的 `tool-result`，经
 > `tool-result->text` 渲染为「错误：找不到工具 xxx」回传模型让它自纠——
 > 条件不会冒泡出 `(chat ...)` 中断整轮对话。安全边界不变：未暴露的工具
@@ -183,14 +203,14 @@
 > `execute-tool-calls`（`(manager prompt response)` 签名）/
 > `tool-execution-result` / `process-tool-execution-error` /
 > `with-concurrent-tool-calling-manager` 等符号均已不存在。工具执行唯一
-> 住在 `cl-agent.kernel`：`run-tool-loop` + `invoke-tool-batch` + 三个
-> [kernel ToolCallingManager](#toolcallingmanager实现)。「自己调
+> 住在 kernel 层：`run-tool-loop` + `invoke-tool-batch` + 三个
+> [ToolCallingManager](#toolcallingmanager实现)。「自己调
 > `chat-model-call` 再用 `execute-tool-calls` 驱动循环」这条 user-controlled
 > 路径已不存在，kernel 是唯一路径。
 >
 > `*inherited-special-variables*` / `with-inherited-specials` 不属于已删除的
-> manager，它们是 `cl-agent.core` 的（`core/utils.lisp`），与 `cl-agent.http`
-> 的异步请求共用同一份名单，需要时从那里取。
+> manager，它们仍在（`core/utils.lisp`），与 HTTP 异步请求共用同一份名单，
+> 需要时从 `cl-agent.core` 取。
 
 ### ChatModel 协议（`ChatModel` / `StreamingChatModel`）
 
@@ -203,7 +223,7 @@
 ```
 
 ChatModel 只做**单次**模型调用——解析工具引用并注入 schema，但不执行工具。
-携带 tool-calls 的响应原样返回，工具循环由 `cl-agent.kernel:run-tool-loop`
+携带 tool-calls 的响应原样返回，工具循环由 `cl-agent.core:run-tool-loop`
 （`:turn` 链的 terminal）承担。
 
 ### ChatMemory（`ChatMemory` / `ChatMemoryRepository`）
@@ -228,9 +248,9 @@ ChatModel 只做**单次**模型调用——解析工具引用并注入 schema�
 窗口裁剪 pairing-safe：system 消息不计入且保留；孤立 tool 消息头连带丢弃。
 
 记忆本身**不是** kernel 的字段——把它挂成 filter：
-`(cl-agent.kernel:memory-filter memory)`。
+`(cl-agent.core:memory-filter memory)`。
 
-## cl-agent.kernel —— Kernel + Filter 三链（执行内核）
+## cl-agent.core —— Kernel + Filter 三链（执行内核）
 
 三条洋葱链，各自有独立的载体与 terminal：
 
@@ -270,7 +290,7 @@ invoke-turn → [:turn filters] → run-tool-loop
 
 ```lisp
 ;; 钩子的四个槽都可选
-(cl-agent.kernel:make-filter
+(cl-agent.core:make-filter
  :timing
  :turn (lambda (req chain)
          (let ((start (get-internal-real-time)))
@@ -336,26 +356,31 @@ invoke-turn → [:turn filters] → run-tool-loop
 (make-turn-request messages &key context resume-p)
 (turn-request-messages r) (turn-request-context r) (turn-request-resume-p r)
 
-(make-turn-result status &key response tool-context tool-calls-made)
+(make-turn-result status &key response tool-context tool-calls-made
+                              loop-state pending-tool pause-reason)
 (turn-result-status r)          ; :completed | :paused | :cancelled | :error
 (turn-result-response r)        ; 最终 chat-response（出错时 nil）
 (turn-result-tool-context r)
 (turn-result-tool-calls-made r) ; 本轮工具调用计数
+;; 仅 :paused 时有值（见「HITL：暂停与续跑」）
+(turn-result-loop-state r)      ; 续跑快照，喂给 resume-turn
+(turn-result-pending-tool r)    ; 待审批的工具（name/args/id）
+(turn-result-pause-reason r)    ; gate 给的原因文本
 ```
 
-> `:chat` 链**不用**包装载体：请求就是 `cl-agent.chat:prompt`，响应就是
+> `:chat` 链**不用**包装载体：请求就是 `cl-agent.core:prompt`，响应就是
 > `chat-response`。
 >
 > 命名：`tool-request` → `tool-result` 与 turn 链的 `turn-request` →
 > `turn-result` 对称。`tool-result` 曾叫 `tool-response`（初始参数 `:result`，
-> 读取器 `tool-response-result`），与 `cl-agent.chat:tool-response` 撞名——
+> 读取器 `tool-response-result`），与 `cl-agent.core:tool-response` 撞名——
 > 后者是协议消息层的值对象，两者分属不同层。改名后撞名消失。
 
 ### Kernel
 
 ```lisp
 (build-kernel &key model tools filters eligibility-fn settings tool-manager
-                   system options)
+                   system options tool-gate)
 ;; model          chat-model 实例
 ;; tools          工具符号列表或 tool-callback 列表（缺省 nil）
 ;; filters        filter 实例列表（顺序 = 洋葱层级；缺省 nil）
@@ -365,10 +390,12 @@ invoke-turn → [:turn filters] → run-tool-loop
 ;; tool-manager   ToolCallingManager 实例；nil = 走 invoke-tool-batch 原路径
 ;; system         默认系统提示文本；请求级 (:system ...) 覆盖它
 ;; options        默认 chat-options；请求级 (:options ...) 合并覆盖
+;; tool-gate      工具审批闸门（HITL）：(tool-call) → :proceed | :pause
+;;                | (:pause . 原因)；nil（缺省）= 不审批，全部直接执行
 
 (kernel-model k) (kernel-tools k) (kernel-filters k)
 (kernel-eligibility-fn k) (kernel-settings k) (kernel-tool-manager k)
-(kernel-default-system k) (kernel-default-options k)
+(kernel-default-system k) (kernel-default-options k) (kernel-tool-gate k)
 ```
 
 kernel 极简：**没有 memory 字段**——记忆是 filter，不是 kernel 的固有属性。
@@ -384,6 +411,59 @@ kernel 极简：**没有 memory 字段**——记忆是 filter，不是 kernel �
 | system | `build-kernel :system` | `(:system ...)` | 请求级**覆盖** |
 | options | `build-kernel :options` | `(:options ...)` | 请求级**优先**，未提及的默认项保留 |
 | tools | `build-kernel :tools` | `(:tools ...)` | **取并集** |
+
+### HITL：暂停与续跑（kernel 原语）
+
+`:tool-gate` 是人工审批的底层原语（`cl-agent.client` 的
+[SimpleAgent HITL](#人工审批hitl) 就是它的封装）。
+
+```lisp
+(build-kernel
+  :model *model* :tools '(rm-file)
+  ;; (tool-call) → :proceed | :pause | (:pause . 原因)
+  :tool-gate (lambda (tc)
+               (if (string= (tool-call-name tc) "rm_file")
+                   (cons :pause "删除需审批")
+                   :proceed)))
+```
+
+gate 在**批执行之前**对本批每个 tool-call **恰好评估一次**——gate 常带副作用
+（审计日志、审批 UI、计数器），「恰好一次」是契约的一部分。任一判 `:pause`
+则整轮暂停：**工具一个都不执行**，`run-tool-loop` 返回 `turn-result(:paused)`。
+
+```lisp
+(resume-turn kernel loop-state decision &key payload)
+;; loop-state  turn-result(:paused) 上的 (turn-result-loop-state r)
+;; decision    :approved | :rejected | :reply
+;; payload     :approved + (:args 新参数)  → 编辑后批准（用新参数执行）
+;;             :rejected + (:message 理由) → 结果「已拒绝执行：<理由>」回模型
+;;             :reply    + (:message 答复) → 答复**直接**作为该工具的结果
+;;                                           （ask-user 语义，工具不执行）
+;; → 同 invoke-turn：:completed，或**再次** :paused（批里还有别的敏感工具，
+;;   或后续轮次又触发 gate）
+```
+
+`resume-turn` 同样过 `:turn` filter 链——validation 之类的 filter 要能作用于
+续跑后的结果。
+
+暂停载体：
+
+```lisp
+(make-loop-state &key messages response tool-calls pending-id
+                      iteration options context)
+(loop-state-messages ls)    ; 暂停时刻的消息（尚未含本轮 assistant/工具结果）
+(loop-state-response ls)    ; 触发暂停的那条 assistant 响应（携带 tool-calls）
+(loop-state-tool-calls ls)  ; 本批全部 tool-call——**都还没执行**
+(loop-state-pending-id ls)  ; 被判 :pause 的那个 tool-call 的 id
+(loop-state-iteration ls)   ; 暂停发生在第几轮（续跑后接着数）
+(loop-state-options ls) (loop-state-context ls)
+
+(make-pending-tool &key name args id)
+(pending-tool-name p) (pending-tool-args p) (pending-tool-id p)
+```
+
+`loop-state` 刻意**不含** kernel / gate / callbacks——那些是代码侧的东西，
+resume 时重新提供；本类只装「续跑所需的数据」。
 
 ### chat 宏 —— 声明式请求 DSL（调用方入口）
 
@@ -457,7 +537,7 @@ kernel 极简：**没有 memory 字段**——记忆是 filter，不是 kernel �
 `json-parse`。**不做 schema 校验、不重试**（没有 schema 参数）。
 
 ```lisp
-(cl-agent.kernel:strip-json-fences text)   ; 剥离 ```json ... ``` 围栏，可单独使用
+(cl-agent.core:strip-json-fences text)   ; 剥离 ```json ... ``` 围栏，可单独使用
 ```
 
 要「不符合 schema 就带着校验错误让模型重新输出」，给 kernel 挂
@@ -471,14 +551,14 @@ kernel 极简：**没有 memory 字段**——记忆是 filter，不是 kernel �
     \"required\":[\"name\",\"population\"]}")
 
 (defvar *validating-kernel*
-  (cl-agent.kernel:build-kernel
+  (cl-agent.core:build-kernel
     :model *model*
-    :filters (list (cl-agent.kernel:validation-turn-filter
-                    (cl-agent.kernel:structured-output-validate-fn
+    :filters (list (cl-agent.core:validation-turn-filter
+                    (cl-agent.core:structured-output-validate-fn
                      *schema* :parse-fn #'cl-agent.core:json-parse)
                     :max-retries 2))))
 
-(cl-agent.kernel:chat *validating-kernel*
+(cl-agent.core:chat *validating-kernel*
   (:user "用 JSON 给出东京的信息")
   (:call :entity))
 ```
@@ -499,6 +579,8 @@ kernel 极简：**没有 memory 字段**——记忆是 filter，不是 kernel �
                                      ; :serial → 整批顺序；异常按三类分类路由
 (invoke-turn kernel turn-request)    ; :turn 链 → run-tool-loop → turn-result
 (run-tool-loop kernel turn-request)  ; 工具循环本体（:turn 链的 terminal，不是 filter）
+(resume-turn kernel loop-state decision &key payload)
+                                     ; 从暂停点续跑（见「HITL：暂停与续跑」）
 ```
 
 `run-tool-loop` 每轮：构建 prompt（messages + kernel tools，与调用方 options
@@ -507,13 +589,16 @@ kernel 极简：**没有 memory 字段**——记忆是 filter，不是 kernel �
 `turn-result(:completed)`。
 
 - 循环上限取自 settings `:max-tool-iterations`（缺省 10），超限发
-  `cl-agent.chat:max-tool-iterations-exceeded-error`
+  `cl-agent.core:max-tool-iterations-exceeded-error`
 - `:return-direct` 工具：整批都声明时短路，工具结果直接成为最终答案，不回传模型
 - `kernel-tool-manager` 非 nil 时经 `execute-tool-calls` 协议执行，否则走
   `invoke-tool-batch`
 - 模型报出不存在的工具名时不中断循环：`batch.lisp` 把 `tool-not-found-error`
   转成 `:semantic` 错误结果，`tool-result->text` 渲染为「错误：找不到工具 xxx」
   回传模型自纠
+- `kernel-tool-gate` 非 nil 时，每批工具执行**前**过一遍 gate；判 `:pause`
+  则返回 `turn-result(:paused)`，工具一个都不执行（见
+  [HITL：暂停与续跑](#hitl暂停与续跑kernel-原语)）
 
 ### ToolCallingManager（实现）
 
@@ -522,7 +607,7 @@ eligibility、`:tool` filter 链都仍在 kernel 侧，manager 只决定调度�
 这是本项目**唯一**的 ToolCallingManager（chat 层那套旧的已删除）。
 
 ```lisp
-(cl-agent.kernel:execute-tool-calls manager kernel response options)
+(cl-agent.core:execute-tool-calls manager kernel response options)
 ;; options plist：(:tool-context ctx ...)
 ;; → tool-execution-result plist：(:messages ... :records ... :context ... :errors ...)
 (make-tool-execution-result &key messages records context errors)
@@ -533,9 +618,10 @@ eligibility、`:tool` filter 链都仍在 kernel 侧，manager 只决定调度�
 (default-tool-calling-manager)                ; = virtual-thread
 ```
 
-> 签名只有这一个：`(manager kernel response options)`。曾经 `cl-agent.chat`
-> 还有一套 `(manager prompt response)` 的同名泛型函数，逼得 kernel `shadow`
-> 这个符号；那套已整体删除，`execute-tool-calls` 现在唯一属于 `cl-agent.kernel`。
+> 签名只有这一个：`(manager kernel response options)`。合并前的
+> `cl-agent.chat` 还有一套 `(manager prompt response)` 的同名泛型函数，
+> 逼得 kernel `shadow` 这个符号；那套已整体删除，`execute-tool-calls`
+> 现在唯一属于 `cl-agent.core`。
 >
 > `thread-pool-tool-calling-manager` 首版行为与 virtual-thread 相同
 > （lparallel 内部已是线程池），`pool-size` 暂未绑定独立 kernel。
@@ -606,7 +692,7 @@ forbidden → `:environment`）；兜底 `:semantic`（保守，不重试）。
 ;; parse-fn  如 #'cl-agent.core:json-parse；缺省 nil = 拿不到结构化值，一律放行
 ;; 判定：空文本 → 不合格；无 parse-fn → 放行；有 parse-fn 但解析失败 → 不合格；
 ;;      解析成功 → 按 schema 校验，错误逐条回喂
-(cl-agent.kernel:strip-json-fences text)  ; 剥离 ```json ... ``` 围栏
+(cl-agent.core:strip-json-fences text)  ; 剥离 ```json ... ``` 围栏
 
 ;; 6. re-reading-filter (:turn) —— 对标 ReReadingAdvisor（RE2）
 (re-reading-filter &key template)
@@ -650,15 +736,181 @@ forbidden → `:environment`）；兜底 `:semantic`（保守，不重试）。
 
 > `:token-xform` 在流式 terminal 内组装，**不经 `build-chain`**。
 
+## cl-agent.client —— SimpleAgent（有状态对话 + HITL）
+
+面向应用的易用层：一个有状态的 agent 对象，管住会话、可观测性、错误归一化
+与人工审批。它是 kernel 的薄封装——`agent-chat` 最终落到 `kernel-chat`。
+
+agent **不自己存历史**：历史仍由 core 的 `memory-filter` 按 conversation-id
+管，agent 只持 conversation-id + 轻量控制状态。
+
+### make-agent
+
+```lisp
+(make-agent &key model system options tools memory conversation-id
+                 callbacks kernel settings)
+;; model           chat-model 实例（不给 :kernel 时必填）
+;; system          默认系统提示
+;; options         默认 chat-options
+;; tools           工具符号列表
+;; memory          chat-memory store；缺省 = 新建滑动窗口记忆；
+;;                 nil = 无记忆（每轮独立）
+;; conversation-id 会话 ID（缺省自动生成）
+;; callbacks       回调 plist（见下）
+;; settings        kernel settings alist，如 '((:max-tool-iterations . 10))
+;; kernel          预构建 kernel（要挂 filter 时用这个）
+
+(agent-id a) (agent-kernel a) (agent-memory a) (agent-conversation-id a)
+(agent-callbacks a) (agent-turn-count a)
+```
+
+> **本层不接受 `:filters`**——传了会**直接报错**并给出迁移指引（而不是静默
+> 忽略）。agent 只暴露 `:callbacks`；要挂 filter 请自建 kernel 后经 `:kernel`
+> 传入。这条边界是刻意的：简单层一旦开始转发 filter，就会慢慢长成第二个
+> kernel——本仓库刚删掉的 ChatClient 正是这么烂掉的。
+>
+> 给 `:kernel` 时，`memory-filter` 由**调用方自己**负责挂载
+> （`make-agent` 不改动预构建 kernel 的 filters）；`:memory` 只是告诉 agent
+> 去哪读 `agent-history`。
+
+线程安全：单个 agent 实例**不可**被多线程并发 `agent-chat`。每个 agent 绑定
+单一对话线程；要并发就按会话各建一个 agent（共享同一个持久 store、
+各自 `:conversation-id` 即可隔离）。
+
+### 对话
+
+```lisp
+(agent-chat agent message &key options tools)
+;; → 回复文本；出错时 → (values nil result)
+(agent-chat-result agent message &key options tools)   ; → agent-result（**不抛异常**）
+(agent-history agent)      ; → 消息列表（无记忆时 nil）
+(agent-reset agent)        ; 清空会话
+```
+
+### agent-result（归一化，不发条件）
+
+```lisp
+(agent-result-status r)        ; :completed | :paused | :cancelled | :error
+(agent-result-text r)          ; :completed 时的回复文本
+(agent-result-response r)      ; chat-response
+(agent-result-error r)         ; :error 时的条件对象
+(agent-result-pending-tool r)  ; :paused 时待审批的工具
+(agent-result-pause-reason r)  ; :paused 的原因
+```
+
+| status | 含义 |
+|---|---|
+| `:completed` | 正常完成 |
+| `:paused` | 工具待审批（`:on-tool-call` 返回了 `:interrupt`） |
+| `:cancelled` | 被 filter 短路（如 safeguard 命中敏感词） |
+| `:error` | LLM/工具/其它异常 |
+
+> core 的 `chat` 宏出错就抛条件；agent 层把它归一化成结果对象。理由：
+> agent 是面向应用的入口，一次 LLM 调用失败是**预期内**的常态（网络抖动、
+> 限流、模型抽风），调用方该拿到状态而不是被条件掀翻。
+
+### callbacks
+
+```lisp
+(make-agent :model m :tools '(get-weather)
+            :callbacks (list :on-turn-start  (lambda (agent) ...)
+                             :on-turn-end    (lambda (agent result) ...)
+                             :on-turn-error  (lambda (agent condition) ...)
+                             :on-tool-call   (lambda (name args) ...)
+                             :on-tool-result (lambda (name text) ...)
+                             :on-interrupt   (lambda (agent result) ...)
+                             :on-resume      (lambda (agent decision) ...)))
+```
+
+| 回调 | 签名 | 时机 |
+|---|---|---|
+| `:on-turn-start` | `(agent)` | 每轮开始前 |
+| `:on-turn-end` | `(agent result)` | 每轮正常结束 |
+| `:on-turn-error` | `(agent condition)` | 该轮出异常 |
+| `:on-tool-call` | `(name args)` | 工具**执行前**；返回值可触发 HITL（见下） |
+| `:on-tool-result` | `(name text)` | 工具执行后 |
+| `:on-interrupt` | `(agent result)` | 轮次因待审批而暂停 |
+| `:on-resume` | `(agent decision)` | `agent-resume` 续跑前 |
+
+**回调抛异常不会掀翻整轮对话**——它们是观测手段，不是控制流，异常记进日志
+后忽略。`:on-tool-call` 即便抛异常也按「没表态」处理（放行）。
+
+内部实现：`:on-tool-result` 桥接为一个 `:tool` filter（结果只能在执行后拿到），
+`:on-tool-call` 桥接为 kernel 的 `tool-gate`（要能在执行**前**否决）。
+
+### 人工审批（HITL）
+
+**配 `:on-tool-call` 让它返回 `(:interrupt . 原因)` 即启用**——不是另一套
+机制，就是回调的返回值：
+
+```lisp
+(make-agent :model m :tools '(rm-file)
+            :callbacks (list :on-tool-call
+                             (lambda (name args)
+                               (when (string= name "rm_file")
+                                 (cons :interrupt
+                                       (format nil "删除 ~A 需审批"
+                                               (getf args :path)))))))
+```
+
+`:on-tool-call` 的返回值 → gate 判决：
+
+| 返回值 | 判决 |
+|---|---|
+| `nil` / 其它 | 放行 |
+| `:interrupt` | 暂停待审批（无原因） |
+| `(:interrupt . 原因)` 或 `(:interrupt 原因)` | 暂停，并带上原因 |
+
+```lisp
+(agent-paused-p agent)      ; → t / nil
+(agent-pending-tool agent)  ; → 当前待审批的 tool-call（未暂停时 nil）
+
+(agent-resume agent decision &key payload)   ; → agent-result（**不抛异常**）
+;; :approved  批准。payload (:args 新参数) → 编辑后批准（用新参数执行）
+;; :rejected  拒绝。payload (:message 理由) → 「已拒绝执行：<理由>」回模型
+;; :reply     答复即结果（ask-user 语义）。payload (:message 答复) **必填**
+;;            → pending 工具不执行，答复直接作为它的结果回模型
+```
+
+**关键不变式：暂停时工具一个都没执行。** 续跑后可能**再次** `:paused`
+（本批还有别的敏感工具，或后续轮次又触发）——按状态循环处理，别假设
+resume 一次就到底。
+
+未处于暂停状态时调 `agent-resume` 会报错（用 `agent-paused-p` 先判）。
+
 ## 迁移
+
+### 包合并（`cl-agent.http` / `.chat` / `.kernel` → `cl-agent.core`）
+
+三个包已合并为一个 `cl-agent.core`。机械改名，逐一对应：
+
+| 旧 | 新 |
+|---|---|
+| `cl-agent.kernel:X` | `cl-agent.core:X` |
+| `cl-agent.chat:X` | `cl-agent.core:X` |
+| `cl-agent.http:X` | `cl-agent.core:X` |
+| 昵称 `cla.kernel` / `cla.chat` / `cla.http` | `cla.core` |
+| `cl-agent.kernel:build-kernel` | `cl-agent.core:build-kernel` |
+| `cl-agent.chat:deftool` | `cl-agent.core:deftool` |
+| `cl-agent.http:http-request` | `cl-agent.core:http-request` |
+| `:shadowing-import-from` 相关写法 | **不再需要**，整体删掉 |
+
+照旧包名写的代码会直接撞上
+`Package CL-AGENT.KERNEL does not exist`。
 
 ### 从 ChatClient 迁移
 
-`cl-agent.client` **整包已删除**——它是 Spring AI 的 ChatClient + Builder +
+**ChatClient 移植层已整体删除**——它是 Spring AI 的 ChatClient + Builder +
 fluent RequestSpec 移植。Builder 与链式 spec 是 Java 的表达习惯：在 Lisp 里
 `build-kernel` 的关键字参数 + 声明式 `chat` 宏覆盖同样的地面，且少一层。
 
-以下符号**不再存在**：`cl-agent.client`（包本身）、`make-kernel-client`、
+> **注意：`cl-agent.client` 这个包名被复用了。** 它曾是 ChatClient 移植层
+> （已删），**现在是 SimpleAgent**（见
+> [cl-agent.client](#cl-agentclient--simpleagent有状态对话--hitl)）。
+> 也就是说包还在、名字还在，但里面是完全不同的东西——旧的 ChatClient
+> 符号一个都不剩。
+
+以下符号**不再存在**：`make-kernel-client`、
 `make-chat-client`、`chat-client`、`chat-client-builder`、`default-system`、
 `default-options`、`default-tools`、`build-client`、`client-prompt`、
 `prompt-system`、`prompt-user`、`prompt-add-messages`、`prompt-with-options`、
@@ -668,7 +920,11 @@ fluent RequestSpec 移植。Builder 与链式 spec 是 Java 的表达习惯：�
 `make-client-response`、`context-get`、`context-set`、`client-kernel`、
 `client-default-system`、`client-default-options`、`client-default-tools`。
 
-`chat` 宏**幸存**，语法原样可用——只是符号现在来自 `cl-agent.kernel`。
+`chat` 宏**幸存**，语法原样可用——只是符号现在来自 `cl-agent.core`。
+
+要「有状态对话 + 一个对象管住会话」的那种手感（ChatClient 常见用法），
+现在用 [SimpleAgent](#cl-agentclient--simpleagent有状态对话--hitl)：
+`(make-agent :model m :system "..." :tools '(...))` + `(agent-chat a "...")`。
 
 | 旧（ChatClient） | 新（Kernel） |
 |---|---|
@@ -716,27 +972,31 @@ Advisor 体系已整体删除。以下符号**不再存在**：`defadvisor`、`a
 ### 从 kernel:tool-response 迁移（载体改名）
 
 kernel 工具链的响应载体改名为 `tool-result`，与 turn 链的 `turn-request` /
-`turn-result` 对称，并借此消除与 `cl-agent.chat:tool-response` 的撞名。
+`turn-result` 对称，并借此消除与协议消息层 `tool-response` 的撞名
+（撞名消失后三个包才得以合并）。
 
 | 旧（已不存在） | 新 |
 |---|---|
-| `cl-agent.kernel:tool-response`（类） | `cl-agent.kernel:tool-result` |
-| `cl-agent.kernel:make-tool-response` | `cl-agent.kernel:make-tool-result` |
+| `cl-agent.kernel:tool-response`（类） | `cl-agent.core:tool-result` |
+| `cl-agent.kernel:make-tool-response` | `cl-agent.core:make-tool-result` |
 | `(make-tool-response :result X)` | `(make-tool-result :value X)`——**初始参数由 `:result` 改为 `:value`** |
 | `tool-response-result` | `tool-result-value` |
 | `tool-response-writes` | `tool-result-writes` |
 | `tool-response-error` | `tool-result-error` |
 
 `tool-request` / `make-tool-request` / `tool-request-function` /
-`tool-request-args` / `tool-request-context` **不变**。
-新增导出 `tool-result->text`。
+`tool-request-args` / `tool-request-context` **不变**（前缀改为
+`cl-agent.core:`）。新增导出 `cl-agent.core:tool-result->text`。
 
-`cl-agent.chat:tool-response` / `make-tool-response` / `tool-response-message`
-**不变**——那是协议消息层的另一个东西。
+> **别混淆**：`cl-agent.core:tool-response` / `make-tool-response` /
+> `tool-response-message` / `tool-response-text` **依然存在**——那是**协议消息层**
+> 的值对象（id/name/text），放进 role=:tool 的消息发回模型，与 kernel 执行链的
+> `tool-result`（value/writes/error）是不同层的不同东西。合并前它属于
+> `cl-agent.chat`，现在同在 `cl-agent.core`，两者不再同名，可以共存。
 
 ### 从 chat 层 ToolCallingManager 迁移（已删除）
 
-以下 `cl-agent.chat` 符号**不再存在**：`tool-calling-manager`、
+以下旧 `cl-agent.chat` 符号**不再存在**：`tool-calling-manager`、
 `default-tool-calling-manager`、`make-default-tool-calling-manager`、
 `execute-tool-calls`（`(manager prompt response)` 签名）、
 `execute-one-tool-call`、`process-tool-execution-error`、
@@ -758,7 +1018,7 @@ kernel 工具链的响应载体改名为 `tool-result`，与 turn 链的 `turn-r
 | 特化 `process-tool-execution-error` | `:tool` filter，或读 `tool-result-error` 的 `:class` |
 | `:inherit-specials` / `manager-inherit-specials` | `cl-agent.core:with-inherited-specials` + `*inherited-special-variables*` |
 
-> **注意**：`cl-agent.kernel` 也有一个 `default-tool-calling-manager`，但它是
+> **注意**：`cl-agent.core` 现在也有一个 `default-tool-calling-manager`，但它是
 > **零参工厂函数**（返回 virtual-thread manager），与已删除的 chat 层同名
 > **类**无关。
 
