@@ -19,7 +19,7 @@
 三模块分层（对标 clj-agent 的 core / provider / client）：
 
 ```
-cl-agent.core（框架本体，单包 458 导出）
+cl-agent.core（框架本体，单包 477 导出）
   ├── Filter CLOS 类（四钩子: :tool/:chat/:turn/:token-xform）
   ├── build-chain（洋葱折叠, 闭包仅下游, 递归重入免费）
   ├── Kernel（model/tools/filters/settings/tool-manager +
@@ -339,7 +339,7 @@ cl-agent.client（面向应用的易用层，v10 新增）
 
 ### 包合并：三模块分层 ✅
 
-- [x] **http / chat / kernel → cl-agent.core**（458 导出），对齐 clj-agent 的
+- [x] **http / chat / kernel → cl-agent.core**（477 导出），对齐 clj-agent 的
       core / provider / client 三模块
 - [x] **llm 保持独立**（provider 可插拔）；`chat` 与 core 的宏撞名 → llm `:shadow` 之
 - [x] **合并前先清死代码**（否则正面撞名 15 处，SBCL 调用图坐实全是死的）：
@@ -417,44 +417,106 @@ cl-agent.client（面向应用的易用层，v10 新增）
 
 ## 待完成
 
-### 待查：batch 故障路由名不副实（文档审计时发现，未改代码）
+> 排序原则：**先修「说了但没做」的**——它们比缺功能更有害：
+> 用户照着注释/文档用，然后撞墙或静默受损。本轮已踩到过一串同类
+> （documentation.lisp、alist-get、internal-tool-execution-enabled、
+> qa-turn-filter、structured-output-validate-fn…），代价都一样。
 
-> `kernel/batch.lisp` 的文件头注释承诺一套策略矩阵，但实现没兑现。
-> 已在 docs 里如实标为「已知偏差」，代码待修。
+---
 
-- [ ] **`:retry` / 退避从不触发**：注释说 `:transient` + `:retry` →
-      指数退避 3 次、`:environment` → 暂停。`invoke-tool-batch` 从不读
-      `tool-callback-retry-p`、不退避、不暂停——三类都被转成文本。
-      `deftool` 记了 `(:retry t)` 但 kernel 批路径不消费。
-- [ ] **`classify-tool-error` 基本被绕过**：`tool-apply-terminal` 捕获
-      所有 `error` 硬编码 `:class :semantic`；`classify-tool-error` 只在
-      `execute-batch-parallel` 的 future 包装里调用一次，故实际只分类
-      「逃出 `:tool` filter 的错误」（如 `timeout-filter`）。工具体内
-      signal 的 `transient-tool-failure` **不会**被归为 `:transient`。
-      建议：让 `tool-apply-terminal` 走 `classify-tool-error`。
+### P0：文档全线过时 ✅（已修）
 
-### 待查：其他已在文档标注的实现缺口
+> 包合并 + 新增 cl-agent.client 后没同步文档，206 处引用已删除的包——
+> 照 README 抄一行就撞 `Package CL-AGENT.KERNEL does not exist`。
+> **这是本轮改动造成的回归，已全部修复。**
 
-- [ ] **`tool-search-filter` 是半成品**：`search_tools` 内联工具没接线，
-      只有 filter 侧的系统消息改写。
-- [ ] **`thread-pool-tool-calling-manager` 不理 `pool-size`**：首版直接
-      委托 virtual-thread manager。
-- [ ] **`stream-content` 不是真流式**：降级为一次性同步 chunk；真 SSE
-      只在 `chat-model-stream`。invoke-chat-stream 仍待实现（见下）。
+- [x] **13 个文档全量更新**：README（我改写并逐段实跑）、README_EN、
+      core README ×2、docs/API ×2、docs/QUICKSTART ×2、docs/tool-calling ×2、
+      llm README ×2、mock README ×2。已删除包的引用只剩在迁移表的「旧」列。
+- [x] **SimpleAgent 上文档**：README 与 QUICKSTART 都改为 SimpleAgent 打头
+      （对标 clj-agent 的「方式一：推荐入门」），kernel 降为「完全控制」。
+      API 加 `cl-agent.client` 章。
+- [x] **HITL 上文档**：pause/resume、tool-gate、三种 decision、
+      「暂停时工具一个都不执行」的不变量。
+- [x] **迁移表**：Advisor→Filter、ChatClient→Kernel/SimpleAgent、包合并
+      三张表；并写明 `cl-agent.client` 这个名字被**复用**了。
+- [x] **过时的 shadowing 建议全部反转**：合并后 `(:use :cl-agent.core
+      :cl-agent.client)` 无需任何 shadowing。
+- [x] 所有片段实跑验证（README 一遍、docs 一遍）
 
-### Kernel 集成深化
+顺带修掉：
 
-- [ ] **:writes + :state-slots MapReduce 契约**（对标 clj-agent 的
-      context/apply-writes 屏障折叠）
-- [ ] **Streaming 通路**：invoke-chat-stream + :token-xform 组装
+- [x] **`agent-result` 类型没导出**（子代理审计发现）：只导出了访问器，
+      用户无法 `(typep r 'cl-agent.client:agent-result)`。已补导出
+      `agent-result` + `agent-result-p`。
+- [x] **QUICKSTART 的 ASDF registry 漏了 `client/`**：照抄会导致
+      `(asdf:load-system :cl-agent)` 失败（cl-agent.asd 依赖 cl-agent-client）。
+- [x] **core/README 文件树列了已删的 `types.lisp`**、漏了
+      `dependency-injection.lisp`。
 
-### 既有遗留（非本轮引入）
+### P1：注释在撒谎 —— 承诺了但代码没做
+
+#### 1.1 `thread-pool-tool-calling-manager` 的限流是假的
+
+> ToolCallingManager 的定位是 **kernel 级绑定的 Tool Call 执行模型与
+> 隔离机制**，三个实现 = 三种执行/隔离策略。thread-pool 的存在意义
+> 就是**限流隔离**——而它现在根本没实现。
+
+- [ ] docstring 写着「用固定大小 lparallel kernel 调度…适合需要限流的
+      场景」，有 `pool-size` 槽（initform 4）+ `tcm-pool-size` 读取器，
+      但 `execute-tool-calls` **直接委托 virtual-thread manager**，
+      pool-size 完全被忽略（`tool-calling-manager.lisp`）。
+      后果：用户配 `:pool-size 4` 以为限流到 4 并发，实际无限制——
+      **可能直接打爆下游**。三种执行模型实际只有两种。
+      修法：绑定独立的 lparallel kernel（`make-kernel :worker-count pool-size`），
+      用完 `end-kernel`；注意 kernel 的生命周期（chat 层旧
+      concurrent-manager 有 `ensure-manager-kernel` / `shutdown` 可参考）。
+
+#### 1.2 `batch.lisp` 的故障路由策略矩阵名不副实
+
+- [ ] 文件头注释白纸黑字的矩阵：`:transient` + `:retry` → 指数退避 3 次、
+      `:environment` → 暂停。实际 `invoke-tool-batch` 从不读
+      `tool-callback-retry-p`、不退避、不暂停——三类**全部**转成文本。
+      `deftool` 记了 `(:retry t)` 但 kernel 批路径没人消费。
+- [ ] 顺带：`:environment` → 暂停 属于 HITL 的 `:env-retry`（环境类暂停）。
+      本轮只做了审批类暂停，env-retry 未做，且它依赖下面的 1.3。
+
+#### 1.3 `classify-tool-error` 基本被绕过
+
+- [ ] `tool-apply-terminal` 捕获所有 `error` 硬编码 `:class :semantic`；
+      `classify-tool-error` 只在 `execute-batch-parallel` 的 future 包装里
+      调用一次，故实际只分类「逃出 `:tool` filter 的错误」（如
+      timeout-filter）。工具体内 signal 的 `transient-tool-failure`
+      **不会**被归为 `:transient`——三故障分类只在纸面上成立。
+      修法：让 `tool-apply-terminal` 走 `classify-tool-error`。
+      注意：这是 1.2 的前置（没有正确分类就谈不上按类路由）。
+
+---
+
+### P2：半成品
+
+- [ ] **`tool-search-filter`**：`search_tools` 内联工具没接线，只有 filter
+      侧的系统消息改写——渐进式披露的「模型主动搜工具」那半没有。
+- [ ] **真流式通路**：`invoke-chat-stream` + `:token-xform` 组装未实现。
+      `kernel-chat-stream` 现在是同步降级（整段文本一个 chunk）。
+      真 SSE 只存在于 `chat-model-stream`（已验证：MiniMax 19-23 分片）。
+
+---
+
+### P3：未做的设计
+
+- [ ] **`:writes` + `:state-slots` MapReduce 契约**（对标 clj-agent 的
+      context/apply-writes 屏障折叠）。`tool-result` 已有 `writes` 槽但无人消费。
+
+---
+
+### 既有遗留（非本轮引入，不建议短期推进）
 
 - [ ] **A2A / MCP 子系统（`protocols/` 目录 + `cl-agent.protocols` 包）**：
       未完成且**加载即报错**——asd 列了 `mcp.lisp` / `mcp-client.lisp` /
-      `mcp-server.lisp` 三个文件，但目录里根本不存在，
+      `mcp-server.lisp`，目录里根本不存在，
       `(asdf:load-system :cl-agent-protocols)` 直接
       `Failed to find the TRUENAME of .../protocols/mcp.lisp`。
-      它不在主构建里，故平时不影响。不建议短期推进。
-      注：与已并入 core 的 `cl-agent.core.protocols` 毫无关系——
-      后者只是 ID/时间戳工厂，同名纯属巧合（也正是它该改名的理由之一）。
+      不在主构建里，平时不影响。
+      注：与已并入 core 的 `cl-agent.core.protocols`（ID/时间戳工厂）
+      毫无关系，同名纯属巧合。
