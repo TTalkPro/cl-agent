@@ -941,3 +941,28 @@ thread-pool(1) + HITL 暂停的组合下，续跑批并发不受限。"
                   :tool-context (list :conversation-id "conv-once"))))
     (is (= 1 seen-count)
         "instruction 应只追加一次，实际 ~D 次" seen-count)))
+
+;;; ============================================================
+;;; 捉虫回归（2026-07-17 探针发现的 4 个真 bug）
+;;; ============================================================
+
+(test stream-guard-catches-options-tools
+  "流式守卫必须拦下 options 里的 tool-callbacks——不止 :tools 参数。
+回归：守卫此前只查 (getf plist :tools) 与 kernel-tools，漏了请求级
+:options 和 kernel 默认 :options 携带的工具，配 :options 的流式请求
+直接穿过守卫，模型发 tool_call 却无人执行（正是守卫本该堵的洞）。"
+  (let ((opts (cl-agent.core:make-chat-options
+               :tool-callbacks (cl-agent.core:resolve-tool-callbacks '(mt-echo)))))
+    ;; 请求级 :options 带工具
+    (signals error
+      (cl-agent.core:kernel-chat-stream (stream-kernel '("x"))
+                                        (lambda (d) (declare (ignore d)))
+                                        :user "hi" :options opts))
+    ;; kernel 默认 :options 带工具
+    (let ((k (cl-agent.core:build-kernel
+              :model (cl-agent.core:make-provider-chat-model
+                      (make-instance 'stream-provider :chunks '("x")))
+              :options opts)))
+      (signals error
+        (cl-agent.core:kernel-chat-stream k (lambda (d) (declare (ignore d)))
+                                          :user "hi")))))

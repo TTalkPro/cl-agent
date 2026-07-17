@@ -124,13 +124,22 @@
          (ctx (getf plist :context)))
     ;; 工具会被发给模型 → 模型可能发 tool_call → 但这条路径不跑工具循环。
     ;; 宁可直接拦下：静默丢掉工具执行，用户只会看到一段没头没尾的文本。
-    (let ((tools (or (getf plist :tools) (kernel-tools kernel))))
-      (when tools
+    ;;
+    ;; 工具有**三个**来源，缺一个都会漏：请求级 :tools、kernel :tools、
+    ;; 以及 options 里的 tool-callbacks（请求级 :options 或 kernel 默认
+    ;; :options 都可能带）。此前只查前两个，配 :options 携带工具的请求
+    ;; 直接穿过守卫——正是这道守卫本该堵死的静默失效。
+    (let ((tool-count (+ (length (getf plist :tools))
+                         (length (kernel-tools kernel))
+                         (length (and options
+                                      (cl-agent.core:chat-options-tool-callbacks
+                                       options))))))
+      (when (plusp tool-count)
         (error "kernel-chat-stream 不支持工具循环（它是单次流式调用），~@
-                但本次会把 ~D 个工具发给模型——模型若发 tool_call 将无人执行。~@
+                但本次会把工具发给模型——模型若发 tool_call 将无人执行。~@
                 带工具的请求请用 kernel-chat / (chat k ...)；~@
-                只要流式就用一个不带 :tools 的 kernel。"
-               (length tools))))
+                只要流式就用一个不带任何工具（含 :options 里的 tool-callbacks）~@
+                的 kernel。")))
     ;; 把 context 折进 options 的 tool-context，:chat filter（memory 等）才读得到
     (let* ((options (fold-context-into-tool-context
                      (or options (cl-agent.core:make-chat-options)) ctx))
