@@ -300,12 +300,18 @@ some+filter 那种两阶段扫描。"
           for response = (multiple-value-bind (r eff) (invoke-chat kernel prompt)
                            (setf exec-options (cl-agent.core:prompt-options eff))
                            r)
-          do (when (> iter max-iter)
-               (error 'cl-agent.core:max-tool-iterations-exceeded-error
-                      :limit max-iter))
-             (cond
+          do (cond
                ((and (cl-agent.core:chat-response-has-tool-calls-p response)
                      (funcall eligibility response context))
+                ;; 上限检查放在**要执行工具**这个分支里，而不是循环顶部：
+                ;;   1. 无工具的最终答复轮不受限——否则一个正好在边界给出
+                ;;      答复的对话会被误判成「超限」而非正常返回。
+                ;;   2. 用 >= 而非 >：max-iter=N 就是「最多执行 N 轮工具」。
+                ;; 此前两处都错：检查在 cond 外（无工具轮也计入并多调一次
+                ;; 模型），且用 >（又松一层）——上限 3 实际调了 5 次模型。
+                (when (>= iter max-iter)
+                  (error 'cl-agent.core:max-tool-iterations-exceeded-error
+                         :limit max-iter))
                 (let ((tool-calls (cl-agent.core:chat-response-tool-calls response)))
                   ;; HITL 闸门：在**执行之前**评估。判 :pause 就整批不执行，
                   ;; 把续跑所需的一切装进 loop-state 交出去。

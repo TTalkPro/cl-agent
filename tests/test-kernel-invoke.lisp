@@ -966,3 +966,33 @@ thread-pool(1) + HITL 暂停的组合下，续跑批并发不受限。"
       (signals error
         (cl-agent.core:kernel-chat-stream k (lambda (d) (declare (ignore d)))
                                           :user "hi")))))
+
+(defclass always-tool-provider ()
+  ((count :initform 0 :accessor atp-count))
+  (:documentation "永远回 tool_call 的 provider，用来数模型被调多少次"))
+(defmethod cl-agent.core:llm-chat ((p always-tool-provider) messages
+                                   &key &allow-other-keys)
+  (declare (ignore messages))
+  (incf (atp-count p))
+  (let ((h (make-hash-table :test #'equal)))
+    (setf (gethash "id" h) "1")
+    (cl-agent.core:make-llm-response
+     :content "" :finish-reason :tool-call :model "loop"
+     :tool-calls (list (list :id (format nil "c~D" (atp-count p))
+                             :name "mt_echo" :arguments h)))))
+
+(test max-tool-iterations-exact-count
+  "max-tool-iterations=N 恰好执行 N 轮工具，第 N+1 次探测发现模型仍
+要工具即报错。回归：此前检查在循环体外且用 >（而非 >=），上限 3
+实际调了 5 次模型（多执行 1 轮 + 多探测 1 次）。"
+  (let* ((provider (make-instance 'always-tool-provider))
+         (k (cl-agent.core:build-kernel
+             :model (cl-agent.core:make-provider-chat-model provider)
+             :tools '(mt-echo)
+             :settings '((:max-tool-iterations . 2)))))
+    (signals cl-agent.core:max-tool-iterations-exceeded-error
+      (cl-agent.core:invoke-turn
+       k (cl-agent.core:make-turn-request (list (cl-agent.core:user-message "go")))))
+    ;; 2 轮工具执行（iter 0,1）+ 第 3 次探测（iter 2）触发 error = 恰 3 次
+    (is (= 3 (atp-count provider))
+        "上限 2 → 模型恰调 3 次（2 轮执行 + 1 次探测），不是旧的 4 次")))
