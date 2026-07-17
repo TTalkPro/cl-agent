@@ -1040,3 +1040,44 @@ return-direct 工具后又多调一次模型，拿到的是不该出现的续写
                   (cl-agent.core:chat-response-text
                    (cl-agent.core:turn-result-response final)))
           "最终答复是工具结果本身，不是模型续写"))))
+
+(test memory-crop-keeps-tool-pairs-intact
+  "memory 窗口裁剪不得切开 assistant(tool_use)/tool(tool_result) 对——
+否则序列以孤儿 tool 消息开头，真实 provider 400。回归：此前纯数量
+subseq，window 落在对中间就产生孤儿 tool 开头。"
+  (let* ((mem (cl-agent.core:make-message-window-chat-memory))
+         (conv "crop"))
+    ;; 历史：user / assistant(tool_use) / tool / assistant（4 条）
+    (cl-agent.core:memory-add mem conv (cl-agent.core:user-message "问题"))
+    (cl-agent.core:memory-add
+     mem conv (cl-agent.core:assistant-message
+               "" :tool-calls (list (cl-agent.core:make-tool-call
+                                     :id "t1" :name "f" :arguments nil))))
+    (cl-agent.core:memory-add
+     mem conv (cl-agent.core:tool-response-message
+               (list (cl-agent.core:make-tool-response :id "t1" :name "f" :text "r"))))
+    (cl-agent.core:memory-add mem conv (cl-agent.core:assistant-message "答"))
+    (let (sent)
+      (let* ((spy (cl-agent.core:make-filter
+                   :spy :chat
+                   (lambda (prompt chain)
+                     (declare (ignore chain))
+                     (setf sent (mapcar #'cl-agent.core:message-role
+                                        (cl-agent.core:prompt-messages prompt)))
+                     (cl-agent.core:make-chat-response
+                      (cl-agent.core:make-generation
+                       (cl-agent.core:assistant-message "ok") :finish-reason :stop)))))
+             (k (cl-agent.core:build-kernel
+                 :model nil
+                 :filters (list (cl-agent.core:memory-filter mem :window 3) spy))))
+        (cl-agent.core:kernel-chat k :user "新" :context (list :conversation-id conv))
+        ;; window=3 的纯裁剪会切成 (tool assistant user)——孤儿 tool 开头。
+        ;; 修复后起点前移到 user，首条非 tool。
+        (is (not (eq :tool (first sent)))
+            "裁剪后首条不是孤儿 tool 消息")
+        ;; 任意 tool 消息前必有配对的 assistant(tool_use)
+        (loop for (role . rest) on sent
+              for i from 0
+              when (eq role :tool)
+                do (is (find :assistant (subseq sent 0 i))
+                       "tool 消息前存在 assistant(tool_use)"))))))

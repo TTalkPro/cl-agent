@@ -11,6 +11,25 @@
 
 (in-package #:cl-agent.core)
 
+(defun crop-history-to-window (history window)
+  "把 HISTORY 裁到最后 WINDOW 条，但起点**前移到最近的 user 消息**。
+
+  为什么不能纯按数量 subseq：历史里 assistant(tool_use) 与其
+  tool(tool_result) 是**成对**的，纯数量裁剪可能切在对中间——留下
+  以孤儿 tool_result 开头的序列，Anthropic / MiniMax 直接 400
+  （tool_result 必须紧跟 tool_use；且首条须为 user）。
+
+  策略：从数量边界往更早退，退到最近一条 user 消息为止。宁可多带几条
+  历史（略超 window），也不发非法序列。history 不含 system——filter 存
+  历史时已跳过，展开时 system 单独置顶。"
+  (if (<= (length history) window)
+      history
+      (let ((start (- (length history) window)))
+        (loop while (and (> start 0)
+                         (not (user-message-p (nth start history))))
+              do (decf start))
+        (subseq history start))))
+
 (defun memory-filter (store &key (window 20))
   "创建 memory-filter（:chat 链首位，循环内）。
 
@@ -62,9 +81,9 @@
                    ;; window 只裁历史，不碰 system——否则长对话里 system
                    ;; 会先被裁掉，模型直接失忆人设。
                    (let* ((history (cl-agent.core:memory-messages store conv-id))
-                          (cropped (if (> (length history) window)
-                                       (subseq history (- (length history) window))
-                                       history))
+                          ;; 按 user 边界裁剪——纯数量 subseq 会切开
+                          ;; tool_use/tool_result 对（见 crop-history-to-window）
+                          (cropped (crop-history-to-window history window))
                           (new-prompt (cl-agent.core:prompt-copy
                                        prompt :messages (append system-msgs cropped)))
                           ;; 调下游（LLM）
