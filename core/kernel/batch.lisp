@@ -102,6 +102,18 @@ id/name 一一对应——顺序错位 = 回传模型的消息 id 全错）。"
 ;;; 并行/串行执行
 ;;; ============================================================
 
+(defun batch-all-return-direct-p (tool-calls options)
+  "批内是否**每个** tool-call 都解析到声明了 :return-direct 的工具。
+空批返回 nil。解析不到的工具算不满足——它执行不了，谈不上直接返回。
+
+与 Spring AI 一致取全体语义（allMatch）：混批（部分声明）继续正常
+回灌 LLM——「一半直接返回、一半交给模型」没有自洽解释。"
+  (and tool-calls
+       (every (lambda (tc)
+                (let ((cb (resolve-callback options tc)))
+                  (and cb (cl-agent.core:tool-callback-return-direct-p cb))))
+              tool-calls)))
+
 (defun batch-has-serial-p (tool-calls options)
   "检查批次中是否有任一工具声明了 :serial。
 解析不到的工具当作非 serial——它根本不会被执行。"

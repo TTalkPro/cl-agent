@@ -996,3 +996,47 @@ thread-pool(1) + HITL 暂停的组合下，续跑批并发不受限。"
     ;; 2 轮工具执行（iter 0,1）+ 第 3 次探测（iter 2）触发 error = 恰 3 次
     (is (= 3 (atp-count provider))
         "上限 2 → 模型恰调 3 次（2 轮执行 + 1 次探测），不是旧的 4 次")))
+
+(cl-agent.core:deftool rdc-direct (&key q)
+  "直接返回结果"
+  (:param q :string "q" :required t)
+  (:return-direct t)
+  (format nil "直答：~A" q))
+
+(defclass rdc-provider ()
+  ((q :initarg :q :accessor rdc-q)))
+(defmethod cl-agent.core:llm-chat ((p rdc-provider) messages &key &allow-other-keys)
+  (declare (ignore messages))
+  (let ((n (pop (rdc-q p)))) (if (functionp n) (funcall n) n)))
+
+(test resume-respects-return-direct
+  "resume 后对全批 return-direct 工具必须短路——工具结果即最终答复，
+不再回模型。回归：resume 路径此前无条件进 %tool-loop，approve 一个
+return-direct 工具后又多调一次模型，拿到的是不该出现的续写。"
+  (let* ((extra 0)
+         (h (make-hash-table :test #'equal))
+         (_ (setf (gethash "q" h) "42"))
+         (provider (make-instance 'rdc-provider
+                     :q (list (cl-agent.core:make-llm-response
+                               :content "" :finish-reason :tool-call :model "m"
+                               :tool-calls (list (list :id "c1" :name "rdc_direct"
+                                                       :arguments h)))
+                              (lambda () (incf extra)
+                                (cl-agent.core:make-llm-response
+                                 :content "不该来" :finish-reason :stop :model "m")))))
+         (k (cl-agent.core:build-kernel
+             :model (cl-agent.core:make-provider-chat-model provider)
+             :tools '(rdc-direct)
+             :tool-gate (lambda (tc) (declare (ignore tc)) :pause))))
+    (declare (ignore _))
+    (let* ((paused (cl-agent.core:invoke-turn
+                    k (cl-agent.core:make-turn-request
+                       (list (cl-agent.core:user-message "q")))))
+           (final (cl-agent.core:resume-turn
+                   k (cl-agent.core:turn-result-loop-state paused) :approved)))
+      (is (= 0 extra) "resume 后不再调模型（return-direct 短路）")
+      (is (eq :completed (cl-agent.core:turn-result-status final)))
+      (is (search "直答：42"
+                  (cl-agent.core:chat-response-text
+                   (cl-agent.core:turn-result-response final)))
+          "最终答复是工具结果本身，不是模型续写"))))

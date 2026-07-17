@@ -526,12 +526,29 @@ some+filter 那种两阶段扫描。"
                                    :name (cl-agent.core:tool-call-name tc)
                                    :text text))
                                 tool-calls texts))))
-        (%tool-loop kernel
-                    (append messages
-                            (list (cl-agent.core:chat-response-message response) tool-msg))
-                    ;; context 若被写意图更新，options 的 tool-context 也要跟上
-                    (fold-context-into-tool-context options context)
-                    context (1+ iteration))))))
+        ;; return-direct 短路——正常路径（%execute-and-append）对全批
+        ;; return-direct 会把工具结果直接当最终答复、不回模型；resume
+        ;; 此前漏了这一步，approve 一个 return-direct 工具后又多调一次
+        ;; 模型（拿到的还是「不该来」的续写）。
+        ;; 只在**全部真执行且全 return-direct**时短路：有被拒/被答复的
+        ;; （decided 非空）说明要把结果回给模型，不短路。
+        (if (and callable (null decided)
+                 (batch-all-return-direct-p callable options))
+            (make-turn-result
+             :completed
+             :response (cl-agent.core:make-chat-response
+                        (cl-agent.core:make-generation
+                         (cl-agent.core:assistant-message
+                          (format nil "~{~A~^~%~}" texts))
+                         :finish-reason :stop))
+             :tool-context context
+             :tool-calls-made (1+ iteration))
+            (%tool-loop kernel
+                        (append messages
+                                (list (cl-agent.core:chat-response-message response) tool-msg))
+                        ;; context 若被写意图更新，options 的 tool-context 也要跟上
+                        (fold-context-into-tool-context options context)
+                        context (1+ iteration)))))))
 
 (defun resume-turn (kernel loop-state decision &key payload)
   "从暂停点续跑工具循环。
