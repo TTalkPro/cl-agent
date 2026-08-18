@@ -176,6 +176,46 @@ SYSTEM 提示折叠进 messages（OpenAI 风格）；可选参数存在才发送
     (and key (not (string= key "")))))
 
 ;;; ============================================================
+;;; 厂商专有参数的构造助手
+;;; ============================================================
+;;;
+;;; :extra-params 是逃生通道——能下发任何字段，也就能下发任何拼错的
+;;; 字段：写成 :reasoning_efort 不会有任何报错，只是模型行为不变，
+;;; 排查起来要翻厂商日志。各 provider 文件里的 <vendor>-extra-params
+;;; 用这两个助手做取值校验，把「拼错/取值非法」提前到构造时报出来。
+
+(defun enum->wire (value allowed &key field)
+  "把中立关键字翻译为 wire 字符串，并校验取值。
+
+VALUE 为 NIL 时返回 NIL（保持「存在才发送」语义）。
+取值不在 ALLOWED 内报 validation-error。"
+  (when value
+    (let ((key (if (keywordp value)
+                   value
+                   (intern (string-upcase (string value)) :keyword))))
+      (unless (member key allowed)
+        (cl-agent.core:signal-error
+         'cl-agent.core:validation-error
+         :message (format nil "~@[~A ~]取值 ~S 非法，可选：~{~S~^ / ~}"
+                          field value allowed)
+         :field (or field "extra-params")))
+      (string-downcase (symbol-name key)))))
+
+(defun wire-hash (&rest pairs)
+  "由 (键 值) 交替的参数构造 wire hash-table，值为 NIL 的键跳过。
+
+用于构造厂商的嵌套对象（xAI 的 search_parameters、
+Moonshot 的 thinking、OpenRouter 的 provider）。
+需要显式下发 false 时传 :false —— 它会被翻成 JSON 的 false，
+与「不传」区分开。"
+  (let ((table (make-hash-table :test 'equal)))
+    (loop for (key value) on pairs by #'cddr
+          unless (null value)
+            do (setf (gethash key table)
+                     (if (eq value :false) nil value)))
+    table))
+
+;;; ============================================================
 ;;; define-openai-compat-provider 宏
 ;;; ============================================================
 

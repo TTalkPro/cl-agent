@@ -27,3 +27,43 @@
 需要 SILICONFLOW_API_KEY 或显式 :api-key。
 模型名用 \"<组织>/<模型>\" 全路径；嵌入模型见 provider-default-embedding-model。
 海外站点：(make-siliconflow-provider :api-url \"https://api.siliconflow.com/v1\")")
+
+;;; ============================================================
+;;; SiliconFlow 专有参数
+;;; ============================================================
+
+(defun siliconflow-extra-params (&key (enable-thinking nil enable-thinking-p)
+                                      thinking-budget
+                                      top-k
+                                      min-p)
+  "构造 SiliconFlow 专有参数，供 :extra-params 使用。
+
+参数：
+  ENABLE-THINKING - 是否开启思考（布尔，显式传入才下发；
+                    Qwen3 / GLM 等混合推理模型支持）
+  THINKING-BUDGET - 思考预算 token 数（整数）
+  TOP-K           - Top-K 采样（SiliconFlow 支持，OpenAI 标准字段里没有）
+  MIN-P           - 最小概率阈值（0.0 ~ 1.0）
+
+返回：
+  可直接传给 :extra-params 的 plist；未指定的项不出现。
+
+示例：
+  (llm-chat provider messages
+            :extra-params (siliconflow-extra-params :enable-thinking t
+                                                    :thinking-budget 2048))"
+  (when (and min-p (or (< min-p 0) (> min-p 1)))
+    (cl-agent.core:signal-error
+     'cl-agent.core:validation-error
+     :message (format nil "min-p 应在 [0, 1] 区间，实际 ~S" min-p)
+     :field "min-p"))
+  (let ((params nil))
+    (when enable-thinking-p
+      (setf params (append params (list :enable-thinking (and enable-thinking t)))))
+    (when thinking-budget
+      (setf params (append params (list :thinking-budget thinking-budget))))
+    (when top-k
+      (setf params (append params (list :top-k top-k))))
+    (when min-p
+      (setf params (append params (list :min-p min-p))))
+    params))
