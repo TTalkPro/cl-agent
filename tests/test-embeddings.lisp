@@ -116,6 +116,60 @@ SHUFFLED 为真时把 data 逆序摆放（index 仍然正确），用来锁住
     (is (equalp #(0.0 1.0) (second vectors)))))
 
 ;;; ============================================================
+;;; DashScope 原生嵌入
+;;; ============================================================
+
+(defun dashscope-embed-provider ()
+  (cl-agent.llm.providers:make-dashscope-provider :api-key "k"))
+
+(test dashscope-embedding-request-shape
+  "DashScope 是自家形状：input.texts + parameters.dimension"
+  (let* ((body (cl-agent.llm::build-dashscope-embedding-request
+                (dashscope-embed-provider) '("a" "b") :dimensions 1024))
+         (input (gethash "input" body))
+         (parameters (gethash "parameters" body)))
+    (is (string= "text-embedding-v3" (gethash "model" body)))
+    (is (equalp #("a" "b") (gethash "texts" input)))
+    (is (= 1024 (gethash "dimension" parameters)))
+    ;; 不是 OpenAI 那套顶层 input
+    (is-false (nth-value 1 (gethash "texts" body)))))
+
+(test dashscope-embedding-parameters-omitted-when-empty
+  "没有任何可选参数时不发空的 parameters 对象"
+  (let ((body (cl-agent.llm::build-dashscope-embedding-request
+               (dashscope-embed-provider) '("a"))))
+    (is-false (nth-value 1 (gethash "parameters" body)))))
+
+(test dashscope-embedding-text-type-via-extra-params
+  "text_type（query / document）经 extra-params 进 parameters"
+  (let ((parameters (gethash "parameters"
+                             (cl-agent.llm::build-dashscope-embedding-request
+                              (dashscope-embed-provider) '("a")
+                              :extra-params '(:text-type "query")))))
+    (is (string= "query" (gethash "text_type" parameters)))))
+
+(test dashscope-embedding-response-parsed
+  "响应在 output.embeddings 下，索引字段叫 text_index"
+  (let ((response (cl-agent.llm::parse-dashscope-embedding-response
+                   "{\"output\":{\"embeddings\":[
+                      {\"text_index\":1,\"embedding\":[0.0,1.0]},
+                      {\"text_index\":0,\"embedding\":[1.0,0.0]}]},
+                     \"usage\":{\"total_tokens\":7}}")))
+    (is (= 2 (length (cl-agent.core:embedding-response-embeddings response))))
+    ;; 同样必须按索引排序
+    (is (equalp #(1.0 0.0)
+                (first (cl-agent.core:embedding-response-embeddings response))))
+    (is (equalp #(0.0 1.0)
+                (second (cl-agent.core:embedding-response-embeddings response))))))
+
+(test dashscope-embedding-endpoint-and-capability
+  "DashScope 走自家嵌入端点，且声明支持嵌入"
+  (let ((provider (dashscope-embed-provider)))
+    (is-true (cl-agent.core:provider-supports-embedding-p provider))
+    (is (string= "/api/v1/services/embeddings/text-embedding/text-embedding"
+                 (cl-agent.llm:provider-embedding-endpoint provider)))))
+
+;;; ============================================================
 ;;; 便捷 API（不打网络：特化一个假 provider 的 llm-embed）
 ;;; ============================================================
 

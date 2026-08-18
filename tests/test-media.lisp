@@ -298,6 +298,109 @@
     (is (string= "hi" (gethash "content" wire)))))
 
 ;;; ============================================================
+;;; DashScope 原生 wire
+;;; ============================================================
+
+(defun dashscope-request (msg)
+  "取单条中立消息的 DashScope 原生请求体"
+  (cl-agent.llm.providers::build-dashscope-request
+   (cl-agent.llm.providers:make-dashscope-provider :api-key "k")
+   (list msg)
+   :model "qwen-vl-max"))
+
+(defun dashscope-wire-message (msg)
+  (elt (gethash "messages" (gethash "input" (dashscope-request msg))) 0))
+
+(test dashscope-plain-message-content-stays-string
+  "无附件的消息 content 仍是字符串"
+  (is (string= "hi" (gethash "content"
+                             (dashscope-wire-message
+                              (list :role :user :content "hi"))))))
+
+(test dashscope-image-becomes-content-part
+  "图片附件 → DashScope 的单键分片 {\"image\": ...}，附件在文本之前"
+  (let ((parts (gethash "content"
+                        (dashscope-wire-message
+                         (list :role :user :content "这是什么"
+                               :media (list (list :kind :image
+                                                  :media-type "image/png"
+                                                  :url "https://x/y.png")))))))
+    (is (vectorp parts))
+    (is (= 2 (length parts)))
+    (is (string= "https://x/y.png" (gethash "image" (elt parts 0))))
+    (is (string= "这是什么" (gethash "text" (elt parts 1))))))
+
+(test dashscope-image-bytes-become-data-uri
+  "字节图片编码进 data URI（DashScope 接受 data: 形态）"
+  (let ((parts (gethash "content"
+                        (dashscope-wire-message
+                         (list :role :user :content ""
+                               :media (list (list :kind :image
+                                                  :media-type "image/jpeg"
+                                                  :data "QUJD")))))))
+    (is (= 1 (length parts)))
+    (is (string= "data:image/jpeg;base64,QUJD" (gethash "image" (elt parts 0))))))
+
+(test dashscope-audio-part
+  "音频 → {\"audio\": ...} 分片"
+  (let ((parts (gethash "content"
+                        (dashscope-wire-message
+                         (list :role :user :content "听"
+                               :media (list (list :kind :audio
+                                                  :media-type "audio/wav"
+                                                  :url "https://x/a.wav")))))))
+    (is (string= "https://x/a.wav" (gethash "audio" (elt parts 0))))))
+
+(test dashscope-document-skipped
+  "PDF 不属于多模态 generation 端点 —— 跳过而不是发必然 400 的请求"
+  (let ((parts (gethash "content"
+                        (dashscope-wire-message
+                         (list :role :user :content "总结"
+                               :media (list (list :kind :document
+                                                  :media-type "application/pdf"
+                                                  :data "QUJD")))))))
+    (is (= 1 (length parts)))
+    (is (string= "总结" (gethash "text" (elt parts 0))))))
+
+(test dashscope-multimodal-omits-result-format
+  "多模态端点不接受 result_format 参数"
+  (let ((with-media (dashscope-request
+                     (list :role :user :content "看"
+                           :media (list (list :kind :image :url "https://x/y.png")))))
+        (text-only (dashscope-request (list :role :user :content "hi"))))
+    (is-false (nth-value 1 (gethash "result_format"
+                                    (gethash "parameters" with-media))))
+    (is (string= "message" (gethash "result_format"
+                                    (gethash "parameters" text-only))))))
+
+(test dashscope-media-routes-to-multimodal-endpoint
+  "带附件的请求必须走多模态端点（两个端点不通用）"
+  (is (cl-agent.llm.providers::messages-have-media-p
+       (list (list :role :user :content "看"
+                   :media (list (list :kind :image :url "u"))))))
+  (is-false (cl-agent.llm.providers::messages-have-media-p
+             (list (list :role :user :content "hi"))))
+  (is (string= "/api/v1/services/aigc/multimodal-generation/generation"
+               cl-agent.llm.providers::+dashscope-multimodal-endpoint+)))
+
+(test dashscope-multimodal-response-content-flattened
+  "多模态响应的 content 是分片数组，必须归一为字符串"
+  (let ((response (cl-agent.llm.providers::parse-dashscope-response
+                   "{\"output\":{\"choices\":[{\"finish_reason\":\"stop\",
+                     \"message\":{\"role\":\"assistant\",
+                     \"content\":[{\"text\":\"一只猫\"}]}}]},
+                     \"usage\":{\"input_tokens\":10,\"output_tokens\":3}}")))
+    (is (stringp (cl-agent.core:llm-response-content response)))
+    (is (string= "一只猫" (cl-agent.core:llm-response-content response)))))
+
+(test dashscope-text-response-content-unchanged
+  "纯文本响应的 content 仍按字符串解析（归一化不能改坏老路径）"
+  (let ((response (cl-agent.llm.providers::parse-dashscope-response
+                   "{\"output\":{\"choices\":[{\"finish_reason\":\"stop\",
+                     \"message\":{\"role\":\"assistant\",\"content\":\"你好\"}}]}}")))
+    (is (string= "你好" (cl-agent.core:llm-response-content response)))))
+
+;;; ============================================================
 ;;; 端到端：ChatModel → SPI
 ;;; ============================================================
 
