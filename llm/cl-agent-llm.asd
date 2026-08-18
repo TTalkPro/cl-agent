@@ -14,20 +14,25 @@
 ;;;;   - Unified client interface
 ;;;;
 ;;;; Supported Providers:
-;;;;   - Anthropic Claude
-;;;;   - OpenAI GPT
-;;;;   - ZhipuAI GLM
-;;;;   - Ollama (local)
+;;;;   - Anthropic 格式：Anthropic Claude、MiniMax
+;;;;   - OpenAI 兼容：OpenAI、智谱 GLM、DeepSeek、Gemini、Mistral、
+;;;;                  xAI Grok、Moonshot Kimi、SiliconFlow、OpenRouter、
+;;;;                  Ollama（本地）
+;;;;   - 厂商原生：阿里云 DashScope（通义千问）
+;;;;
+;;;; Capabilities:
+;;;;   - 多模态输入（图片/音频/文档）：OpenAI 兼容 + Anthropic 两套 wire
+;;;;   - 嵌入向量：embeddings.lisp（llm-embed SPI + embed / embed-batch）
 ;;;;
 ;;;; Usage:
 ;;;;   (cl-agent.llm:create-chat-model :anthropic
 ;;;;                                   :model "claude-sonnet-4-20250514")
 
 (asdf:defsystem #:cl-agent-llm
-  :description "CL-Agent LLM Service Layer - Multi-Provider LLM Client (v4.1.0)"
+  :description "CL-Agent LLM Service Layer - Multi-Provider LLM Client (v4.2.0)"
   :author "David"
   :license "MIT"
-  :version "4.1.0"
+  :version "4.2.0"
 
   :depends-on (#:cl-agent-core
                #:alexandria
@@ -74,6 +79,10 @@
      (:file "deepseek")         ; DeepSeek（含前缀续写 beta）
      (:file "gemini")           ; Google Gemini（OpenAI 兼容端点）
      (:file "mistral")          ; Mistral AI
+     (:file "xai")              ; xAI Grok
+     (:file "moonshot")         ; 月之暗面 Kimi
+     (:file "siliconflow")      ; 硅基流动（多模型聚合 + 嵌入）
+     (:file "openrouter")       ; OpenRouter（多厂商聚合网关）
      (:file "dashscope")))     ; 阿里云 DashScope（通义千问）
 
    ;; 6. SSE 流式实现（真流式：llm-chat-stream 特化）
@@ -81,6 +90,9 @@
     :components
     ((:file "anthropic")       ; Anthropic 格式（anthropic + minimax）
      (:file "openai")))        ; OpenAI 兼容（openai/zhipu/deepseek/...）
+
+   ;; 6.5 嵌入向量（llm-embed SPI 的 OpenAI 兼容实现 + 便捷 API）
+   (:file "embeddings")
 
    ;; 7. Service layer (response normalization)
    (:file "service")

@@ -40,6 +40,7 @@
                #:uuid
                #:uiop
                #:com.inuoe.jzon
+               #:cl-base64          ; 多模态附件的 base64 编码
                #:lparallel
                #:bordeaux-threads
                #:closer-mop
@@ -98,6 +99,7 @@
    (:module "llm"
     :components
     ((:file "response")           ; Unified LLM Response Schema
+     (:file "embedding")          ; 嵌入向量 SPI + 统一嵌入响应
      (:file "provider")))         ; ILLMProvider protocol
 
 
@@ -117,7 +119,8 @@
    ;; ============================================================
    (:module "chat"
     :components
-    ((:file "message")            ; CLOS 消息体系 + 中立 plist 互转
+    ((:file "media")              ; 多模态输入载体（图片/音频/文档）
+     (:file "message")            ; CLOS 消息体系 + 中立 plist 互转
      (:file "options")            ; ChatOptions（合并语义）
      (:file "prompt")             ; Prompt
      (:file "response")           ; ChatResponse / Generation / 元数据

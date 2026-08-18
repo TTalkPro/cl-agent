@@ -80,6 +80,7 @@
 
                ;; Chat Model API tests
                (:file "tests/test-message")     ; 消息体系 + 中立互转
+               (:file "tests/test-media")       ; 多模态输入 + 两套 wire 转换
                (:file "tests/test-options")     ; ChatOptions 合并语义
                (:file "tests/test-tool")        ; deftool / ToolCallback / Manager
                (:file "tests/test-chat-model")  ; ChatModel + 工具执行循环
@@ -106,6 +107,7 @@
                ;; LLM provider tests
                (:file "tests/test-llm")
                (:file "tests/test-providers")  ; 新 provider / registry / 请求参数
+               (:file "tests/test-embeddings") ; 嵌入向量 SPI + 便捷 API
                (:file "tests/test-streaming")  ; SSE 流式处理器
                ;; 复用 test-streaming 的事件驱动 harness，须排其后
                (:file "tests/test-thinking-roundtrip")) ; 思考块回传 + SPI 契约
