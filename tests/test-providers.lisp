@@ -92,15 +92,157 @@
       (signals cl-agent.core:missing-api-key-error
         (cl-agent.llm.providers:make-mistral-provider))))
 
+(test xai-provider-factory
+  "xAI Grok provider 默认配置"
+  (let ((provider (cl-agent.llm.providers:make-xai-provider :api-key "k")))
+    (is (typep provider 'cl-agent.llm.providers:openai-compat-provider))
+    (is (string= "https://api.x.ai/v1"
+                 (cl-agent.llm:base-provider-api-url provider)))
+    (is (eq :xai (cl-agent.llm:base-provider-name provider)))))
+
+(test moonshot-provider-factory
+  "Moonshot（Kimi）provider 默认配置"
+  (let ((provider (cl-agent.llm.providers:make-moonshot-provider :api-key "k")))
+    (is (string= "https://api.moonshot.ai/v1"
+                 (cl-agent.llm:base-provider-api-url provider)))
+    (is (eq :moonshot (cl-agent.llm:base-provider-name provider)))
+    ;; 国内站点经 :api-url 切换
+    (is (string= "https://api.moonshot.cn/v1"
+                 (cl-agent.llm:base-provider-api-url
+                  (cl-agent.llm.providers:make-moonshot-provider
+                   :api-key "k" :api-url "https://api.moonshot.cn/v1"))))))
+
+(test siliconflow-provider-factory
+  "SiliconFlow provider 默认配置"
+  (let ((provider (cl-agent.llm.providers:make-siliconflow-provider :api-key "k")))
+    (is (string= "https://api.siliconflow.cn/v1"
+                 (cl-agent.llm:base-provider-api-url provider)))
+    (is (eq :siliconflow (cl-agent.llm:base-provider-name provider)))
+    (is (string= "deepseek-ai/DeepSeek-V3"
+                 (cl-agent.llm:base-provider-default-model provider)))))
+
+(test openrouter-provider-factory
+  "OpenRouter provider 默认配置"
+  (let ((provider (cl-agent.llm.providers:make-openrouter-provider :api-key "k")))
+    (is (string= "https://openrouter.ai/api/v1"
+                 (cl-agent.llm:base-provider-api-url provider)))
+    (is (eq :openrouter (cl-agent.llm:base-provider-name provider)))))
+
+;;; ============================================================
+;;; 附加请求头（extra-headers）
+;;; ============================================================
+
+(test provider-request-headers-merge-extra
+  "extra-headers 与认证头合并后下发"
+  (let* ((provider (cl-agent.llm.providers:make-xai-provider
+                    :api-key "k" :headers '(("X-Tenant" . "team-a"))))
+         (headers (cl-agent.llm.providers:provider-request-headers provider)))
+    (is (string= "Bearer k"
+                 (cdr (assoc "Authorization" headers :test #'string=))))
+    (is (string= "team-a"
+                 (cdr (assoc "X-Tenant" headers :test #'string=))))))
+
+(test provider-request-headers-override-auth
+  "同名头由 extra-headers 覆盖，且只出现一次（HTTP 头名大小写不敏感）"
+  (let* ((provider (cl-agent.llm.providers:make-xai-provider
+                    :api-key "k"
+                    :headers '(("authorization" . "Bearer override"))))
+         (headers (cl-agent.llm.providers:provider-request-headers provider)))
+    (is (= 1 (count-if (lambda (pair)
+                         (string-equal "Authorization" (car pair)))
+                       headers)))
+    (is (string= "Bearer override"
+                 (cdr (assoc "Authorization" headers :test #'string-equal))))))
+
+(test provider-request-headers-default-empty
+  "未传 :headers 时行为与从前一致（只有认证头）"
+  (let ((headers (cl-agent.llm.providers:provider-request-headers
+                  (cl-agent.llm.providers:make-xai-provider :api-key "k"))))
+    (is (= 2 (length headers)))))
+
+(test openrouter-attribution-headers
+  "OpenRouter 归因头写入 extra-headers"
+  (let ((headers (cl-agent.llm.providers:provider-request-headers
+                  (cl-agent.llm.providers:make-openrouter-provider-with-attribution
+                   :api-key "k"
+                   :referer "https://app.example.com"
+                   :title "MyApp"))))
+    (is (string= "https://app.example.com"
+                 (cdr (assoc "HTTP-Referer" headers :test #'string=))))
+    (is (string= "MyApp" (cdr (assoc "X-Title" headers :test #'string=))))
+    (is (string= "Bearer k"
+                 (cdr (assoc "Authorization" headers :test #'string=))))))
+
+;;; ============================================================
+;;; 厂商错误体归一
+;;; ============================================================
+
+(test error-message-extracted-openai-shape
+  "OpenAI 形状：error.message (+ type)"
+  (is (string= "Invalid model (invalid_request_error)"
+               (cl-agent.llm:extract-api-error-message
+                "{\"error\":{\"message\":\"Invalid model\",\"type\":\"invalid_request_error\"}}"))))
+
+(test error-message-extracted-anthropic-shape
+  "Anthropic 形状：顶层 type=error + error.message"
+  (is (string= "max_tokens is required (invalid_request_error)"
+               (cl-agent.llm:extract-api-error-message
+                "{\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"max_tokens is required\"}}"))))
+
+(test error-message-extracted-flat-shape
+  "DashScope 形状：顶层 code + message"
+  (is (string= "Range of input length should be [1, 6000] (InvalidParameter)"
+               (cl-agent.llm:extract-api-error-message
+                "{\"code\":\"InvalidParameter\",\"message\":\"Range of input length should be [1, 6000]\"}"))))
+
+(test error-message-extracted-string-error
+  "Ollama 形状：error 直接是字符串"
+  (is (string= "model 'llama9' not found"
+               (cl-agent.llm:extract-api-error-message
+                "{\"error\":\"model 'llama9' not found\"}"))))
+
+(test error-message-non-json-passthrough
+  "非 JSON（网关的 HTML/纯文本）原样带出，超长截断"
+  (is (string= "502 Bad Gateway"
+               (cl-agent.llm:extract-api-error-message "  502 Bad Gateway  ")))
+  (let ((long (cl-agent.llm:extract-api-error-message
+               (make-string 500 :initial-element #\x))))
+    (is (= 303 (length long)))
+    (is (string= "..." (subseq long 300)))))
+
+(test error-message-empty-body
+  "空响应体提取不出信息，返回 NIL（调用方回落到状态码）"
+  (is (null (cl-agent.llm:extract-api-error-message nil)))
+  (is (null (cl-agent.llm:extract-api-error-message "")))
+  ;; 合法 JSON 但没有任何可读字段
+  (is (null (cl-agent.llm:extract-api-error-message "{\"ok\":true}"))))
+
+(test error-message-decodes-octets
+  "字节形态的响应体先解码再提取（dexador 的 force-binary 路径）"
+  (let ((octets (flexi-streams:string-to-octets
+                 "{\"error\":{\"message\":\"配额不足\"}}"
+                 :external-format :utf-8)))
+    (is (string= "配额不足"
+                 (cl-agent.llm:extract-api-error-message octets)))))
+
 ;;; ============================================================
 ;;; Registry
 ;;; ============================================================
 
 (test registry-new-providers-registered
-  "三个新 provider 已注册"
-  (is-true (cl-agent.llm:provider-registered-p :deepseek))
-  (is-true (cl-agent.llm:provider-registered-p :gemini))
-  (is-true (cl-agent.llm:provider-registered-p :mistral)))
+  "新 provider 已注册"
+  (dolist (name '(:deepseek :gemini :mistral :xai :moonshot :siliconflow
+                  :openrouter))
+    (is-true (cl-agent.llm:provider-registered-p name)
+             "~S 未注册" name)))
+
+(test registry-table-matches-registry
+  "工厂表是单一事实来源：表里每一项都注册了，且工厂函数存在"
+  (dolist (entry cl-agent.llm:+builtin-provider-factories+)
+    (is-true (cl-agent.llm:provider-registered-p (car entry))
+             "~S 在表里但没注册" (car entry))
+    (is-true (fboundp (cdr entry))
+             "~S 的工厂函数 ~S 不存在" (car entry) (cdr entry))))
 
 (test registry-aliases
   "别名解析到规范名"
@@ -108,6 +250,9 @@
   (is (eq :dashscope (cl-agent.llm:resolve-provider-name "qwen")))
   (is (eq :dashscope (cl-agent.llm:resolve-provider-name "bailian")))
   (is (eq :anthropic (cl-agent.llm:resolve-provider-name :claude)))
+  (is (eq :xai (cl-agent.llm:resolve-provider-name "grok")))
+  (is (eq :moonshot (cl-agent.llm:resolve-provider-name "kimi")))
+  (is (eq :siliconflow (cl-agent.llm:resolve-provider-name "silicon")))
   ;; 非别名原样透传
   (is (eq :deepseek (cl-agent.llm:resolve-provider-name :deepseek))))
 
@@ -328,6 +473,26 @@ ECASE 落空报错，尽管注册表里一直有它们。现改为委托 create-
                   (error (e) e))))
       (is (typep made 'cl-agent.llm:base-provider)
           "make-provider ~S 失败：~A" name made))))
+
+(test estimate-cost-covers-every-registered-provider
+  "estimate-cost 不能对任何注册的 provider 报错。
+
+此前是一张 ecase，只认 anthropic/openai/ollama/zhipu——其余
+provider 一律 ecase 落空，成本估算把整个调用打断。"
+  (dolist (name (cl-agent.llm:list-providers))
+    (let* ((provider (cl-agent.llm:make-provider name :api-key "test-key"))
+           (cost (handler-case (cl-agent.llm:estimate-cost provider 1000 500)
+                   (error (e) e))))
+      (is (numberp cost) "estimate-cost ~S 失败：~A" name cost)
+      (is (>= cost 0) "~S 估算出负成本" name))))
+
+(test estimate-cost-unit-is-per-million-tokens
+  "定价表单位为「美元 / 1M token」，与算式一致"
+  (let ((provider (cl-agent.llm:make-provider :anthropic :api-key "k")))
+    ;; Anthropic 档位 $3/1M 输入 + $15/1M 输出
+    ;; 1M 输入 + 1M 输出 = $18
+    (is (< (abs (- 18.0 (cl-agent.llm:estimate-cost provider 1000000 1000000)))
+           0.01))))
 
 (test make-provider-accepts-aliases
   "别名经注册表解析（此前手写 ECASE 完全不认别名）"
