@@ -28,12 +28,23 @@
     :initarg :api-key
     :reader provider-api-key
     :initform ""
-    :documentation "API 密钥"))
+    :documentation "API 密钥")
+   (extra-headers
+    :initarg :extra-headers
+    :reader provider-extra-headers
+    :initform nil
+    :documentation "附加请求头（alist），与认证头合并后下发；同名项覆盖认证头。
+
+对标 ai-sdk 各 provider 的 headers 选项：网关（OpenRouter 的
+HTTP-Referer/X-Title）、企业代理的自定义鉴权、灰度标记等，
+无需为此新开一个 provider 类。"))
   (:documentation "OpenAI 兼容 Provider 基类。
 
 子类通常只需通过 define-openai-compat-provider 声明 base-url /
 env-key / default-model；特殊认证或请求修饰通过特化
-provider-auth-headers / provider-finalize-request 实现。"))
+provider-auth-headers / provider-finalize-request 实现。
+
+实例级的一次性请求头用 :extra-headers 传入，不必特化任何方法。"))
 
 ;;; ============================================================
 ;;; CLOS 扩展点
@@ -45,6 +56,28 @@ provider-auth-headers / provider-finalize-request 实现。"))
 (defmethod provider-auth-headers ((provider openai-compat-provider))
   `(("Content-Type" . "application/json")
     ("Authorization" . ,(format nil "Bearer ~A" (provider-api-key provider)))))
+
+(defun merge-header-alists (base overrides)
+  "合并两组请求头 alist：OVERRIDES 中同名（大小写不敏感）的项覆盖 BASE。
+
+HTTP 头名不区分大小写，直接 append 会让同一个头出现两次——多数
+服务端取第一个、少数取最后一个，行为不可预期。这里做显式去重。"
+  (let ((result (mapcar (lambda (pair) (cons (car pair) (cdr pair))) base)))
+    (dolist (pair overrides result)
+      (let ((existing (assoc (car pair) result :test #'string-equal)))
+        (if existing
+            (setf (cdr existing) (cdr pair))
+            (setf result (append result (list (cons (car pair) (cdr pair))))))))))
+
+(defgeneric provider-request-headers (provider)
+  (:documentation "最终下发的请求头 = 认证头 + 实例 extra-headers（后者覆盖同名）。
+
+请求路径统一走本函数，provider-auth-headers 只管鉴权方案本身，
+子类特化鉴权时不必再操心 extra-headers 的合并。"))
+
+(defmethod provider-request-headers ((provider openai-compat-provider))
+  (merge-header-alists (provider-auth-headers provider)
+                       (provider-extra-headers provider)))
 
 (defgeneric provider-finalize-request (provider body)
   (:documentation "请求体发送前的最后修饰（hash-table -> hash-table）。
@@ -129,7 +162,7 @@ SYSTEM 提示折叠进 messages（OpenAI 风格）；可选参数存在才发送
          (url (cl-agent.llm:build-api-url
                provider
                (cl-agent.llm:provider-chat-endpoint provider)))
-         (headers (provider-auth-headers provider))
+         (headers (provider-request-headers provider))
          (response (cl-agent.llm:make-http-request
                     url
                     headers
@@ -149,10 +182,12 @@ SYSTEM 提示折叠进 messages（OpenAI 风格）；可选参数存在才发送
 (defmacro define-openai-compat-provider (name &key
                                               base-url
                                               env-key
+                                              env-keys
                                               default-model
                                               (chat-endpoint "/chat/completions")
                                               (timeout 120)
                                               key-optional
+                                              default-headers
                                               documentation)
   "声明式定义一个 OpenAI 兼容 Provider。
 
@@ -164,10 +199,13 @@ SYSTEM 提示折叠进 messages（OpenAI 风格）；可选参数存在才发送
   NAME          - Provider 名称（符号，如 openai）
   BASE-URL      - 默认 API 基础 URL
   ENV-KEY       - API 密钥环境变量名
+  ENV-KEYS      - 备选环境变量名列表（按序回退，用于厂商改名/多套命名）
   DEFAULT-MODEL - 默认模型
   CHAT-ENDPOINT - 端点（默认 /chat/completions）
   TIMEOUT       - 超时秒数（默认 120）
   KEY-OPTIONAL  - T 则缺 key 不报错（本地服务如 Ollama）
+  DEFAULT-HEADERS - 该厂商恒定附加的请求头（alist 求值形式），
+                  与调用方 :headers 合并（后者覆盖同名）
   DOCUMENTATION - 类文档
 
 示例：
@@ -194,6 +232,7 @@ provider-finalize-request 于生成的类上实现。"
        (defun ,factory-name (&key (api-url ,base-url)
                                   (model ,default-model)
                                   api-key
+                                  headers
                                   (timeout ,timeout))
          ,(format nil "创建 ~A Provider
 
@@ -201,6 +240,7 @@ provider-finalize-request 于生成的类上实现。"
   API-URL  - API 基础 URL（默认 ~A）
   MODEL    - 默认模型（默认 ~A）
   API-KEY  - API 密钥~@[（可从 ~A 环境变量读取）~]
+  HEADERS  - 附加请求头 alist（可选，覆盖同名认证头）
   TIMEOUT  - 请求超时（秒，默认 ~A）
 
 返回：
@@ -208,7 +248,8 @@ provider-finalize-request 于生成的类上实现。"
                   (string-capitalize name-str) base-url default-model
                   env-key timeout class-name)
          (let ((key (or api-key
-                        ,@(when env-key `((uiop:getenv ,env-key))))))
+                        ,@(when env-key `((uiop:getenv ,env-key)))
+                        ,@(mapcar (lambda (k) `(uiop:getenv ,k)) env-keys))))
            ,@(unless key-optional
                `((when (and (null key)
                             (not (search "localhost" api-url))
@@ -216,8 +257,9 @@ provider-finalize-request 于生成的类上实现。"
                    (cl-agent.core:signal-error
                     'cl-agent.core:missing-api-key-error
                     :message ,(format nil "~A API 密钥未设置~@[，请设置 ~A 环境变量~]"
-                                      (string-capitalize name-str) env-key)
-                    :config-key ,(or env-key name-str)))))
+                                      (string-capitalize name-str)
+                                      (or env-key (first env-keys)))
+                    :config-key ,(or env-key (first env-keys) name-str)))))
            (make-instance ',class-name
                           :name ,keyword-name
                           :api-url api-url
@@ -225,6 +267,8 @@ provider-finalize-request 于生成的类上实现。"
                           :chat-endpoint ,chat-endpoint
                           :stream-endpoint ,chat-endpoint
                           :api-key (or key "")
+                          :extra-headers (merge-header-alists ,default-headers
+                                                              headers)
                           :timeout timeout)))
 
        ',class-name)))

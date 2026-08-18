@@ -175,12 +175,72 @@ EXTRA-PARAMS 为厂商专有参数逃生通道（plist，键为字符串或关�
 
     body))
 
+(defun media-part-for-openai (media)
+  "把一段中立 media plist 翻译为 OpenAI 的 content 分片（hash-table）。
+
+各种类的 wire 形态（OpenAI 及其兼容厂商一致）：
+  :image    {\"type\":\"image_url\",\"image_url\":{\"url\": <URL 或 data URI>}}
+  :audio    {\"type\":\"input_audio\",\"input_audio\":{\"data\":<base64>,\"format\":\"wav\"}}
+  :document {\"type\":\"file\",\"file\":{\"filename\":...,\"file_data\":<data URI>}}
+
+音频分片只接受裸 base64 + format（不是 data URI），是 OpenAI
+这一处的例外；只有 URL 没有字节时无法构造，返回 NIL 跳过。"
+  (let ((kind (or (getf media :kind) :image))
+        (part (make-hash-table :test 'equal))
+        (payload (make-hash-table :test 'equal)))
+    (case kind
+      ((:image :video)
+       (let ((uri (cl-agent.core:media-neutral-data-uri media)))
+         (when uri
+           (setf (gethash "url" payload) uri)
+           (setf (gethash "type" part) "image_url")
+           (setf (gethash "image_url" part) payload)
+           part)))
+      (:audio
+       (let ((b64 (cl-agent.core:media-neutral-base64 media)))
+         (when b64
+           (setf (gethash "data" payload) b64)
+           (setf (gethash "format" payload)
+                 (or (cl-agent.core:media-format-from-type
+                      (getf media :media-type))
+                     "wav"))
+           (setf (gethash "type" part) "input_audio")
+           (setf (gethash "input_audio" part) payload)
+           part)))
+      (t
+       (let ((uri (cl-agent.core:media-neutral-data-uri media)))
+         (when uri
+           (setf (gethash "filename" payload)
+                 (or (getf media :name) "file"))
+           (setf (gethash "file_data" payload) uri)
+           (setf (gethash "type" part) "file")
+           (setf (gethash "file" part) payload)
+           part))))))
+
+(defun build-openai-content-parts (content media)
+  "把「文本 + 附件」构造成 OpenAI 的 content 分片数组（vector）。
+
+文本为空时不发文本分片——空字符串的 text 分片会被部分厂商判为
+非法请求。无法翻译的附件（如只给了 URL 的音频）静默跳过，
+不会让整条消息发不出去。"
+  (let ((parts nil))
+    (when (and content (stringp content) (string/= content ""))
+      (let ((text-part (make-hash-table :test 'equal)))
+        (setf (gethash "type" text-part) "text")
+        (setf (gethash "text" text-part) content)
+        (push text-part parts)))
+    (dolist (m media)
+      (let ((part (media-part-for-openai m)))
+        (when part (push part parts))))
+    (coerce (nreverse parts) 'vector)))
+
 (defun convert-messages-for-openai (messages)
   "转换消息为 OpenAI 格式（返回 vector 用于 JSON 序列化）"
   (coerce
    (loop for msg in messages
          for role = (getf msg :role)
          for content = (getf msg :content)
+         for media = (getf msg :media)
          for tool-calls = (getf msg :tool-calls)
          for tool-call-id = (getf msg :tool-call-id)
          for msg-hash = (make-hash-table :test 'equal)
@@ -189,8 +249,13 @@ EXTRA-PARAMS 为厂商专有参数逃生通道（plist，键为字符串或关�
                     (if (keywordp role)
                         (string-downcase (symbol-name role))
                         role))
-              (when content
-                (setf (gethash "content" msg-hash) content))
+              ;; 带附件的消息：content 升为分片数组；否则保持字符串
+              (cond
+                (media
+                 (setf (gethash "content" msg-hash)
+                       (build-openai-content-parts content media)))
+                (content
+                 (setf (gethash "content" msg-hash) content)))
               (when tool-calls
                 (setf (gethash "tool_calls" msg-hash)
                       (convert-tool-calls-for-openai tool-calls)))

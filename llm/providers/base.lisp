@@ -140,6 +140,69 @@
 ;; 调用——各 provider 都有自己的请求头构建（build-anthropic-headers /
 ;; provider-auth-headers），因为鉴权头各家不同。已删除。
 
+(defun %error-node-message (node)
+  "从一个已解析的错误对象里取出人类可读信息。
+
+NODE 可能是 hash-table（{\"message\": ...}）或直接就是字符串
+（Ollama 的 {\"error\": \"model not found\"}）。"
+  (cond
+    ((stringp node) node)
+    ((hash-table-p node)
+     (let ((message (or (gethash "message" node)
+                        (gethash "msg" node)
+                        (gethash "detail" node)))
+           (code (or (gethash "code" node)
+                     (gethash "type" node)
+                     (gethash "status" node))))
+       (cond
+         ((and message code) (format nil "~A (~A)" message code))
+         (message message)
+         (code (format nil "~A" code))
+         (t nil))))
+    (t nil)))
+
+(defun %ensure-error-body-string (body)
+  "把响应体规范成字符串；无法规范时返回 NIL。
+
+dexador 在 force-binary 或 http-request-failed 路径上可能给出
+字节向量，直接 stringp 判断会让错误信息静默丢失。"
+  (cond
+    ((null body) nil)
+    ((stringp body) body)
+    ((and (vectorp body) (not (stringp body)))
+     (handler-case (flexi-streams:octets-to-string
+                    (coerce body '(vector (unsigned-byte 8)))
+                    :external-format :utf-8)
+       (error () nil)))
+    (t nil)))
+
+(defun extract-api-error-message (body)
+  "从厂商错误响应体中提取可读信息；提取不出时返回 NIL。
+
+各家错误体形状不同，但都收敛到「error 节点 / 顶层 message」两种：
+  OpenAI 系   {\"error\": {\"message\": ..., \"type\": ...}}
+  Anthropic   {\"type\": \"error\", \"error\": {\"type\": ..., \"message\": ...}}
+  Google      {\"error\": {\"message\": ..., \"status\": ...}}
+  DashScope   {\"code\": ..., \"message\": ...}
+  Ollama      {\"error\": \"model not found\"}
+
+对标 ai-sdk 各 provider 的 failedResponseHandler：把厂商说的话带出来。
+此前这里只报「HTTP 请求失败: 400」，真正的原因（模型名拼错、
+上下文超限、余额不足、参数不被该模型支持）全被丢在响应体里。"
+  (let ((body (%ensure-error-body-string body)))
+    (when (and body (string/= body ""))
+      (let ((parsed (handler-case (cl-agent.core:json-parse body)
+                      (error () nil))))
+        (if (hash-table-p parsed)
+            (or (%error-node-message (gethash "error" parsed))
+                (%error-node-message parsed))
+            ;; 非 JSON（网关返回的 HTML/纯文本）：截断后原样带出
+            (let ((trimmed (string-trim '(#\Space #\Newline #\Tab #\Return) body)))
+              (when (string/= trimmed "")
+                (if (> (length trimmed) 300)
+                    (concatenate 'string (subseq trimmed 0 300) "...")
+                    trimmed))))))))
+
 (defun make-http-request (url headers body &key (timeout 120))
   "发送 HTTP POST 请求
 
@@ -153,7 +216,8 @@
   响应体字符串
 
 错误：
-  如果请求失败，发出 cl-agent.core:llm-error"
+  如果请求失败，发出 cl-agent.core:llm-error——其 message 带上厂商
+  错误体里的原因，response-body 保留原始响应体供上层排查。"
   (handler-case
       (let ((response (cl-agent.core:http-request url
                                                    :method :post
@@ -164,12 +228,18 @@
         (cl-agent.core:http-response-body response))
     ;; HTTP 错误
     (cl-agent.core:http-error (condition)
-      (cl-agent.core:signal-error 'cl-agent.core:llm-error
-                                  :message (format nil "HTTP 请求失败: ~A"
-                                                   (cl-agent.core:http-error-status condition))
-                                  :status-code (cl-agent.core:http-error-status condition)
-                                  :request-url url
-                                  :cause condition))
+      (let* ((raw-body (cl-agent.core:http-error-body condition))
+             (response-body (or (%ensure-error-body-string raw-body) raw-body))
+             (detail (extract-api-error-message raw-body)))
+        (cl-agent.core:signal-error
+         'cl-agent.core:llm-error
+         :message (format nil "HTTP 请求失败: ~A~@[ - ~A~]"
+                          (cl-agent.core:http-error-status condition)
+                          detail)
+         :status-code (cl-agent.core:http-error-status condition)
+         :response-body response-body
+         :request-url url
+         :cause condition)))
     ;; 其他错误
     (error (condition)
       (cl-agent.core:signal-error 'cl-agent.core:llm-error

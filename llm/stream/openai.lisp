@@ -192,7 +192,7 @@ CALLBACK 收到 chunk plist：
          (state (make-openai-stream-state)))
     (cl-agent.core:http-stream-sse
      url
-     :headers (provider-auth-headers provider)
+     :headers (provider-request-headers provider)
      :body (cl-agent.core:json-stringify request-body)
      :content-type "application/json"
      :timeout (max 300 (cl-agent.llm:provider-timeout provider))

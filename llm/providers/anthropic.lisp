@@ -321,6 +321,61 @@ NIL 表示不下发该字段。TEMPERATURE 此前默认 0.7，违反该契约：
 
     body))
 
+(defun media-block-for-anthropic (media)
+  "把一段中立 media plist 翻译为 Anthropic 的 content 块（hash-table）。
+
+Anthropic 的块形态：
+  图片  {\"type\":\"image\",   \"source\":{...}}
+  文档  {\"type\":\"document\",\"source\":{...}}
+  source 有两种：
+    {\"type\":\"base64\",\"media_type\":\"image/png\",\"data\":\"<base64>\"}
+    {\"type\":\"url\",\"url\":\"https://...\"}
+
+Anthropic 的 Messages API 不接受音频/视频输入，这两类返回 NIL 跳过——
+把它们塞进请求只会换来一个 400。"
+  (let ((kind (or (getf media :kind) :image))
+        (url (getf media :url))
+        (block-hash (make-hash-table :test 'equal))
+        (source (make-hash-table :test 'equal)))
+    (when (member kind '(:image :document))
+      (cond
+        ;; 远程 URL 直接交给 Anthropic 去取
+        ((and url (not (eql 0 (search "data:" url))))
+         (setf (gethash "type" source) "url")
+         (setf (gethash "url" source) url))
+        (t
+         (let ((b64 (cl-agent.core:media-neutral-base64 media)))
+           ;; 调用方给的 data: URI：剥掉前缀，取出裸 base64
+           (when (and (null b64) url)
+             (let ((comma (position #\, url)))
+               (when comma (setf b64 (subseq url (1+ comma))))))
+           (when b64
+             (setf (gethash "type" source) "base64")
+             (setf (gethash "media_type" source)
+                   (or (getf media :media-type)
+                       (if (eq kind :image) "image/png" "application/pdf")))
+             (setf (gethash "data" source) b64)))))
+      (when (plusp (hash-table-count source))
+        (setf (gethash "type" block-hash)
+              (if (eq kind :image) "image" "document"))
+        (setf (gethash "source" block-hash) source)
+        block-hash))))
+
+(defun build-anthropic-content-blocks (text media)
+  "把「文本 + 附件」构造成 Anthropic 的 content 块数组（vector）。
+
+顺序与 OpenAI 侧一致：文本在前、附件在后；文本为空时不发文本块。"
+  (let ((blocks nil))
+    (when (and text (stringp text) (string/= text ""))
+      (let ((text-block (make-hash-table :test 'equal)))
+        (setf (gethash "type" text-block) "text")
+        (setf (gethash "text" text-block) text)
+        (push text-block blocks)))
+    (dolist (m media)
+      (let ((block-hash (media-block-for-anthropic m)))
+        (when block-hash (push block-hash blocks))))
+    (coerce (nreverse blocks) 'vector)))
+
 (defun parse-messages-for-anthropic (messages)
   "解析消息，分离系统消息，处理工具调用消息
 
@@ -412,6 +467,8 @@ NIL 表示不下发该字段。TEMPERATURE 此前默认 0.7，违反该契约：
                            (getf msg :content)))
               (tool-calls (when (consp (cdr msg)) (getf msg :tool-calls)))
               (tool-call-id (when (consp (cdr msg)) (getf msg :tool-call-id)))
+              ;; 多模态附件（中立 media plist 列表）
+              (media (when (consp (cdr msg)) (getf msg :media)))
               ;; provider 原生推理块（含 signature），由 message->neutral 带过来
               (reasoning-blocks (when (consp (cdr msg))
                                   (getf msg :reasoning-blocks))))
@@ -449,8 +506,13 @@ NIL 表示不下发该字段。TEMPERATURE 此前默认 0.7，违反该契约：
              (let ((msg-hash (make-hash-table :test 'equal)))
                (setf (gethash "role" msg-hash) (convert-role-to-anthropic role))
                (setf (gethash "content" msg-hash)
-                     (if (stringp content) content
-                         (format nil "~S" content)))
+                     (cond
+                       ;; 带附件：content 升为块数组（文本块 + 媒体块）
+                       (media
+                        (build-anthropic-content-blocks
+                         (if (stringp content) content "") media))
+                       ((stringp content) content)
+                       (t (format nil "~S" content))))
                (push msg-hash other-messages))))))
 
       ;; 刷新剩余的 tool results
