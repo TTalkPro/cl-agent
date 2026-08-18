@@ -470,6 +470,26 @@
   估算的 token 数"
   (count-tokens text (client-provider-name client)))
 
+(defparameter *provider-pricing*
+  '(;; provider . (每 1M 输入 token 美元 . 每 1M 输出 token 美元)
+    (:anthropic   . (3.0 . 15.0))    ; Claude Sonnet 档
+    (:openai      . (5.0 . 15.0))    ; GPT-4o 档
+    (:zhipu       . (1.0 . 2.0))     ; GLM（人民币折算）
+    (:ollama      . (0.0 . 0.0)))    ; 本地推理，无 API 费用
+  "provider → (输入单价 . 输出单价)，单位：美元 / 1M token。
+
+只覆盖粗略估算所需的几家旗舰档位；未列出的 provider 按 0 计
+（见 estimate-cost 的说明）。
+
+注：此前这里是一张 ecase，只认 4 个 provider——其余（deepseek /
+gemini / mistral / minimax / dashscope 以及后来加入的几家）一律
+ecase 落空报错。成本估算这种边角功能不该把调用方整个打断，
+改成查表 + 未知回落。
+
+单位也随之修正：注释一直写「$3/1M tokens」，值却按「$/1K」写成
+0.003，再乘 1e-6——算出来的成本比真实值小 1000 倍。现在表里的值
+与注释同为「每 1M token 美元」，乘 1e-6 得到每 token 单价。")
+
 (defun estimate-cost (client input-tokens &optional (output-tokens 0))
   "估算请求成本
 
@@ -479,31 +499,17 @@
   OUTPUT-TOKENS - 输出 token 数（可选）
 
 返回：
-  估算成本（美元）
+  估算成本（美元）；provider 不在定价表里时返回 0.0
 
 注意：
-  这是基于公开定价的粗略估算
-  实际成本可能有所不同
+  这是基于公开定价的粗略估算，按 provider 的旗舰档位计，
+  不区分具体模型；实际成本以厂商账单为准。
   CLIENT 也可以直接传 provider 实例"
-  (let ((provider (if (typep client 'client)
-                      (client-provider-name client)
-                      (cl-agent.core:provider-name client)))
-        (input-price 0.0)
-        (output-price 0.0))
-    (ecase provider
-      (:anthropic
-       (setf input-price 0.003)    ; $3/1M tokens (input)
-       (setf output-price 0.015))  ; $15/1M tokens (output)
-      (:openai
-       (setf input-price 0.005)    ; GPT-4o: $5/1M tokens
-       (setf output-price 0.015))  ; $15/1M tokens
-      (:ollama
-       ;; Ollama 是免费的
-       (setf input-price 0.0)
-       (setf output-price 0.0))
-      (:zhipu
-       ;; 智谱 AI 定价（人民币转美元估算）
-       (setf input-price 0.001)
-       (setf output-price 0.002)))
+  (let* ((provider (if (typep client 'client)
+                       (client-provider-name client)
+                       (cl-agent.core:provider-name client)))
+         (pricing (cdr (assoc provider *provider-pricing*)))
+         (input-price (if pricing (car pricing) 0.0))
+         (output-price (if pricing (cdr pricing) 0.0)))
     (+ (* input-tokens input-price 1e-6)
        (* output-tokens output-price 1e-6))))

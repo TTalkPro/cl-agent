@@ -67,43 +67,41 @@ Returns:
 ;;; ============================================================
 ;;; Built-in Provider Registration
 ;;; ============================================================
+;;;
+;;; 一张表，不是十几段复制粘贴的 register-provider——同一个事实
+;;; （provider 关键字 ↔ 工厂函数）只写一遍。新增内置 provider 只需
+;;; 在表里加一行；忘记加时 make-provider / create-chat-model 一并失效，
+;;; 不会出现「注册了但工厂名写错」这种半可用状态。
+;;;
+;;; 注：表里存的是工厂函数的**符号**而非 #'函数对象。apply 接受函数
+;;; 名符号，于是调用时才解析——provider 文件单独重新编译后，注册表
+;;; 自动指向新定义，不必重新加载 registry。
 
-;; Register built-in providers
-(register-provider :anthropic
-  (lambda (&rest args)
-    (apply #'cl-agent.llm.providers:make-anthropic-provider args)))
+(defparameter +builtin-provider-factories+
+  '(;; —— Anthropic 格式 ——
+    (:anthropic   . cl-agent.llm.providers:make-anthropic-provider)
+    (:minimax     . cl-agent.llm.providers:make-minimax-provider)
 
-(register-provider :openai
-  (lambda (&rest args)
-    (apply #'cl-agent.llm.providers:make-openai-provider args)))
+    ;; —— OpenAI 兼容 ——
+    (:openai      . cl-agent.llm.providers:make-openai-provider)
+    (:zhipu       . cl-agent.llm.providers:make-zhipu-provider)
+    (:deepseek    . cl-agent.llm.providers:make-deepseek-provider)
+    (:gemini      . cl-agent.llm.providers:make-gemini-provider)
+    (:mistral     . cl-agent.llm.providers:make-mistral-provider)
+    (:xai         . cl-agent.llm.providers:make-xai-provider)
+    (:moonshot    . cl-agent.llm.providers:make-moonshot-provider)
+    (:siliconflow . cl-agent.llm.providers:make-siliconflow-provider)
+    (:openrouter  . cl-agent.llm.providers:make-openrouter-provider)
+    (:ollama      . cl-agent.llm.providers:make-ollama-provider)
 
-(register-provider :zhipu
-  (lambda (&rest args)
-    (apply #'cl-agent.llm.providers:make-zhipu-provider args)))
+    ;; —— 厂商原生格式 ——
+    (:dashscope   . cl-agent.llm.providers:make-dashscope-provider))
+  "内置 provider 关键字 → 工厂函数名。")
 
-(register-provider :ollama
-  (lambda (&rest args)
-    (apply #'cl-agent.llm.providers:make-ollama-provider args)))
-
-(register-provider :dashscope
-  (lambda (&rest args)
-    (apply #'cl-agent.llm.providers:make-dashscope-provider args)))
-
-(register-provider :minimax
-  (lambda (&rest args)
-    (apply #'cl-agent.llm.providers:make-minimax-provider args)))
-
-(register-provider :deepseek
-  (lambda (&rest args)
-    (apply #'cl-agent.llm.providers:make-deepseek-provider args)))
-
-(register-provider :gemini
-  (lambda (&rest args)
-    (apply #'cl-agent.llm.providers:make-gemini-provider args)))
-
-(register-provider :mistral
-  (lambda (&rest args)
-    (apply #'cl-agent.llm.providers:make-mistral-provider args)))
+(dolist (entry +builtin-provider-factories+)
+  (register-provider (car entry)
+                     (let ((factory (cdr entry)))
+                       (lambda (&rest args) (apply factory args)))))
 
 ;;; ============================================================
 ;;; Provider Creation
@@ -177,6 +175,12 @@ Returns:
 (register-provider-alias "google" :gemini)
 (register-provider-alias "qwen" :dashscope)
 (register-provider-alias "bailian" :dashscope)
+(register-provider-alias "grok" :xai)
+(register-provider-alias "x-ai" :xai)
+(register-provider-alias "kimi" :moonshot)
+(register-provider-alias "moonshotai" :moonshot)
+(register-provider-alias "silicon" :siliconflow)
+(register-provider-alias "guiji" :siliconflow)
 
 ;;; ============================================================
 ;;; ChatModel 桥接（cl-agent-llm ↔ cl-agent.core 的 ChatModel 协议）
