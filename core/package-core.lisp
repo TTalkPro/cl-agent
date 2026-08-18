@@ -26,6 +26,7 @@
    #:llm-error
    #:llm-error-provider
    #:llm-error-model
+   #:embedding-error
    #:tool-error
    #:config-error
    #:missing-api-key-error
@@ -193,6 +194,20 @@
    #:llm-response-get-tool-calls
    #:llm-response-get-finish-reason
 
+   ;; === Embedding Protocol ===
+   #:llm-embed
+   #:provider-supports-embedding-p
+   #:provider-default-embedding-model
+   #:embedding-response
+   #:make-embedding-response
+   #:embedding-response-p
+   #:embedding-response-embeddings
+   #:embedding-response-model
+   #:embedding-response-usage
+   #:embedding-response-raw
+   #:embedding-response-first
+   #:embedding-dimensions
+
    ;; === LLM Provider Protocol ===
    ;; Core protocol
    #:llm-chat
@@ -330,6 +345,7 @@
    #:tool-response-message
    #:message-role
    #:message-text
+   #:message-media
    #:message-metadata
    #:assistant-tool-calls
    #:tool-responses
@@ -355,6 +371,33 @@
    #:messages->neutral
    #:neutral->message
    #:neutral->messages
+
+   ;; ==================== 多模态输入（Media）====================
+   #:media
+   #:mediap
+   #:make-media
+   #:image-media
+   #:audio-media
+   #:document-media
+   #:media-from-file
+   #:media-kind
+   #:media-content-type
+   #:media-data
+   #:media-url
+   #:media-name
+   #:media-data-uri
+   ;; MIME 推断
+   #:guess-media-type
+   #:media-kind-from-type
+   #:media-format-from-type
+   #:+media-type-by-extension+
+   #:read-file-octets
+   ;; 中立 plist 互转 + 编码（provider 侧调这几个）
+   #:media->neutral
+   #:neutral->media
+   #:media-list->neutral
+   #:media-neutral-base64
+   #:media-neutral-data-uri
 
    ;; ==================== ChatOptions ====================
    #:chat-options

@@ -41,9 +41,12 @@
    #:openai-compat-provider
    #:define-openai-compat-provider
    #:provider-auth-headers
+   #:provider-request-headers
    #:provider-finalize-request
    #:parse-openai-compat-response
    #:provider-api-key
+   #:provider-extra-headers
+   #:merge-header-alists
 
    ;; ==================== OpenAI 提供商 ====================
    #:openai-provider
@@ -83,6 +86,23 @@
    #:response-complete-p
    #:get-suggested-max-tokens
 
+   ;; ==================== xAI Grok 提供商 ====================
+   #:xai-provider
+   #:make-xai-provider
+
+   ;; ==================== Moonshot（Kimi）提供商 ====================
+   #:moonshot-provider
+   #:make-moonshot-provider
+
+   ;; ==================== SiliconFlow（硅基流动）提供商 ====================
+   #:siliconflow-provider
+   #:make-siliconflow-provider
+
+   ;; ==================== OpenRouter 聚合网关 ====================
+   #:openrouter-provider
+   #:make-openrouter-provider
+   #:make-openrouter-provider-with-attribution
+
    ;; ==================== 阿里云 DashScope 提供商 ====================
    #:dashscope-provider
    #:make-dashscope-provider
@@ -117,6 +137,14 @@
                 #:make-ollama-provider
                 #:make-zhipu-provider
                 #:make-dashscope-provider
+                #:make-minimax-provider
+                #:make-deepseek-provider
+                #:make-gemini-provider
+                #:make-mistral-provider
+                #:make-xai-provider
+                #:make-moonshot-provider
+                #:make-siliconflow-provider
+                #:make-openrouter-provider
                 #:response-complete-p)
   (:export
    ;; ==================== 客户端 ====================
@@ -142,13 +170,21 @@
    #:base-provider-stream-endpoint
    #:base-provider-timeout
 
-   ;; 提供商工厂
+   ;; 提供商工厂（门面：符号本体来自 cl-agent.llm.providers）
    #:make-provider
    #:make-anthropic-provider
    #:make-openai-provider
    #:make-ollama-provider
    #:make-zhipu-provider
    #:make-dashscope-provider
+   #:make-minimax-provider
+   #:make-deepseek-provider
+   #:make-gemini-provider
+   #:make-mistral-provider
+   #:make-xai-provider
+   #:make-moonshot-provider
+   #:make-siliconflow-provider
+   #:make-openrouter-provider
 
    ;; 提供商访问器（统一接口）
    ;; provider-name 使用 cl-agent.core 的泛型函数
@@ -201,10 +237,35 @@
    #:stream-context
    #:make-stream-context
 
+   ;; ==================== 嵌入向量 ====================
+   ;; SPI 与统一响应定义在 cl-agent.core（core/llm/embedding.lisp），
+   ;; 这里是 OpenAI 兼容实现 + 面向应用的便捷函数
+   #:llm-embed
+   #:embed
+   #:embed-batch
+   #:embed-response
+   #:cosine-similarity
+   #:provider-embedding-endpoint
+   #:provider-default-embedding-model
+   #:provider-supports-embedding-p
+   #:build-embedding-request
+   #:parse-embedding-response
+   ;; embedding-response 访问器（重导出 cl-agent.core）
+   #:embedding-response
+   #:make-embedding-response
+   #:embedding-response-p
+   #:embedding-response-embeddings
+   #:embedding-response-model
+   #:embedding-response-usage
+   #:embedding-response-raw
+   #:embedding-response-first
+   #:embedding-dimensions
+
    ;; ==================== Token 计算 ====================
    #:count-tokens
    #:count-tokens-for-client
    #:estimate-cost
+   #:*provider-pricing*
 
    ;; 注：曾在此导出 *anthropic-api-url* / *default-anthropic-model* 一类
    ;; 全局配置变量，但无人读取且已过时——端点与默认模型由各
@@ -216,6 +277,8 @@
    #:parse-json-response
    #:build-api-url
    #:provider-headers
+   ;; 厂商错误体归一（llm-error 的 message 由它填充）
+   #:extract-api-error-message
 
    ;; 消息转换
    #:convert-message-to-provider
@@ -295,6 +358,7 @@
    #:create-provider
    #:register-provider-alias
    #:resolve-provider-name
+   #:+builtin-provider-factories+
 
    ;; 注：曾在此导出 factory/config.lisp 的一组 provider 配置函数，
    ;; 但那是个自封闭的死岛（registry/builder/providers 均不调用），
