@@ -47,6 +47,9 @@
    #:provider-api-key
    #:provider-extra-headers
    #:merge-header-alists
+   ;; 厂商专有参数的构造助手（<vendor>-extra-params 用它做取值校验）
+   #:enum->wire
+   #:wire-hash
 
    ;; ==================== OpenAI 提供商 ====================
    #:openai-provider
@@ -89,19 +92,31 @@
    ;; ==================== xAI Grok 提供商 ====================
    #:xai-provider
    #:make-xai-provider
+   #:xai-extra-params
+   #:+xai-reasoning-efforts+
+   #:+xai-search-modes+
+   #:+xai-source-types+
 
    ;; ==================== Moonshot（Kimi）提供商 ====================
    #:moonshot-provider
    #:make-moonshot-provider
+   #:moonshot-extra-params
+   #:+moonshot-thinking-types+
+   #:+moonshot-reasoning-efforts+
+   #:+moonshot-reasoning-histories+
 
    ;; ==================== SiliconFlow（硅基流动）提供商 ====================
    #:siliconflow-provider
    #:make-siliconflow-provider
+   #:siliconflow-extra-params
 
    ;; ==================== OpenRouter 聚合网关 ====================
    #:openrouter-provider
    #:make-openrouter-provider
    #:make-openrouter-provider-with-attribution
+   #:openrouter-extra-params
+   #:+openrouter-data-collections+
+   #:+openrouter-sort-strategies+
 
    ;; ==================== 阿里云 DashScope 提供商 ====================
    #:dashscope-provider
@@ -145,6 +160,11 @@
                 #:make-moonshot-provider
                 #:make-siliconflow-provider
                 #:make-openrouter-provider
+                ;; 厂商专有参数构造器（门面层同一符号）
+                #:xai-extra-params
+                #:moonshot-extra-params
+                #:siliconflow-extra-params
+                #:openrouter-extra-params
                 #:response-complete-p)
   (:export
    ;; ==================== 客户端 ====================
@@ -185,6 +205,11 @@
    #:make-moonshot-provider
    #:make-siliconflow-provider
    #:make-openrouter-provider
+   ;; 厂商专有参数构造器（校验取值后产出 :extra-params plist）
+   #:xai-extra-params
+   #:moonshot-extra-params
+   #:siliconflow-extra-params
+   #:openrouter-extra-params
 
    ;; 提供商访问器（统一接口）
    ;; provider-name 使用 cl-agent.core 的泛型函数

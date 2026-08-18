@@ -57,6 +57,10 @@
     ((provider cl-agent.llm.providers::ollama-provider))
   "nomic-embed-text")
 
+(defmethod cl-agent.core:provider-default-embedding-model
+    ((provider cl-agent.llm.providers::dashscope-provider))
+  "text-embedding-v3")
+
 ;;; OpenRouter 只做对话路由，没有嵌入端点；xai / moonshot / deepseek
 ;;; 亦未提供嵌入模型——不给它们方法，默认 NIL，调用时会明确报
 ;;; 「未指定嵌入模型」而不是拿对话模型去撞 400。
@@ -65,6 +69,14 @@
     ((provider cl-agent.llm.providers::openai-compat-provider))
   "OpenAI 兼容端点是否提供嵌入服务，以是否有默认嵌入模型为准"
   (not (null (cl-agent.core:provider-default-embedding-model provider))))
+
+(defmethod cl-agent.core:provider-supports-embedding-p
+    ((provider cl-agent.llm.providers::dashscope-provider))
+  t)
+
+(defmethod provider-embedding-endpoint
+    ((provider cl-agent.llm.providers::dashscope-provider))
+  cl-agent.llm.providers::+dashscope-embedding-endpoint+)
 
 ;;; ============================================================
 ;;; 请求构建
@@ -168,6 +180,95 @@ TEXTS 接受单个字符串或字符串列表；返回的 embeddings 顺序与�
                     (cl-agent.core:json-stringify request-body)
                     :timeout (provider-timeout provider))))
     (parse-embedding-response response)))
+
+;;; ============================================================
+;;; llm-embed 实现（DashScope 原生格式）
+;;; ============================================================
+;;;
+;;; DashScope 的嵌入 API 与对话一样是自家形状，不是 OpenAI 兼容的：
+;;;   请求 {"model":..., "input":{"texts":[...]}, "parameters":{"dimension":N}}
+;;;   响应 {"output":{"embeddings":[{"text_index":0,"embedding":[...]}]},
+;;;         "usage":{"total_tokens":N}}
+;;; text_index 与 OpenAI 的 index 同义，同样必须排序后再产出。
+
+(defun build-dashscope-embedding-request (provider texts &key model dimensions
+                                                              text-type
+                                                              extra-params)
+  "构建 DashScope 原生嵌入请求体"
+  (let ((body (make-hash-table :test 'equal))
+        (input (make-hash-table :test 'equal))
+        (parameters (make-hash-table :test 'equal))
+        (effective-model
+          (or model
+              (cl-agent.core:provider-default-embedding-model provider))))
+    (setf (gethash "model" body) effective-model)
+    (setf (gethash "texts" input) (coerce texts 'vector))
+    (setf (gethash "input" body) input)
+    ;; 可选参数「存在才发送」
+    (when dimensions
+      (setf (gethash "dimension" parameters) dimensions))
+    (when text-type
+      (setf (gethash "text_type" parameters) text-type))
+    (when extra-params
+      (loop for (key value) on extra-params by #'cddr
+            do (setf (gethash (if (stringp key)
+                                  key
+                                  (substitute #\_ #\-
+                                              (string-downcase (string key))))
+                              parameters)
+                     value)))
+    (when (plusp (hash-table-count parameters))
+      (setf (gethash "parameters" body) parameters))
+    body))
+
+(defun parse-dashscope-embedding-response (response)
+  "解析 DashScope 原生嵌入响应，产出统一的 embedding-response"
+  (let* ((parsed (parse-json-response response))
+         (output (gethash "output" parsed))
+         (data (when output (gethash "embeddings" output)))
+         (items (cond ((null data) nil)
+                      ((vectorp data) (coerce data 'list))
+                      ((listp data) data)
+                      (t nil)))
+         (sorted (sort (copy-list items)
+                       #'<
+                       :key (lambda (item)
+                              (or (and (hash-table-p item)
+                                       (gethash "text_index" item))
+                                  0)))))
+    (cl-agent.core:make-embedding-response
+     :embeddings (mapcar (lambda (item)
+                           (parse-embedding-vector
+                            (when (hash-table-p item)
+                              (gethash "embedding" item))))
+                         sorted)
+     :model (gethash "model" parsed)
+     :usage (cl-agent.core:normalize-usage (gethash "usage" parsed))
+     :raw-response parsed)))
+
+(defmethod cl-agent.core:llm-embed
+    ((provider cl-agent.llm.providers::dashscope-provider) texts
+     &key model dimensions encoding-format extra-params)
+  "DashScope 原生嵌入实现（text-embedding-v1/v2/v3）。
+
+ENCODING-FORMAT 被忽略——DashScope 只返回 float 数组，没有这个旋钮；
+需要 text_type（query / document，检索场景区分查询与文档侧）时
+经 :extra-params '(:text-type \"query\") 下发。"
+  (declare (ignore encoding-format))
+  (let* ((text-list (if (stringp texts) (list texts) texts))
+         (request-body (build-dashscope-embedding-request
+                        provider text-list
+                        :model model
+                        :dimensions dimensions
+                        :extra-params extra-params))
+         (url (build-api-url provider (provider-embedding-endpoint provider)))
+         (headers (cl-agent.llm.providers::build-bearer-auth-headers provider))
+         (response (make-http-request
+                    url
+                    headers
+                    (cl-agent.core:json-stringify request-body)
+                    :timeout (provider-timeout provider))))
+    (parse-dashscope-embedding-response response)))
 
 ;;; ============================================================
 ;;; 便捷 API
