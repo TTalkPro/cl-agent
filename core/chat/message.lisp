@@ -44,6 +44,13 @@
 (defgeneric message-text (message)
   (:documentation "消息的文本内容（字符串，可能为空串）"))
 
+(defgeneric message-media (message)
+  (:documentation "消息携带的多模态附件（media 实例列表）。
+
+只有 user-message 会有；其余消息类型恒为 NIL，
+调用方无需先判类型。")
+  (:method ((message message)) nil))
+
 (defun messagep (obj)
   "是否为 message 实例"
   (typep obj 'message))
@@ -131,8 +138,17 @@
     :initarg :text
     :initform ""
     :reader message-text
-    :documentation "用户输入文本"))
-  (:documentation "用户消息（对标 UserMessage）"))
+    :documentation "用户输入文本")
+   (media
+    :initarg :media
+    :initform nil
+    :reader message-media
+    :documentation "多模态附件：media 实例列表（图片/音频/文档，可为空）"))
+  (:documentation "用户消息（对标 UserMessage）。
+
+文本之外可携带 media 附件——同一条消息里文本与附件一起送给模型，
+wire 形态由各 provider 翻译（OpenAI 的 content 分片数组 /
+Anthropic 的 content 块数组）。"))
 
 (defmethod message-role ((msg user-message)) :user)
 
@@ -174,9 +190,23 @@
   "创建系统消息"
   (make-instance 'system-message :text (or text "") :metadata metadata))
 
-(defun user-message (text &key metadata)
-  "创建用户消息"
-  (make-instance 'user-message :text (or text "") :metadata metadata))
+(defun user-message (text &key media metadata)
+  "创建用户消息。
+
+参数：
+  TEXT     - 文本内容
+  MEDIA    - 多模态附件：media 实例或其列表（可选）
+  METADATA - 附加元数据 plist（可选）
+
+示例：
+  (user-message \"这张图里有什么？\"
+                :media (image-media :url \"https://example.com/cat.png\"))"
+  (make-instance 'user-message
+                 :text (or text "")
+                 :media (cond ((null media) nil)
+                              ((listp media) media)
+                              (t (list media)))
+                 :metadata metadata))
 
 (defun assistant-message (text &key tool-calls metadata)
   "创建模型回复消息。TOOL-CALLS 为 tool-call 实例列表。"
@@ -229,7 +259,12 @@
   (list (list :role :system :content (message-text msg))))
 
 (defmethod message->neutral ((msg user-message))
-  (list (list :role :user :content (message-text msg))))
+  (let ((media (message-media msg)))
+    (list (append (list :role :user :content (message-text msg))
+                  ;; 附件降为中立 plist——CLOS media 不跨 SPI 边界，
+                  ;; 与 tool-call 同一纪律
+                  (when media
+                    (list :media (media-list->neutral media)))))))
 
 (defmethod message->neutral ((msg assistant-message))
   (let ((calls (assistant-tool-calls msg))
@@ -269,7 +304,9 @@
         (content (or (getf plist :content) "")))
     (ecase role
       (:system (system-message content))
-      (:user (user-message content))
+      (:user (user-message content
+                           :media (mapcar #'neutral->media
+                                          (getf plist :media))))
       (:assistant
        (assistant-message
         content
