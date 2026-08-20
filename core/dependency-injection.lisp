@@ -18,7 +18,7 @@
 ;;;;        (tools (:tool-registry)))
 ;;;;     (use-services memory tools))
 
-(in-package :cl-agent.core)
+(in-package :cl-agent/core)
 
 ;;; ============================================================
 ;;; 请求作用域

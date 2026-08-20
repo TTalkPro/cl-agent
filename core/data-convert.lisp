@@ -10,7 +10,7 @@
 ;;;;   - hash-table 用于 JSON 序列化
 ;;;;   - 提供双向转换
 
-(in-package :cl-agent.core)
+(in-package :cl-agent/core)
 
 ;;; ============================================================
 ;;; Plist <-> Hash-table 转换

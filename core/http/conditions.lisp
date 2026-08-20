@@ -11,7 +11,7 @@
 ;;;;   ├── http-timeout-error  ; 超时错误
 ;;;;   └── http-connection-error ; 连接错误
 
-(in-package #:cl-agent.core)
+(in-package #:cl-agent/core)
 
 ;;; ============================================================
 ;;; 基础 HTTP 错误

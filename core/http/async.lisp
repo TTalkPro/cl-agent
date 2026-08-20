@@ -27,7 +27,7 @@
 ;;;;   （lparallel task stealing），而且时间上常常已在提交处的 let 退出
 ;;;;   之后。所以未列入继承名单的特殊变量，其可见性不可依赖。
 ;;;;
-;;;;   列入 cl-agent.core:*inherited-special-variables* 的变量会在
+;;;;   列入 cl-agent/core:*inherited-special-variables* 的变量会在
 ;;;;   **提交时刻**于调用方线程快照，并在请求体实际执行处重建：
 ;;;;
 ;;;;     (with-inherited-specials (*request-id*)
@@ -35,9 +35,9 @@
 ;;;;         (setf f (http-get-async url))))   ; let 在此退出
 ;;;;     (http-future-value f)                 ; 请求体仍看到 "req-42"
 ;;;;
-;;;;   名单与 cl-agent.chat 的并行工具执行共用（同一个变量）。
+;;;;   名单与 cl-agent/chat 的并行工具执行共用（同一个变量）。
 
-(in-package #:cl-agent.core)
+(in-package #:cl-agent/core)
 
 ;;; ============================================================
 ;;; 线程池管理

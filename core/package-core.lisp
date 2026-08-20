@@ -13,9 +13,9 @@
 ;;; Core Infrastructure Package
 ;;; ============================================================
 
-(defpackage :cl-agent.core
+(defpackage :cl-agent/core
   (:use :cl)
-  (:nicknames :cla.core)
+  (:nicknames :cla/core)
   (:export
    ;; === Condition System ===
    #:cl-agent-error
@@ -45,7 +45,7 @@
    ;; InvokeResult，外加 5 个从未实现的 plugin-* defgeneric，共 34 个符号。
    ;; SBCL 调用图显示它们**全部零调用**：唯一的「调用」是文件内部的自闭环
    ;; （make-message 被 4 个构造器调用，而那 4 个本身零调用；message-p 同理），
-   ;; 没有任何外部入口。它们与 cl-agent.chat 真正在用的 CLOS 消息体系
+   ;; 没有任何外部入口。它们与 cl-agent/chat 真正在用的 CLOS 消息体系
    ;; 有 11 个同名符号——合并 chat 进 core 时正面撞车。整体删除。
    ;; 消息/ToolCall/Response 请用下方 chat 层的 CLOS 版本。
 
@@ -56,7 +56,7 @@
    #:generate-uuid
    #:timestamp-now
    ;; 注：alist-get 已移除（原实现是伪装成 alist 访问器的 plist 访问器，
-   ;; 且被 cl-agent.llm 的同名真实现静默覆盖）。plist 访问直接用 getf。
+   ;; 且被 cl-agent/llm 的同名真实现静默覆盖）。plist 访问直接用 getf。
    ;; 注：曾导出一批零调用的工具函数（plist-get / truncate-string /
    ;; clean-whitespace / string-empty-p / ensure-string / take / drop /
    ;; group-by / format-timestamp / make-tool），已随实现一并删除。
@@ -131,7 +131,7 @@
    #:type-to-json-type
    #:params->json-schema
    #:schema-to-hash-table
-   ;; JSON Schema 校验（cl-agent.core:validation-turn-filter 使用）
+   ;; JSON Schema 校验（cl-agent/core:validation-turn-filter 使用）
    #:validate-json-schema
    #:validate-json-text
    #:ensure-json-schema
@@ -231,7 +231,7 @@
    #:provider-default-temperature
 
    ;; ============================================================
-   ;; HTTP 客户端（原 cl-agent.http）
+   ;; HTTP 客户端（原 cl-agent/http）
    ;; ============================================================
    ;; ==================== 同步 API ====================
    ;; 核心请求函数
@@ -261,7 +261,7 @@
    #:http-future-wait
    #:http-future-cancel
 
-   ;; 动态绑定继承（转出 cl-agent.core 的同名符号，非副本）
+   ;; 动态绑定继承（转出 cl-agent/core 的同名符号，非副本）
    #:*inherited-special-variables*
    #:with-inherited-specials
 
@@ -273,8 +273,8 @@
    ;; 注：HTTP 传输层的 SSE 上下文（stream-context / make-stream-context /
    ;; stream-context-buffer|callback|stop-p）不导出——它只在 http/streaming.lisp
    ;; 内部使用，对外的 SSE 入口是 http-stream-sse。
-   ;; 而且 cl-agent.llm 另有一个同名但语义不同的 stream-context
-   ;; （LLM 客户端层的累积器，带 accumulator 槽）。llm :use cl-agent.core，
+   ;; 而且 cl-agent/llm 另有一个同名但语义不同的 stream-context
+   ;; （LLM 客户端层的累积器，带 accumulator 槽）。llm :use cl-agent/core，
    ;; 一旦这里导出，llm 的 defstruct 就会重定义 core 的 structure 并报错。
    ;; :use 只继承 external 符号——不导出，两者各自为政，互不干扰。
 
@@ -335,7 +335,7 @@
    #:json-body
 
    ;; ============================================================
-   ;; Chat Model API（原 cl-agent.chat）
+   ;; Chat Model API（原 cl-agent/chat）
    ;; ============================================================
    ;; ==================== 消息体系 ====================
    #:message
@@ -484,10 +484,10 @@
    #:find-callback-for-call
    ;; 注：ToolCallingManager（tool-calling-manager / execute-tool-calls /
    ;; concurrent-tool-calling-manager / tool-execution-result ...）已删除。
-   ;; 工具执行循环唯一住在 cl-agent.core:run-tool-loop，执行策略见
-   ;; cl-agent.kernel 的 sequential/virtual-thread/thread-pool 三个 manager。
+   ;; 工具执行循环唯一住在 cl-agent/core:run-tool-loop，执行策略见
+   ;; cl-agent/kernel 的 sequential/virtual-thread/thread-pool 三个 manager。
    ;; *inherited-special-variables* / with-inherited-specials 属于
-   ;; cl-agent.core（见 core/utils.lisp），需要时从那里取。
+   ;; cl-agent/core（见 core/utils.lisp），需要时从那里取。
    #:arguments->plist
    ;; 条件
    #:tool-execution-error
@@ -525,7 +525,7 @@
    #:+default-conversation-id+
 
    ;; ============================================================
-   ;; Kernel + Filter（原 cl-agent.kernel）
+   ;; Kernel + Filter（原 cl-agent/kernel）
    ;; ============================================================
    ;; ==================== Filter 类与构造 ====================
    #:filter

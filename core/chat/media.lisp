@@ -29,7 +29,7 @@
 ;;;;                 :media (list (image-media :path #p"/tmp/a.png")
 ;;;;                              (image-media :path #p"/tmp/b.jpg")))
 
-(in-package #:cl-agent.core)
+(in-package #:cl-agent/core)
 
 ;;; ============================================================
 ;;; MIME 推断

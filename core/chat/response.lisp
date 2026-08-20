@@ -8,10 +8,10 @@
 ;;;;   │     └── generation = assistant-message + finish-reason
 ;;;;   └── metadata: chat-response-metadata  (id / model / usage / raw)
 ;;;;
-;;;;   底层 provider 产出统一的 cl-agent.core:llm-response，
+;;;;   底层 provider 产出统一的 cl-agent/core:llm-response，
 ;;;;   由 llm-response->chat-response 在 ChatModel 适配层转换。
 
-(in-package #:cl-agent.core)
+(in-package #:cl-agent/core)
 
 ;;; ============================================================
 ;;; Generation
@@ -61,7 +61,7 @@
     :initarg :usage
     :initform nil
     :reader response-metadata-usage
-    :documentation "token 用量（cl-agent.core:llm-usage）")
+    :documentation "token 用量（cl-agent/core:llm-usage）")
    (raw
     :initarg :raw
     :initform nil
@@ -149,7 +149,7 @@
 ;;; ============================================================
 
 (defun llm-response->chat-response (llm-response)
-  "把 provider 统一响应（cl-agent.core:llm-response）转换为 chat-response"
+  "把 provider 统一响应（cl-agent/core:llm-response）转换为 chat-response"
   (let* ((tool-calls (mapcar (lambda (tc)
                                (make-tool-call
                                 :id (llm-tool-call-id tc)

@@ -1,7 +1,7 @@
 ;;;; conditions.lisp
 ;;;; CL-Agent - 统一错误处理系统
 
-(in-package :cl-agent.core)
+(in-package :cl-agent/core)
 
 ;;; ============================================================
 ;;; 基础错误条件

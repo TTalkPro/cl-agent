@@ -3,17 +3,17 @@
 ;;;;
 ;;;; 概述：
 ;;;;   1. 生成：把工具参数规格转换为 LLM 函数调用所需的 JSON Schema。
-;;;;      供 cl-agent.chat（工具体系）与 cl-agent.llm（provider 序列化）共用。
+;;;;      供 cl-agent/chat（工具体系）与 cl-agent/llm（provider 序列化）共用。
 ;;;;
 ;;;;      参数规格格式：
 ;;;;        ((name type description &key required-p default) ...)
 ;;;;
 ;;;;   2. 校验：validate-json-schema 校验 JSON 值是否符合 schema。
-;;;;      供 cl-agent.kernel 的 validation-turn-filter
+;;;;      供 cl-agent/kernel 的 validation-turn-filter
 ;;;;      （对标 Spring AI 2.0 StructuredOutputValidationAdvisor）使用：
 ;;;;      校验失败时带着错误信息递归重入下游，让模型自我纠正。
 
-(in-package #:cl-agent.core)
+(in-package #:cl-agent/core)
 
 (defun type-to-json-type (type-keyword)
   "将 Lisp 类型关键字转换为 JSON Schema 类型字符串

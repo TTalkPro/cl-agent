@@ -16,7 +16,7 @@
 ;;;;     （其对应的 assistant 工具调用已被裁掉），继续丢弃直到头部合法，
 ;;;;     避免 provider 校验报错。
 
-(in-package #:cl-agent.core)
+(in-package #:cl-agent/core)
 
 (alexandria:define-constant +default-conversation-id+ "default"
   :test #'equal

@@ -13,7 +13,7 @@
 ;;;; log:info 包（从没编译展开过所以没暴露）。已全部删除——需要 Clojure
 ;;;; 式线程宏或更多绑定宏时用 alexandria / arrows 这类专门库，框架不自造。
 
-(in-package :cl-agent.core)
+(in-package :cl-agent/core)
 
 ;;; ============================================================
 ;;; 绑定宏

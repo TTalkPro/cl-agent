@@ -20,11 +20,11 @@
 ;;;;     (assistant-message "好的" :tool-calls (list (make-tool-call ...)))
 ;;;;
 ;;;; 中立 plist：
-;;;;   Provider SPI（cl-agent.core:llm-chat）接收 (:role ... :content ...)
+;;;;   Provider SPI（cl-agent/core:llm-chat）接收 (:role ... :content ...)
 ;;;;   风格的中立消息。message->neutral / neutral->message 负责边界互转，
 ;;;;   CLOS 消息不跨越 SPI 边界。
 
-(in-package #:cl-agent.core)
+(in-package #:cl-agent/core)
 
 ;;; ============================================================
 ;;; 抽象基类

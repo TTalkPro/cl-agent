@@ -6,13 +6,13 @@
 ;;;;   chat-model-call (model prompt) → chat-response      —— ChatModel#call
 ;;;;   chat-model-stream (model prompt on-chunk) → 最终响应 —— StreamingChatModel#stream
 ;;;;
-;;;;   provider-chat-model 把实现了 cl-agent.core:llm-chat SPI 的任意
+;;;;   provider-chat-model 把实现了 cl-agent/core:llm-chat SPI 的任意
 ;;;;   provider（Anthropic/OpenAI/智谱/MiniMax/Mock...）适配为 ChatModel。
 ;;;;
 ;;;; 2.0 架构变更（对齐 Spring AI 2.0 GA）：
 ;;;;   ChatModel 只负责单次模型调用——解析工具引用并向模型注入工具
 ;;;;   schema，但**不执行工具**。工具执行循环上移到
-;;;;   cl-agent.core:run-tool-loop（由 invoke-turn 驱动，ChatClient
+;;;;   cl-agent/core:run-tool-loop（由 invoke-turn 驱动，ChatClient
 ;;;;   经 kernel 自动走到）。1.x 的 internal-tool-execution-enabled
 ;;;;   选项已随之移除。
 ;;;;
@@ -21,7 +21,7 @@
 ;;;;     (execute-tool-calls manager prompt response)
 ;;;;     → tool-execution-result → 用 conversation-history 组新 prompt 再调。
 
-(in-package #:cl-agent.core)
+(in-package #:cl-agent/core)
 
 ;;; ============================================================
 ;;; 条件
@@ -50,7 +50,7 @@
 
 返回：
   chat-response 实例（可能携带 tool-calls，由上层
-  cl-agent.core:run-tool-loop 或调用方处理）"))
+  cl-agent/core:run-tool-loop 或调用方处理）"))
 
 (defgeneric chat-model-stream (model prompt on-chunk)
   (:documentation "流式调用模型（单次，不执行工具）。
@@ -98,7 +98,7 @@
   ((provider
     :initarg :provider
     :reader chat-model-provider
-    :documentation "实现 cl-agent.core:llm-chat 的 provider 实例")
+    :documentation "实现 cl-agent/core:llm-chat 的 provider 实例")
    (default-options
     :initarg :default-options
     :initform nil
@@ -115,7 +115,7 @@
 
 示例：
   (make-provider-chat-model
-    (cl-agent.llm:make-anthropic-provider)
+    (cl-agent/llm:make-anthropic-provider)
     :default-options (make-chat-options :temperature 0.3))"
   (make-instance 'provider-chat-model
                  :provider provider

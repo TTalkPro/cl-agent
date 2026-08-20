@@ -1,13 +1,13 @@
 ;;;; utils.lisp
 ;;;; CL-Agent - 核心工具函数
 
-(in-package :cl-agent.core)
+(in-package :cl-agent/core)
 
 ;;; ============================================================
 ;;; ID 生成器 / 时间戳提供者
 ;;; ============================================================
 ;;;
-;;; 这两个工厂原先住在独立的 cl-agent.core.protocols 包里（core/protocols/
+;;; 这两个工厂原先住在独立的 cl-agent/core/protocols 包里（core/protocols/
 ;;; protocols.lisp）。那个包统共只导出这两个符号，却占着 `protocols` 这个
 ;;; 极宽泛的昵称——还容易与 protocols/ 子系统（A2A，另一回事）混淆。
 ;;; 它排在 utils 之后加载，于是下面的默认实现只能靠 find-package +
@@ -139,15 +139,15 @@
 ;;; 用在真正的 alist 上，奇数长度直接抛 malformed property list，
 ;;; 偶数长度则恒返回 default（字符串键永不 eq）。它实际只对 plist 有效，
 ;;; 而那正是下面 plist-get 的功能，两者逐字等价。
-;;; 它在 core 内零调用，且被 cl-agent.llm 中同名的真 alist 访问器
+;;; 它在 core 内零调用，且被 cl-agent/llm 中同名的真 alist 访问器
 ;;; （llm/providers.lisp，35 处调用）静默覆盖——那才是干活的那个。
-;;; 故删除本副本并取消导出，让 alist-get 归 cl-agent.llm 私有。
+;;; 故删除本副本并取消导出，让 alist-get 归 cl-agent/llm 私有。
 ;;; 需要 plist 访问直接用 getf（此处曾有 plist-get——对 getf 的逐字
 ;;; 包装，零调用，已删）。
 
 
 ;;; 注：此处曾有一个 build-url (base-url params)——零调用的死实现。
-;;; 真正在用的是 cl-agent.http 那个 (base-url &optional path query-params)
+;;; 真正在用的是 cl-agent/http 那个 (base-url &optional path query-params)
 ;;; （被 http-get / http-get-async 调用）。两者同名不同签名，
 ;;; 合并 http 进 core 时必然撞车；删死留活。
 
@@ -176,7 +176,7 @@
 (defvar *inherited-special-variables* '()
   "需要跨线程继承的特殊变量名列表（符号列表）。
 
-被 cl-agent.chat 的并行工具执行与 cl-agent.http 的异步请求共用：
+被 cl-agent/chat 的并行工具执行与 cl-agent/http 的异步请求共用：
 列入的变量会在提交线程快照当前值，并在任务实际执行处重新绑定。
 
   (defvar *request-id* nil)
