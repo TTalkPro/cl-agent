@@ -10,7 +10,7 @@
 ;;;;   - 只覆盖需要自定义的部分
 ;;;;   - 保持与现有 API 的兼容性
 
-(in-package :cl-agent.llm.providers)
+(in-package :cl-agent/llm/providers)
 
 ;;; ============================================================
 ;;; 通用辅助函数
@@ -40,7 +40,7 @@
           (cond
             ((hash-table-p schema) schema)
             ((and (listp schema) (keywordp (first schema)))
-             (cl-agent.core:schema-to-hash-table schema))
+             (cl-agent/core:schema-to-hash-table schema))
             (t (let ((empty (make-hash-table :test 'equal)))
                  (setf (gethash "type" empty) "object")
                  (setf (gethash "properties" empty) (make-hash-table :test 'equal))
@@ -78,7 +78,7 @@
                           ((hash-table-p arguments-raw) arguments-raw)
                           ((stringp arguments-raw)
                            (handler-case
-                               (cl-agent.core:json-parse arguments-raw)
+                               (cl-agent/core:json-parse arguments-raw)
                              (error () arguments-raw)))
                           (t arguments-raw))
         collect (list :id id
@@ -124,7 +124,7 @@ build-params：推理类模型对强塞的默认值敏感，且 null 字段会�
 
 EXTRA-PARAMS 为厂商专有参数逃生通道（plist，键为字符串或关键字），
 直接并入请求体顶层，可覆盖任何字段（对标 clj-agent :extra-body）。"
-  (let ((model-name (or model (cl-agent.llm:provider-default-model provider)))
+  (let ((model-name (or model (cl-agent/llm:provider-default-model provider)))
         (body (make-hash-table :test 'equal)))
     ;; 基础字段
     (setf (gethash "model" body) model-name)
@@ -190,25 +190,25 @@ EXTRA-PARAMS 为厂商专有参数逃生通道（plist，键为字符串或关�
         (payload (make-hash-table :test 'equal)))
     (case kind
       ((:image :video)
-       (let ((uri (cl-agent.core:media-neutral-data-uri media)))
+       (let ((uri (cl-agent/core:media-neutral-data-uri media)))
          (when uri
            (setf (gethash "url" payload) uri)
            (setf (gethash "type" part) "image_url")
            (setf (gethash "image_url" part) payload)
            part)))
       (:audio
-       (let ((b64 (cl-agent.core:media-neutral-base64 media)))
+       (let ((b64 (cl-agent/core:media-neutral-base64 media)))
          (when b64
            (setf (gethash "data" payload) b64)
            (setf (gethash "format" payload)
-                 (or (cl-agent.core:media-format-from-type
+                 (or (cl-agent/core:media-format-from-type
                       (getf media :media-type))
                      "wav"))
            (setf (gethash "type" part) "input_audio")
            (setf (gethash "input_audio" part) payload)
            part)))
       (t
-       (let ((uri (cl-agent.core:media-neutral-data-uri media)))
+       (let ((uri (cl-agent/core:media-neutral-data-uri media)))
          (when uri
            (setf (gethash "filename" payload)
                  (or (getf media :name) "file"))
@@ -290,11 +290,11 @@ EXTRA-PARAMS 为厂商专有参数逃生通道（plist，键为字符串或关�
                         ((stringp args) args)
                         ((null args) "{}")
                         ((hash-table-p args)
-                         (cl-agent.core:json-stringify args))
+                         (cl-agent/core:json-stringify args))
                         ((listp args)
-                         (cl-agent.core:json-stringify
-                          (cl-agent.core:plist-to-hash args)))
-                        (t (cl-agent.core:json-stringify args)))))
+                         (cl-agent/core:json-stringify
+                          (cl-agent/core:plist-to-hash args)))
+                        (t (cl-agent/core:json-stringify args)))))
               (setf (gethash "function" tc-hash) fn-hash))
          collect tc-hash)
    'vector))

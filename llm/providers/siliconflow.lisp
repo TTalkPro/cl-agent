@@ -15,7 +15,7 @@
 ;;;;   多模态 Qwen/Qwen2.5-VL-72B-Instruct（走统一的 :media 通道）
 ;;;;   嵌入   BAAI/bge-m3、BAAI/bge-large-zh-v1.5（见 embeddings.lisp）
 
-(in-package :cl-agent.llm.providers)
+(in-package :cl-agent/llm/providers)
 
 (define-openai-compat-provider siliconflow
   :base-url "https://api.siliconflow.cn/v1"
@@ -53,8 +53,8 @@
             :extra-params (siliconflow-extra-params :enable-thinking t
                                                     :thinking-budget 2048))"
   (when (and min-p (or (< min-p 0) (> min-p 1)))
-    (cl-agent.core:signal-error
-     'cl-agent.core:validation-error
+    (cl-agent/core:signal-error
+     'cl-agent/core:validation-error
      :message (format nil "min-p 应在 [0, 1] 区间，实际 ~S" min-p)
      :field "min-p"))
   (let ((params nil))

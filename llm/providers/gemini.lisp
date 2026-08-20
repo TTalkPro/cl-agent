@@ -8,7 +8,7 @@
 ;;;;   Google 的 OpenAI 兼容端点为 .../v1beta/openai/chat/completions，
 ;;;;   base-url 必须含 /openai（默认 endpoint 再拼 /chat/completions）。
 
-(in-package :cl-agent.llm.providers)
+(in-package :cl-agent/llm/providers)
 
 (define-openai-compat-provider gemini
   :base-url "https://generativelanguage.googleapis.com/v1beta/openai"

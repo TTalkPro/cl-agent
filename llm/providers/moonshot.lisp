@@ -14,7 +14,7 @@
 ;;;;
 ;;;; 思考预算经 :extra-params 下发（wire 字段 thinking）。
 
-(in-package :cl-agent.llm.providers)
+(in-package :cl-agent/llm/providers)
 
 (define-openai-compat-provider moonshot
   :base-url "https://api.moonshot.ai/v1"
@@ -69,8 +69,8 @@ Anthropic 系 provider 实现。Kimi 的思考走自家 wire 字段，故单列�
         (history (enum->wire reasoning-history +moonshot-reasoning-histories+
                              :field "reasoning-history")))
     (when (and thinking-budget (< thinking-budget 1024))
-      (cl-agent.core:signal-error
-       'cl-agent.core:validation-error
+      (cl-agent/core:signal-error
+       'cl-agent/core:validation-error
        :message (format nil "thinking-budget 不得小于 1024，实际 ~S" thinking-budget)
        :field "thinking-budget"))
     (when (or type thinking-budget)

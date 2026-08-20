@@ -7,7 +7,7 @@
 ;;;; 设计原则：
 ;;;;   - 所有提供商继承 base-provider 类
 ;;;;   - 提供统一的 CLOS 接口
-;;;;   - 错误处理使用 cl-agent.core 中的条件
+;;;;   - 错误处理使用 cl-agent/core 中的条件
 ;;;;
 ;;;; 使用示例：
 ;;;;   ;; 定义新的提供商
@@ -18,7 +18,7 @@
 ;;;;   (defmethod llm-chat ((provider my-provider) messages &key ...)
 ;;;;     ...)
 
-(in-package :cl-agent.llm)
+(in-package :cl-agent/llm)
 
 ;;; ============================================================
 ;;; 提供商基类
@@ -60,8 +60,8 @@
 ;;; 泛型函数定义
 ;;; ============================================================
 
-;;; llm-chat 泛型函数现定义在 cl-agent.kernel 包中（core/kernel/kernel.lisp）
-;;; cl-agent.llm 包通过 :import-from 导入并重导出该符号
+;;; llm-chat 泛型函数现定义在 cl-agent/kernel 包中（core/kernel/kernel.lisp）
+;;; cl-agent/llm 包通过 :import-from 导入并重导出该符号
 
 (defgeneric llm-available-p (provider)
   (:documentation "检查提供商是否可用
@@ -102,8 +102,8 @@
   (declare (ignore provider))
   t)
 
-;; Implement provider-name generic function from cl-agent.core
-(defmethod cl-agent.core:provider-name ((provider base-provider))
+;; Implement provider-name generic function from cl-agent/core
+(defmethod cl-agent/core:provider-name ((provider base-provider))
   "获取提供商名称"
   (base-provider-name provider))
 
@@ -191,7 +191,7 @@ dexador 在 force-binary 或 http-request-failed 路径上可能给出
 上下文超限、余额不足、参数不被该模型支持）全被丢在响应体里。"
   (let ((body (%ensure-error-body-string body)))
     (when (and body (string/= body ""))
-      (let ((parsed (handler-case (cl-agent.core:json-parse body)
+      (let ((parsed (handler-case (cl-agent/core:json-parse body)
                       (error () nil))))
         (if (hash-table-p parsed)
             (or (%error-node-message (gethash "error" parsed))
@@ -216,33 +216,33 @@ dexador 在 force-binary 或 http-request-failed 路径上可能给出
   响应体字符串
 
 错误：
-  如果请求失败，发出 cl-agent.core:llm-error——其 message 带上厂商
+  如果请求失败，发出 cl-agent/core:llm-error——其 message 带上厂商
   错误体里的原因，response-body 保留原始响应体供上层排查。"
   (handler-case
-      (let ((response (cl-agent.core:http-request url
+      (let ((response (cl-agent/core:http-request url
                                                    :method :post
                                                    :body body
                                                    :headers headers
                                                    :timeout timeout
                                                    :parse-json nil)))
-        (cl-agent.core:http-response-body response))
+        (cl-agent/core:http-response-body response))
     ;; HTTP 错误
-    (cl-agent.core:http-error (condition)
-      (let* ((raw-body (cl-agent.core:http-error-body condition))
+    (cl-agent/core:http-error (condition)
+      (let* ((raw-body (cl-agent/core:http-error-body condition))
              (response-body (or (%ensure-error-body-string raw-body) raw-body))
              (detail (extract-api-error-message raw-body)))
-        (cl-agent.core:signal-error
-         'cl-agent.core:llm-error
+        (cl-agent/core:signal-error
+         'cl-agent/core:llm-error
          :message (format nil "HTTP 请求失败: ~A~@[ - ~A~]"
-                          (cl-agent.core:http-error-status condition)
+                          (cl-agent/core:http-error-status condition)
                           detail)
-         :status-code (cl-agent.core:http-error-status condition)
+         :status-code (cl-agent/core:http-error-status condition)
          :response-body response-body
          :request-url url
          :cause condition)))
     ;; 其他错误
     (error (condition)
-      (cl-agent.core:signal-error 'cl-agent.core:llm-error
+      (cl-agent/core:signal-error 'cl-agent/core:llm-error
                                   :message (format nil "请求错误: ~A" condition)
                                   :request-url url
                                   :cause condition))))
@@ -257,13 +257,13 @@ dexador 在 force-binary 或 http-request-failed 路径上可能给出
   解析后的 Lisp 对象（plist 或 hash-table）
 
 错误：
-  如果解析失败，发出 cl-agent.core:llm-error"
+  如果解析失败，发出 cl-agent/core:llm-error"
   (handler-case
       (if (stringp response)
-          (cl-agent.core:json-parse response)
+          (cl-agent/core:json-parse response)
           response)
     (error (condition)
-      (cl-agent.core:signal-error 'cl-agent.core:llm-error
+      (cl-agent/core:signal-error 'cl-agent/core:llm-error
                                   :message (format nil "JSON 解析失败: ~A" condition)
                                   :cause condition))))
 
@@ -271,19 +271,19 @@ dexador 在 force-binary 或 http-request-failed 路径上可能给出
 ;;; 错误处理说明
 ;;; ============================================================
 ;;;
-;;; 错误条件已在 cl-agent.core 中统一定义：
+;;; 错误条件已在 cl-agent/core 中统一定义：
 ;;;
-;;;   - cl-agent.core:llm-error           - LLM 相关错误
-;;;   - cl-agent.core:api-error           - API 调用错误
-;;;   - cl-agent.core:missing-api-key-error - 缺少 API 密钥
+;;;   - cl-agent/core:llm-error           - LLM 相关错误
+;;;   - cl-agent/core:api-error           - API 调用错误
+;;;   - cl-agent/core:missing-api-key-error - 缺少 API 密钥
 ;;;
 ;;; 错误信号函数：
 ;;;
-;;;   - cl-agent.core:signal-error        - 通用错误信号
+;;;   - cl-agent/core:signal-error        - 通用错误信号
 ;;;
 ;;; 使用示例：
 ;;;
-;;;   (cl-agent.core:signal-error 'cl-agent.core:llm-error
+;;;   (cl-agent/core:signal-error 'cl-agent/core:llm-error
 ;;;                               :message "请求超时"
 ;;;                               :provider :openai
 ;;;                               :model "gpt-4o")

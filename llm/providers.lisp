@@ -15,7 +15,7 @@
 ;;;;   - 本文件提供统一的工厂函数和配置
 ;;;;   - 移除了旧的 defstruct 实现，统一使用 CLOS
 
-(in-package :cl-agent.llm)
+(in-package :cl-agent/llm)
 
 ;;; ============================================================
 ;;; 注：这里曾有一组 *anthropic-api-url* / *default-anthropic-model*
@@ -26,7 +26,7 @@
 ;;; ============================================================
 ;;; 注：这里曾有 make-anthropic-provider / make-ollama-provider /
 ;;; make-openai-provider / make-zhipu-provider 四个手写委托函数，
-;;; 函数体都只是 (apply #'cl-agent.llm.providers:make-X-provider args)。
+;;; 函数体都只是 (apply #'cl-agent/llm/providers:make-X-provider args)。
 ;;;
 ;;; 它们已被 package.lisp 的 :import-from 取代——主包直接重导出
 ;;; providers 的同一符号，语义完全等价，且不再需要手工同步：
@@ -69,10 +69,10 @@
   ;; 获取 API 密钥
   (let ((effective-key (or api-key
                            (when api-key-env-var
-                             (cl-agent.core:get-env api-key-env-var)))))
+                             (cl-agent/core:get-env api-key-env-var)))))
     ;; 检查是否必须有 API 密钥
     (when (and require-api-key-p (null effective-key))
-      (cl-agent.core:signal-error 'cl-agent.core:missing-api-key-error
+      (cl-agent/core:signal-error 'cl-agent/core:missing-api-key-error
                                   :message (format nil "~A API 密钥未设置，请设置 ~A 环境变量"
                                                    name api-key-env-var)
                                   :config-key api-key-env-var))
@@ -123,7 +123,7 @@ register-provider，无需回来改这里。
 ;;; 提供商访问器（统一接口）
 ;;; ============================================================
 ;;; 这些函数为所有提供商类型提供统一的访问接口
-;;; 注意：provider-name 使用 cl-agent.core 中定义的泛型函数
+;;; 注意：provider-name 使用 cl-agent/core 中定义的泛型函数
 ;;;       方法实现在 providers/base.lisp 中
 
 (defun provider-api-url (provider)
@@ -353,11 +353,11 @@ register-provider，无需回来改这里。
 错误处理：
   - 如果响应包含错误，发出 llm-error"
   (let ((parsed (if (stringp response)
-                    (cl-agent.core:json-parse response)
+                    (cl-agent/core:json-parse response)
                     response)))
     ;; 检查错误
     (when-let (error-info (alist-get parsed "error"))
-      (cl-agent.core:signal-error 'cl-agent.core:llm-error
+      (cl-agent/core:signal-error 'cl-agent/core:llm-error
                                   :message (alist-get error-info "message")
                                   :provider (provider-name provider)
                                   :status-code (alist-get error-info "type")))

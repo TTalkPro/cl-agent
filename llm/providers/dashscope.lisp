@@ -16,13 +16,13 @@
 ;;;; API 端点：
 ;;;;   - https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation
 
-(in-package :cl-agent.llm.providers)
+(in-package :cl-agent/llm/providers)
 
 ;;; ============================================================
 ;;; DashScope 提供商类
 ;;; ============================================================
 
-(defclass dashscope-provider (cl-agent.llm:base-provider)
+(defclass dashscope-provider (cl-agent/llm:base-provider)
   ((api-key :initarg :api-key
             :reader provider-api-key
             :documentation "DashScope API 密钥"))
@@ -83,7 +83,7 @@
                  (uiop:getenv "DASHSCOPE_API_KEY")
                  (uiop:getenv "BAILIAN_API_KEY"))))
     (unless key
-      (cl-agent.core:signal-error 'cl-agent.core:missing-api-key-error
+      (cl-agent/core:signal-error 'cl-agent/core:missing-api-key-error
                                   :message "DashScope API 密钥未设置，请设置 DASHSCOPE_API_KEY 或 BAILIAN_API_KEY 环境变量"
                                   :config-key "DASHSCOPE_API_KEY"))
 
@@ -116,7 +116,7 @@ DashScope 接受 data: URI，所以图片/音频/视频统一走 media-neutral-d
 纯文档（PDF）在 DashScope 属于另一套文件上传 API，不在多模态
 generation 端点里，这里返回 NIL 跳过而不是发一个必然 400 的请求。"
   (let ((kind (or (getf media :kind) :image))
-        (uri (cl-agent.core:media-neutral-data-uri media)))
+        (uri (cl-agent/core:media-neutral-data-uri media)))
     (when uri
       (let ((part (make-hash-table :test 'equal))
             (key (case kind
@@ -161,7 +161,7 @@ DashScope 的官方样例把附件排在文本之前，这里照此顺序。"
       \"max_tokens\": 2000
     }
   }"
-  (let ((model-name (or model (cl-agent.llm:provider-default-model provider)))
+  (let ((model-name (or model (cl-agent/llm:provider-default-model provider)))
         (body (make-hash-table :test 'equal))
         (input (make-hash-table :test 'equal))
         (parameters (make-hash-table :test 'equal)))
@@ -299,7 +299,7 @@ DashScope 的官方样例把附件排在文本之前，这里照此顺序。"
   }
 
 返回统一的 llm-response 对象"
-  (let* ((parsed (cl-agent.llm:parse-json-response response))
+  (let* ((parsed (cl-agent/llm:parse-json-response response))
          (output (gethash "output" parsed))
          (choices (when output (gethash "choices" output)))
          (first-choice (when (and choices (plusp (length choices)))
@@ -310,13 +310,13 @@ DashScope 的官方样例把附件排在文本之前，这里照此顺序。"
          (tool-calls (when message (gethash "tool_calls" message)))
          (finish-reason (when first-choice (gethash "finish_reason" first-choice))))
 
-    (cl-agent.core:make-llm-response
+    (cl-agent/core:make-llm-response
      :content (or content "")
      :tool-calls (when tool-calls
                    (parse-dashscope-tool-calls tool-calls))
-     :usage (cl-agent.core:normalize-usage (gethash "usage" parsed))
+     :usage (cl-agent/core:normalize-usage (gethash "usage" parsed))
      :model (gethash "model" parsed)
-     :finish-reason (cl-agent.core:normalize-finish-reason finish-reason)
+     :finish-reason (cl-agent/core:normalize-finish-reason finish-reason)
      :message-id (gethash "request_id" parsed)
      :raw-response parsed)))
 
@@ -338,7 +338,7 @@ DashScope 的官方样例把附件排在文本之前，这里照此顺序。"
 ;;; 协议实现
 ;;; ============================================================
 
-(defmethod cl-agent.llm:llm-chat ((provider dashscope-provider) messages
+(defmethod cl-agent/llm:llm-chat ((provider dashscope-provider) messages
                                    &key
                                    max-tokens
                                    ;; NIL 时不下发（SPI「存在才发送」契约）
@@ -370,23 +370,23 @@ DashScope 的官方样例把附件排在文本之前，这里照此顺序。"
                         :model model
                         :tools tools))
          ;; 构建 URL：带附件的请求走多模态端点（两个端点不通用）
-         (url (cl-agent.llm:build-api-url
+         (url (cl-agent/llm:build-api-url
                provider
                (if (messages-have-media-p messages)
                    +dashscope-multimodal-endpoint+
-                   (cl-agent.llm:provider-chat-endpoint provider))))
+                   (cl-agent/llm:provider-chat-endpoint provider))))
          ;; 使用 Bearer Token 认证
          (headers (build-bearer-auth-headers provider))
          ;; 发送请求
-         (response (cl-agent.llm:make-http-request
+         (response (cl-agent/llm:make-http-request
                     url
                     headers
-                    (cl-agent.core:json-stringify request-body)
-                    :timeout (cl-agent.llm:provider-timeout provider))))
+                    (cl-agent/core:json-stringify request-body)
+                    :timeout (cl-agent/llm:provider-timeout provider))))
     ;; 解析响应
     (parse-dashscope-response response)))
 
-(defmethod cl-agent.llm:llm-available-p ((provider dashscope-provider))
+(defmethod cl-agent/llm:llm-available-p ((provider dashscope-provider))
   "检查 DashScope 提供商是否可用"
   (and (slot-boundp provider 'api-key)
        (provider-api-key provider)

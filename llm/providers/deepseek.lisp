@@ -17,7 +17,7 @@
 ;;;;   - deepseek-reasoner 忽略 temperature/top_p/presence_penalty/
 ;;;;     frequency_penalty —— 本实现「存在才发送」，不传即安全
 
-(in-package :cl-agent.llm.providers)
+(in-package :cl-agent/llm/providers)
 
 (define-openai-compat-provider deepseek
   :base-url "https://api.deepseek.com"
@@ -79,9 +79,9 @@
   (let ((beta-provider (make-instance 'deepseek-provider
                                       :name :deepseek
                                       :api-url +deepseek-beta-base-url+
-                                      :default-model (cl-agent.llm:base-provider-default-model provider)
-                                      :chat-endpoint (cl-agent.llm:base-provider-chat-endpoint provider)
-                                      :stream-endpoint (cl-agent.llm:base-provider-stream-endpoint provider)
+                                      :default-model (cl-agent/llm:base-provider-default-model provider)
+                                      :chat-endpoint (cl-agent/llm:base-provider-chat-endpoint provider)
+                                      :stream-endpoint (cl-agent/llm:base-provider-stream-endpoint provider)
                                       :api-key (provider-api-key provider)
-                                      :timeout (cl-agent.llm:base-provider-timeout provider))))
-    (apply #'cl-agent.llm:llm-chat beta-provider (mark-prefix messages) args)))
+                                      :timeout (cl-agent/llm:base-provider-timeout provider))))
+    (apply #'cl-agent/llm:llm-chat beta-provider (mark-prefix messages) args)))

@@ -12,7 +12,7 @@
 ;;;;   X-Title      - 应用名
 ;;;; 二者都不是鉴权必需项，缺省不发。
 
-(in-package :cl-agent.llm.providers)
+(in-package :cl-agent/llm/providers)
 
 (define-openai-compat-provider openrouter
   :base-url "https://openrouter.ai/api/v1"

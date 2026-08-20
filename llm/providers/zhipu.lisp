@@ -13,7 +13,7 @@
 ;;;;
 ;;;; API 文档：https://open.bigmodel.cn/dev/api
 
-(in-package :cl-agent.llm.providers)
+(in-package :cl-agent/llm/providers)
 
 (define-openai-compat-provider zhipu
   :base-url "https://open.bigmodel.cn/api/paas/v4"
@@ -52,7 +52,7 @@ API 密钥格式为 id.secret 时直传完整格式，否则按 Bearer Token。"
 返回：
   思维链字符串，没有则 NIL"
   (typecase response
-    (cl-agent.core:llm-response (cl-agent.core:llm-response-reasoning response))
+    (cl-agent/core:llm-response (cl-agent/core:llm-response-reasoning response))
     (list (getf response :reasoning-content))
     (t nil)))
 
@@ -65,8 +65,8 @@ API 密钥格式为 id.secret 时直传完整格式，否则按 Bearer Token。"
 返回：
   T 表示正常完成（:stop），NIL 表示被截断或其他原因结束"
   (typecase response
-    (cl-agent.core:llm-response
-     (eq (cl-agent.core:llm-response-finish-reason response) :stop))
+    (cl-agent/core:llm-response
+     (eq (cl-agent/core:llm-response-finish-reason response) :stop))
     (list
      (let ((reason (getf response :finish-reason)))
        (and reason (string-equal (string reason) "stop"))))
@@ -78,7 +78,7 @@ API 密钥格式为 id.secret 时直传完整格式，否则按 Bearer Token。"
 说明：
   - GLM-4.7 / glm-4.6: 建议 4096（含思维链）
   - 其他模型: 建议 2048"
-  (let ((model (cl-agent.llm:provider-default-model provider)))
+  (let ((model (cl-agent/llm:provider-default-model provider)))
     (cond
       ((search "GLM-4.7" model) 4096)
       ((search "glm-4.6" model) 4096)

@@ -15,15 +15,15 @@
 ;;;;
 ;;;;   归一化是单一来源：parse-openai-compat-response 统一产出
 ;;;;   llm-response 对象（tool-calls 为 llm-tool-call 对象、usage 走
-;;;;   cl-agent.core:normalize-usage 别名归一、reasoning_content 提取）。
+;;;;   cl-agent/core:normalize-usage 别名归一、reasoning_content 提取）。
 
-(in-package :cl-agent.llm.providers)
+(in-package :cl-agent/llm/providers)
 
 ;;; ============================================================
 ;;; OpenAI 兼容基类
 ;;; ============================================================
 
-(defclass openai-compat-provider (cl-agent.llm:base-provider)
+(defclass openai-compat-provider (cl-agent/llm:base-provider)
   ((api-key
     :initarg :api-key
     :reader provider-api-key
@@ -94,11 +94,11 @@ HTTP 头名不区分大小写，直接 append 会让同一个头出现两次—�
   "解析 OpenAI 兼容响应，统一产出 llm-response 对象。
 
 - tool_calls -> llm-tool-call 对象（arguments 解析为对象，非 JSON 字符串）
-- usage      -> cl-agent.core:normalize-usage（permissive 别名归一，
+- usage      -> cl-agent/core:normalize-usage（permissive 别名归一，
                 含 cache 字段）
 - reasoning_content（DeepSeek/GLM 思维链）-> :reasoning
-- finish_reason -> cl-agent.core:normalize-finish-reason"
-  (let* ((parsed (cl-agent.llm:parse-json-response response))
+- finish_reason -> cl-agent/core:normalize-finish-reason"
+  (let* ((parsed (cl-agent/llm:parse-json-response response))
          (choices (gethash "choices" parsed))
          (first-choice (when (and choices (plusp (length choices)))
                          (elt choices 0)))
@@ -107,13 +107,13 @@ HTTP 头名不区分大小写，直接 append 会让同一个头出现两次—�
          (reasoning (when message (gethash "reasoning_content" message)))
          (tool-calls (when message (gethash "tool_calls" message)))
          (finish-reason (when first-choice (gethash "finish_reason" first-choice))))
-    (cl-agent.core:make-llm-response
+    (cl-agent/core:make-llm-response
      :content (or content "")
      :tool-calls (when tool-calls
                    (parse-tool-calls-openai-style tool-calls))
-     :usage (cl-agent.core:normalize-usage (gethash "usage" parsed))
+     :usage (cl-agent/core:normalize-usage (gethash "usage" parsed))
      :model (gethash "model" parsed)
-     :finish-reason (cl-agent.core:normalize-finish-reason finish-reason)
+     :finish-reason (cl-agent/core:normalize-finish-reason finish-reason)
      :reasoning reasoning
      :message-id (gethash "id" parsed)
      :raw-response parsed)))
@@ -122,7 +122,7 @@ HTTP 头名不区分大小写，直接 append 会让同一个头出现两次—�
 ;;; llm-chat 共享实现
 ;;; ============================================================
 
-(defmethod cl-agent.llm:llm-chat ((provider openai-compat-provider) messages
+(defmethod cl-agent/llm:llm-chat ((provider openai-compat-provider) messages
                                   &key max-tokens
                                        ;; NIL 时不下发（SPI「存在才发送」契约）
                                        temperature
@@ -159,18 +159,18 @@ SYSTEM 提示折叠进 messages（OpenAI 风格）；可选参数存在才发送
                          :presence-penalty presence-penalty
                          :tool-choice tool-choice
                          :extra-params extra-params)))
-         (url (cl-agent.llm:build-api-url
+         (url (cl-agent/llm:build-api-url
                provider
-               (cl-agent.llm:provider-chat-endpoint provider)))
+               (cl-agent/llm:provider-chat-endpoint provider)))
          (headers (provider-request-headers provider))
-         (response (cl-agent.llm:make-http-request
+         (response (cl-agent/llm:make-http-request
                     url
                     headers
-                    (cl-agent.core:json-stringify request-body)
-                    :timeout (cl-agent.llm:provider-timeout provider))))
+                    (cl-agent/core:json-stringify request-body)
+                    :timeout (cl-agent/llm:provider-timeout provider))))
     (parse-openai-compat-response response)))
 
-(defmethod cl-agent.llm:llm-available-p ((provider openai-compat-provider))
+(defmethod cl-agent/llm:llm-available-p ((provider openai-compat-provider))
   "默认可用性检查：API 密钥非空"
   (let ((key (provider-api-key provider)))
     (and key (not (string= key "")))))
@@ -194,8 +194,8 @@ VALUE 为 NIL 时返回 NIL（保持「存在才发送」语义）。
                    value
                    (intern (string-upcase (string value)) :keyword))))
       (unless (member key allowed)
-        (cl-agent.core:signal-error
-         'cl-agent.core:validation-error
+        (cl-agent/core:signal-error
+         'cl-agent/core:validation-error
          :message (format nil "~@[~A ~]取值 ~S 非法，可选：~{~S~^ / ~}"
                           field value allowed)
          :field (or field "extra-params")))
@@ -259,9 +259,9 @@ provider-finalize-request 于生成的类上实现。"
   (let* ((name-str (string-downcase (symbol-name name)))
          (keyword-name (intern (string-upcase name-str) :keyword))
          (class-name (intern (format nil "~A-PROVIDER" (string-upcase name-str))
-                             :cl-agent.llm.providers))
+                             :cl-agent/llm/providers))
          (factory-name (intern (format nil "MAKE-~A-PROVIDER" (string-upcase name-str))
-                               :cl-agent.llm.providers)))
+                               :cl-agent/llm/providers)))
     `(progn
        (defclass ,class-name (openai-compat-provider)
          ()
@@ -294,8 +294,8 @@ provider-finalize-request 于生成的类上实现。"
                `((when (and (null key)
                             (not (search "localhost" api-url))
                             (not (search "127.0.0.1" api-url)))
-                   (cl-agent.core:signal-error
-                    'cl-agent.core:missing-api-key-error
+                   (cl-agent/core:signal-error
+                    'cl-agent/core:missing-api-key-error
                     :message ,(format nil "~A API 密钥未设置~@[，请设置 ~A 环境变量~]"
                                       (string-capitalize name-str)
                                       (or env-key (first env-keys)))

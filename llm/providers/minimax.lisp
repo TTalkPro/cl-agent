@@ -17,7 +17,7 @@
 ;;;;   - MiniMax-M2.7 / MiniMax-M2.7-highspeed
 ;;;;   - MiniMax-M2.5 / MiniMax-M2.1 / MiniMax-M2
 
-(in-package :cl-agent.llm.providers)
+(in-package :cl-agent/llm/providers)
 
 ;;; ============================================================
 ;;; MiniMax 提供商类（Anthropic 兼容）
@@ -60,8 +60,8 @@ content 中的 <think> 推理块自动剥离到 llm-response-reasoning。"))
   (make-minimax-provider :model \"MiniMax-M3\")"
   (let ((key (or api-key (uiop:getenv "MINIMAX_API_KEY"))))
     (when (null key)
-      (cl-agent.core:signal-error
-       'cl-agent.core:missing-api-key-error
+      (cl-agent/core:signal-error
+       'cl-agent/core:missing-api-key-error
        :message "MiniMax API 密钥未设置，请设置 MINIMAX_API_KEY 环境变量"
        :config-key "MINIMAX_API_KEY"))
     (make-instance 'minimax-provider
@@ -91,17 +91,17 @@ content 中的 <think> 推理块自动剥离到 llm-response-reasoning。"))
                              (subseq content (+ start (length "<think>")) end)))
         (values content nil))))
 
-(defmethod cl-agent.llm:llm-chat :around ((provider minimax-provider) messages
+(defmethod cl-agent/llm:llm-chat :around ((provider minimax-provider) messages
                                           &key &allow-other-keys)
   "MiniMax M 系列：把 content 中的 <think> 推理块剥离到 reasoning 槽"
   (declare (ignore messages))
   (let ((response (call-next-method)))
-    (when (typep response 'cl-agent.core:llm-response)
+    (when (typep response 'cl-agent/core:llm-response)
       (multiple-value-bind (body thinking)
-          (split-think-block (cl-agent.core:llm-response-content response))
+          (split-think-block (cl-agent/core:llm-response-content response))
         (when thinking
-          (setf (cl-agent.core:llm-response-content response) body)
+          (setf (cl-agent/core:llm-response-content response) body)
           ;; 不覆盖已有 reasoning（如 thinking block 已提取的内容）
-          (unless (cl-agent.core:llm-response-reasoning response)
-            (setf (cl-agent.core:llm-response-reasoning response) thinking)))))
+          (unless (cl-agent/core:llm-response-reasoning response)
+            (setf (cl-agent/core:llm-response-reasoning response) thinking)))))
     response))

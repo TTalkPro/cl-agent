@@ -13,7 +13,7 @@
 ;;;; 取值 "low" / "high"）：
 ;;;;   (llm-chat provider msgs :extra-params '(:reasoning-effort "high"))
 
-(in-package :cl-agent.llm.providers)
+(in-package :cl-agent/llm/providers)
 
 (define-openai-compat-provider xai
   :base-url "https://api.x.ai/v1"
@@ -61,7 +61,7 @@
   (llm-chat provider messages
             :extra-params (xai-extra-params :reasoning-effort :high))
 
-  (cl-agent.core:make-chat-options
+  (cl-agent/core:make-chat-options
     :extra-params (xai-extra-params :search-mode :on
                                     :sources '(:web :news)
                                     :return-citations t))"

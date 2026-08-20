@@ -16,21 +16,21 @@
 ;;;;   - max_tokens 是必需参数
 ;;;;   - system 消息单独传递，不在 messages 数组中
 
-(in-package :cl-agent.llm.providers)
+(in-package :cl-agent/llm/providers)
 
 ;;; ============================================================
 ;;; Anthropic 提供商类
 ;;; ============================================================
 
-(defclass anthropic-provider (cl-agent.llm:base-provider)
+(defclass anthropic-provider (cl-agent/llm:base-provider)
   ((api-key :initarg :api-key
             :reader anthropic-provider-api-key
-            ;; 同时实现 cl-agent.core:provider-api-key 协议——调用方（如
+            ;; 同时实现 cl-agent/core:provider-api-key 协议——调用方（如
             ;; make-client）据此统一向 provider 取 key，无需再维护一张
             ;; 「provider → 环境变量名」的手写表。openai-compat 系早已用
             ;; :accessor provider-api-key 实现了它，此前只有 Anthropic 系
             ;; （含 minimax）缺席，于是它们在 make-client 里取不到 key。
-            :reader cl-agent.core:provider-api-key
+            :reader cl-agent/core:provider-api-key
             :documentation "Anthropic API 密钥")
    (anthropic-version :initarg :anthropic-version
                       :initform "2023-06-01"
@@ -77,7 +77,7 @@
   (let ((key (or api-key
                  (uiop:getenv "ANTHROPIC_API_KEY"))))
     (when (null key)
-      (cl-agent.core:signal-error 'cl-agent.core:missing-api-key-error
+      (cl-agent/core:signal-error 'cl-agent/core:missing-api-key-error
                                   :message "Anthropic API 密钥未设置，请设置 ANTHROPIC_API_KEY 环境变量"
                                   :config-key "ANTHROPIC_API_KEY"))
 
@@ -95,7 +95,7 @@
 ;;; 协议实现
 ;;; ============================================================
 
-(defmethod cl-agent.llm:llm-chat ((provider anthropic-provider) messages
+(defmethod cl-agent/llm:llm-chat ((provider anthropic-provider) messages
                                    &key
                                    (max-tokens 4096)
                                    temperature
@@ -152,24 +152,24 @@ NIL 表示不下发该字段。TEMPERATURE 此前默认 0.7，违反该契约：
                         :extra-params extra-params))
 
          ;; 2. 构建 URL
-         (url (cl-agent.llm:build-api-url
+         (url (cl-agent/llm:build-api-url
               provider
-              (cl-agent.llm:base-provider-chat-endpoint provider)))
+              (cl-agent/llm:base-provider-chat-endpoint provider)))
 
          ;; 3. 构建请求头
          (headers (build-anthropic-headers provider))
 
          ;; 4. 发送请求
-         (response (cl-agent.llm:make-http-request
+         (response (cl-agent/llm:make-http-request
                     url
                     headers
-                    (cl-agent.core:json-stringify request-body)
-                    :timeout (cl-agent.llm:base-provider-timeout provider))))
+                    (cl-agent/core:json-stringify request-body)
+                    :timeout (cl-agent/llm:base-provider-timeout provider))))
 
     ;; 5. 解析响应
     (parse-anthropic-response response)))
 
-(defmethod cl-agent.llm:llm-available-p ((provider anthropic-provider))
+(defmethod cl-agent/llm:llm-available-p ((provider anthropic-provider))
   "检查 Anthropic 提供商是否可用"
   (and (slot-boundp provider 'api-key)
        (anthropic-provider-api-key provider)
@@ -272,7 +272,7 @@ NIL 表示不下发该字段。TEMPERATURE 此前默认 0.7，违反该契约：
 返回：
   请求体 hash-table（JSON 格式）"
 
-  (let* ((model-name (or model (cl-agent.llm:base-provider-default-model provider)))
+  (let* ((model-name (or model (cl-agent/llm:base-provider-default-model provider)))
          ;; 分离系统消息和其他消息
          (parsed-messages (parse-messages-for-anthropic messages))
          (system-prompt (or system (getf parsed-messages :system)))
@@ -344,7 +344,7 @@ Anthropic 的 Messages API 不接受音频/视频输入，这两类返回 NIL �
          (setf (gethash "type" source) "url")
          (setf (gethash "url" source) url))
         (t
-         (let ((b64 (cl-agent.core:media-neutral-base64 media)))
+         (let ((b64 (cl-agent/core:media-neutral-base64 media)))
            ;; 调用方给的 data: URI：剥掉前缀，取出裸 base64
            (when (and (null b64) url)
              (let ((comma (position #\, url)))
@@ -440,7 +440,7 @@ Anthropic 的 Messages API 不接受音频/视频输入，这两类返回 NIL �
                          (tc-id (getf tc :id))
                          (tc-args (getf tc :arguments)))
                      (setf (gethash "type" tc-block) "tool_use")
-                     (setf (gethash "id" tc-block) (or tc-id (cl-agent.core:generate-uuid)))
+                     (setf (gethash "id" tc-block) (or tc-id (cl-agent/core:generate-uuid)))
                      (setf (gethash "name" tc-block)
                            (if (keywordp tc-name)
                                (string-downcase (symbol-name tc-name))
@@ -569,7 +569,7 @@ Anthropic 的 Messages API 不接受音频/视频输入，这两类返回 NIL �
                           ((hash-table-p schema-raw) schema-raw)
                           ;; plist schema（来自 params->json-schema）→ 转换为 hash-table
                           ((and (consp schema-raw) (keywordp (first schema-raw)))
-                           (cl-agent.core:schema-to-hash-table schema-raw))
+                           (cl-agent/core:schema-to-hash-table schema-raw))
                           ;; 默认空 schema
                           (t (let ((default-schema (make-hash-table :test 'equal)))
                                (setf (gethash "type" default-schema) "object")
@@ -619,7 +619,7 @@ CLOS 扩展点：Anthropic 兼容厂商（如 MiniMax）通过特化本泛型函
     }
   }"
 
-  (let* ((parsed (cl-agent.llm:parse-json-response response))
+  (let* ((parsed (cl-agent/llm:parse-json-response response))
          ;; 从 hash-table 中提取值（使用字符串键）
          (content-blocks (if (hash-table-p parsed)
                              (gethash "content" parsed)
@@ -642,14 +642,14 @@ CLOS 扩展点：Anthropic 兼容厂商（如 MiniMax）通过特化本泛型函
                          (getf parsed :id))))
 
     ;; 构建 llm-response 对象
-    ;; usage 走 cl-agent.core:normalize-usage（含 cache_read/cache_creation 字段）
-    (cl-agent.core:make-llm-response
+    ;; usage 走 cl-agent/core:normalize-usage（含 cache_read/cache_creation 字段）
+    (cl-agent/core:make-llm-response
      :content content
      :tool-calls (when tool-use
                    (parse-anthropic-tool-use tool-use))
-     :usage (cl-agent.core:normalize-usage usage)
+     :usage (cl-agent/core:normalize-usage usage)
      :model model-name
-     :finish-reason (cl-agent.core:normalize-finish-reason stop-reason)
+     :finish-reason (cl-agent/core:normalize-finish-reason stop-reason)
      :reasoning reasoning
      :reasoning-blocks reasoning-blocks
      :message-id message-id
