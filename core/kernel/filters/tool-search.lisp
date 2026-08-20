@@ -22,7 +22,7 @@
 ;;;; 「中文按二元组切分」也没写，中文查询恒 0 命中。三件全废，而 README
 ;;;; 一直把它列为内置 filter 之一、写着「省 78% token」。
 
-(in-package #:cl-agent.core)
+(in-package #:cl-agent/core)
 
 ;;; ============================================================
 ;;; IToolIndex 协议

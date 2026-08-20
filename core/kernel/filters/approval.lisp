@@ -4,7 +4,7 @@
 ;;;; 概述（对标 clj-agent approval-filter）：
 ;;;;   敏感工具执行前要求审批。审批通过 → 执行；拒绝 → 返回拒绝文本回传模型。
 
-(in-package #:cl-agent.core)
+(in-package #:cl-agent/core)
 
 (defun approval-filter (&key (approve-fn nil) (sensitive-names nil))
   "创建 approval-filter（:tool 链）。
@@ -33,7 +33,7 @@
      :approval
      :tool (lambda (req chain)
              (let* ((callback (tool-request-function req))
-                    (name (cl-agent.core:tool-callback-name callback))
+                    (name (cl-agent/core:tool-callback-name callback))
                     (lname (string-downcase name))
                     (args (tool-request-args req)))
                ;; 判断是否需要审批

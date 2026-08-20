@@ -5,7 +5,7 @@
 ;;;;   校验最终回答，不合格 → 把原因作为反馈重入整个循环。
 ;;;;   闭包链天然支持递归重入：多次 (chain req) = 多次完整循环。
 
-(in-package #:cl-agent.core)
+(in-package #:cl-agent/core)
 
 ;;; ============================================================
 ;;; validation-turn-filter
@@ -46,7 +46,7 @@
                                       (try (1+ attempt)
                                            (make-turn-request
                                             (append (turn-request-messages req)
-                                                    (list (cl-agent.core:user-message feedback)))
+                                                    (list (cl-agent/core:user-message feedback)))
                                             :context (turn-request-context req)
                                             :resume-p (turn-request-resume-p req))))))))))
              (try 0 req)))))
@@ -60,7 +60,7 @@
 
   参数：
   - schema    JSON Schema（hash-table 或 plist）
-  - parse-fn  JSON 解析函数（如 #'cl-agent.core:json-parse）；
+  - parse-fn  JSON 解析函数（如 #'cl-agent/core:json-parse）；
               缺省 NIL = 不解析，此时无从校验结构，一律放行
 
   返回：(lambda (response) → (values ok-p feedback))
@@ -74,7 +74,7 @@
   4. 解析成功            → 按 schema 校验，错误逐条回喂"
 
   (lambda (response)
-    (let ((text (cl-agent.core:chat-response-text response)))
+    (let ((text (cl-agent/core:chat-response-text response)))
       (cond
         ;; 1. 空文本
         ((or (null text)
@@ -91,7 +91,7 @@
                (values nil "输出不是合法 JSON，请只输出 JSON 本身，不要任何多余说明或 markdown 代码围栏。")
                ;; 4. 校验：validate-json-schema 返回的是「错误消息列表」，
                ;;    NIL 才代表通过——不是 ok-p。
-               (let ((errors (cl-agent.core:validate-json-schema parsed schema)))
+               (let ((errors (cl-agent/core:validate-json-schema parsed schema)))
                  (if (null errors)
                      (values t nil)
                      (values nil (format nil "输出不符合 Schema 要求（~{~A~^；~}），请修正后重新输出。"
