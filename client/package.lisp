@@ -3,7 +3,7 @@
 ;;;;
 ;;;; 概述（对标 clj-agent 的 clj-agent-client / SimpleAgent）：
 ;;;;
-;;;;   cl-agent.core 是**执行内核**：三链、filter、工具循环——完全控制，
+;;;;   cl-agent/core 是**执行内核**：三链、filter、工具循环——完全控制，
 ;;;;   但每次调用都得自己拼 conversation-id、自己接错误。
 ;;;;   本包是**面向应用的易用层**：一个有状态的 agent 对象，
 ;;;;   开箱即用地管住会话、可观测性与错误归一化。
@@ -22,10 +22,10 @@
 ;;;; agent 不自己存历史：历史仍由 core 的 memory-filter 按 conversation-id
 ;;;; 管，agent 只持 conversation-id + 轻量控制状态。
 
-(defpackage #:cl-agent.client
+(defpackage #:cl-agent/client
   (:use #:common-lisp)
-  (:nicknames #:cla.client)
-  (:import-from #:cl-agent.core
+  (:nicknames #:cla/client)
+  (:import-from #:cl-agent/core
                 #:log-debug #:log-info #:log-warn)
   (:export
    ;; ==================== Agent ====================

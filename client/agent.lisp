@@ -7,7 +7,7 @@
 ;;;; (:interrupt . 原因) 就暂停待审批，agent-resume 续跑。
 ;;;; 这不是另一套机制，就是回调的返回值（clj-agent 同款设计）。
 
-(in-package #:cl-agent.client)
+(in-package #:cl-agent/client)
 
 ;;; ============================================================
 ;;; Agent
@@ -79,14 +79,14 @@ memory-filter 按这个 ID 管，agent 只持 ID。")
 工具**结果**只能在执行后拿到，所以走 :tool 链。
 而 :on-tool-call 不在这里——它要能在执行**前**否决（返回 :interrupt），
 那是 kernel 的 tool-gate 的活，见 agent-gate。"
-  (cl-agent.core:make-filter
+  (cl-agent/core:make-filter
    :agent-callbacks
    :tool (lambda (req chain)
-           (let* ((cb (cl-agent.core:tool-request-function req))
-                  (name (cl-agent.core:tool-callback-name cb))
+           (let* ((cb (cl-agent/core:tool-request-function req))
+                  (name (cl-agent/core:tool-callback-name cb))
                   (result (funcall chain req)))
              (invoke-callback agent :on-tool-result name
-                              (cl-agent.core:tool-result->text result))
+                              (cl-agent/core:tool-result->text result))
              result))))
 
 (defun agent-gate (agent)
@@ -100,9 +100,9 @@ memory-filter 按这个 ID 管，agent 只持 ID。")
   这正是 clj-agent 的设计：**pause/resume 不是另一套机制，
   就是 on-tool-call 返回 interrupt**。配了这个回调就等于启用了 HITL。"
   (lambda (tool-call)
-    (let* ((name (cl-agent.core:tool-call-name tool-call))
-           (args (cl-agent.core:arguments->plist
-                  (cl-agent.core:tool-call-arguments tool-call)))
+    (let* ((name (cl-agent/core:tool-call-name tool-call))
+           (args (cl-agent/core:arguments->plist
+                  (cl-agent/core:tool-call-arguments tool-call)))
            (verdict (invoke-callback agent :on-tool-call name args)))
       (cond
         ((null verdict) :proceed)
@@ -163,15 +163,15 @@ memory-filter 按这个 ID 管，agent 只持 ID。")
   (when filters-p
     (error "make-agent 不接受 :filters——agent 层只暴露 :callbacks。~@
             要挂 filter 请自建 kernel 后经 :kernel 传入：~@
-              (make-agent :kernel (cl-agent.core:build-kernel~@
+              (make-agent :kernel (cl-agent/core:build-kernel~@
                                     :model m~@
                                     :filters (list ...))~@
                           :memory store)"))
   (let* ((store (cond ((eq memory :default)
-                       (cl-agent.core:make-message-window-chat-memory))
+                       (cl-agent/core:make-message-window-chat-memory))
                       (t memory)))
          (k (or kernel
-                (cl-agent.core:build-kernel
+                (cl-agent/core:build-kernel
                  :model model
                  :system system
                  :options options
@@ -179,7 +179,7 @@ memory-filter 按这个 ID 管，agent 只持 ID。")
                  :settings settings
                  :filters (remove nil
                                   (list (when store
-                                          (cl-agent.core:memory-filter store))))))))
+                                          (cl-agent/core:memory-filter store))))))))
     (let ((a (make-instance 'agent
                             :id (next-agent-id)
                             :kernel k
@@ -193,19 +193,19 @@ memory-filter 按这个 ID 管，agent 只持 ID。")
       ;;   :on-tool-call   → tool-gate（要能在执行前否决，这是 HITL 的入口）
       (when (or (getf callbacks :on-tool-call) (getf callbacks :on-tool-result))
         (setf (slot-value a 'kernel)
-              (cl-agent.core:build-kernel
-               :model (cl-agent.core:kernel-model k)
-               :system (cl-agent.core:kernel-default-system k)
-               :options (cl-agent.core:kernel-default-options k)
-               :tools (cl-agent.core:kernel-tools k)
-               :settings (cl-agent.core:kernel-settings k)
-               :tool-manager (cl-agent.core:kernel-tool-manager k)
-               :eligibility-fn (cl-agent.core:kernel-eligibility-fn k)
+              (cl-agent/core:build-kernel
+               :model (cl-agent/core:kernel-model k)
+               :system (cl-agent/core:kernel-default-system k)
+               :options (cl-agent/core:kernel-default-options k)
+               :tools (cl-agent/core:kernel-tools k)
+               :settings (cl-agent/core:kernel-settings k)
+               :tool-manager (cl-agent/core:kernel-tool-manager k)
+               :eligibility-fn (cl-agent/core:kernel-eligibility-fn k)
                :tool-gate (when (getf callbacks :on-tool-call) (agent-gate a))
                ;; 结果 filter 放最外层：它要看到全部工具调用
                :filters (if (getf callbacks :on-tool-result)
-                            (cons (result-filter a) (cl-agent.core:kernel-filters k))
-                            (cl-agent.core:kernel-filters k)))))
+                            (cons (result-filter a) (cl-agent/core:kernel-filters k))
+                            (cl-agent/core:kernel-filters k)))))
       a)))
 
 ;;; ============================================================
@@ -232,16 +232,16 @@ memory-filter 按这个 ID 管，agent 只持 ID。")
 
 (defun %turn->agent-result (agent turn)
   "把 kernel 的 turn-result 归一化成 agent-result，并同步 agent 的暂停态。"
-  (let ((status (cl-agent.core:turn-result-status turn))
-        (resp (cl-agent.core:turn-result-response turn)))
+  (let ((status (cl-agent/core:turn-result-status turn))
+        (resp (cl-agent/core:turn-result-response turn)))
     (if (eq status :paused)
         ;; 暂停：把 loop-state 记在 agent 上，等 agent-resume
-        (let ((pending (cl-agent.core:turn-result-pending-tool turn)))
-          (setf (agent-paused-state agent) (cl-agent.core:turn-result-loop-state turn))
+        (let ((pending (cl-agent/core:turn-result-pending-tool turn)))
+          (setf (agent-paused-state agent) (cl-agent/core:turn-result-loop-state turn))
           (let ((r (%make-agent-result
                     :status :paused
                     :pending-tool pending
-                    :pause-reason (cl-agent.core:turn-result-pause-reason turn))))
+                    :pause-reason (cl-agent/core:turn-result-pause-reason turn))))
             (invoke-callback agent :on-interrupt agent r)
             r))
         (progn
@@ -250,7 +250,7 @@ memory-filter 按这个 ID 管，agent 只持 ID。")
           (let ((r (%make-agent-result
                     :status status
                     :response resp
-                    :text (when resp (cl-agent.core:chat-response-text resp)))))
+                    :text (when resp (cl-agent/core:chat-response-text resp)))))
             (invoke-callback agent :on-turn-end agent r)
             r)))))
 
@@ -269,7 +269,7 @@ memory-filter 按这个 ID 管，agent 只持 ID。")
   (handler-case
       (let* ((ctx (when (agent-conversation-id agent)
                     (list :conversation-id (agent-conversation-id agent))))
-             (turn (cl-agent.core:kernel-chat
+             (turn (cl-agent/core:kernel-chat
                     (agent-kernel agent)
                     :user message
                     :options options
@@ -292,10 +292,10 @@ memory-filter 按这个 ID 管，agent 只持 ID。")
   "当前待审批的工具（未暂停时为 nil）。"
   (let ((ls (agent-paused-state agent)))
     (when ls
-      (let ((pending-id (cl-agent.core:loop-state-pending-id ls)))
+      (let ((pending-id (cl-agent/core:loop-state-pending-id ls)))
         (find-if (lambda (tc)
-                   (equal (cl-agent.core:tool-call-id tc) pending-id))
-                 (cl-agent.core:loop-state-tool-calls ls))))))
+                   (equal (cl-agent/core:tool-call-id tc) pending-id))
+                 (cl-agent/core:loop-state-tool-calls ls))))))
 
 (defun agent-resume (agent decision &key payload)
   "审批后续跑，返回 agent-result（**不抛异常**）。
@@ -313,7 +313,7 @@ memory-filter 按这个 ID 管，agent 只持 ID。")
       (error "agent 未处于暂停状态（agent-paused-p 为 nil）"))
     (invoke-callback agent :on-resume agent decision)
     (handler-case
-        (let ((turn (cl-agent.core:resume-turn (agent-kernel agent) ls decision
+        (let ((turn (cl-agent/core:resume-turn (agent-kernel agent) ls decision
                                                :payload payload)))
           (%turn->agent-result agent turn))
       (error (e)
@@ -336,13 +336,13 @@ memory-filter 按这个 ID 管，agent 只持 ID。")
   "取该会话的完整消息历史（无记忆时返回 nil）。"
   (let ((store (agent-memory agent)))
     (when store
-      (cl-agent.core:memory-messages store (agent-conversation-id agent)))))
+      (cl-agent/core:memory-messages store (agent-conversation-id agent)))))
 
 (defun agent-reset (agent)
   "清空会话历史、暂停态与轮次计数。agent 本身可继续用。"
   (let ((store (agent-memory agent)))
     (when store
-      (cl-agent.core:memory-clear store (agent-conversation-id agent))))
+      (cl-agent/core:memory-clear store (agent-conversation-id agent))))
   (setf (agent-turn-count agent) 0)
   (setf (agent-paused-state agent) nil)
   agent)
