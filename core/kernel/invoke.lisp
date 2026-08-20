@@ -23,7 +23,7 @@
 ;;;;   Tool 链请求/响应 = tool-request / tool-result（kernel 载体）。
 ;;;;   Turn 链请求/响应 = turn-request / turn-result（kernel 载体）。
 
-(in-package #:cl-agent.core)
+(in-package #:cl-agent/core)
 
 ;;; ============================================================
 ;;; invoke-chat：:chat 链 → ChatModel
@@ -45,7 +45,7 @@
   传给它的那份 options，直接报「找不到工具」）。
 
   :chat filter 钩子签名：(prompt chain) → chat-response
-  - prompt  = cl-agent.core:prompt 实例
+  - prompt  = cl-agent/core:prompt 实例
   - chain   = 下游函数 (prompt) → chat-response
   - 返回值  = chat-response"
   (let* ((effective nil)
@@ -118,7 +118,7 @@
                        (compose-token-xforms (kernel-filters kernel)
                                              (lambda (tok) (funcall on-token tok)))
                      (let ((response
-                             (cl-agent.core:chat-model-stream
+                             (cl-agent/core:chat-model-stream
                               (kernel-model kernel) p
                               ;; chat-model-stream 给的是裸字符串增量，
                               ;; 这里包成 plist 交给 xform 管道
@@ -158,19 +158,19 @@
   兜不住工具体本身。"
   (let* ((fn-spec (tool-request-function req))
          (callback (etypecase fn-spec
-                     (cl-agent.core:tool-callback fn-spec)
-                     (symbol (or (cl-agent.core:symbol-tool-callback fn-spec)
-                                 (error 'cl-agent.core:tool-not-found-error
+                     (cl-agent/core:tool-callback fn-spec)
+                     (symbol (or (cl-agent/core:symbol-tool-callback fn-spec)
+                                 (error 'cl-agent/core:tool-not-found-error
                                         :tool-name fn-spec)))))
          (args (tool-request-args req))
          (ctx (tool-request-context req)))
     (handler-case
         (multiple-value-bind (value writes)
-            (cl-agent.core:tool-callback-call callback args ctx)
+            (cl-agent/core:tool-callback-call callback args ctx)
           ;; writes = 工具用 (values 结果 writes-plist) 声明的写意图，
           ;; 这里只装车不生效——批次屏障（fold-batch-writes）统一折叠
           (make-tool-result :value value :writes writes))
-      (cl-agent.core:tool-not-found-error (e)
+      (cl-agent/core:tool-not-found-error (e)
         (declare (ignore e))
         (make-tool-result :error (list :class :semantic
                                        :message "工具未找到")))
@@ -193,8 +193,8 @@
   "把 kernel 的 :tools（符号列表）解析为 chat-options（含 tool-callbacks）。"
   (let ((tools (kernel-tools kernel)))
     (if tools
-        (cl-agent.core:make-chat-options
-         :tool-callbacks (cl-agent.core:resolve-tool-callbacks tools))
+        (cl-agent/core:make-chat-options
+         :tool-callbacks (cl-agent/core:resolve-tool-callbacks tools))
         nil)))
 
 (defparameter +internal-context-keys+ '(:caller-options)
@@ -211,15 +211,15 @@ context。不桥接则二者各说各话（memory-filter 的 :conversation-id �
                      unless (member k +internal-context-keys+)
                        append (list k v))))
     (if (null extra)
-        (or options (cl-agent.core:make-chat-options))
-        (let* ((base (or options (cl-agent.core:make-chat-options)))
-               (existing (cl-agent.core:chat-options-tool-context base))
+        (or options (cl-agent/core:make-chat-options))
+        (let* ((base (or options (cl-agent/core:make-chat-options)))
+               (existing (cl-agent/core:chat-options-tool-context base))
                ;; 先放 extra，再放既有——同名键 extra 胜出（getf 取首个匹配）
                (merged-ctx (append extra existing)))
           ;; 只覆盖 tool-context 一个槽：primary 仅绑定 tool-context，
           ;; merge 把 base 其余槽（含 tool-callbacks）原样保留。
-          (cl-agent.core:merge-chat-options
-           (cl-agent.core:make-chat-options :tool-context merged-ctx)
+          (cl-agent/core:merge-chat-options
+           (cl-agent/core:make-chat-options :tool-context merged-ctx)
            base)))))
 
 ;;; ============================================================
@@ -231,7 +231,7 @@ context。不桥接则二者各说各话（memory-filter 的 :conversation-id �
   (let* ((caller-options (getf context :caller-options))
          (kernel-options (resolve-kernel-tools kernel))
          (merged (if caller-options
-                     (cl-agent.core:merge-chat-options caller-options kernel-options)
+                     (cl-agent/core:merge-chat-options caller-options kernel-options)
                      kernel-options)))
     ;; 把 turn context 折进 options 的 tool-context——:chat 链的 filter
     ;; （memory-filter 等）只拿得到 prompt，读的是 prompt options 的
@@ -260,7 +260,7 @@ some+filter 那种两阶段扫描。"
 
 (defun tool-results->message (tool-results tool-calls)
   "把一批 tool-result 转成回传模型的 tool 消息。"
-  (cl-agent.core:tool-response-message
+  (cl-agent/core:tool-response-message
    (tool-results->responses tool-results tool-calls)))
 
 (defun run-tool-loop (kernel turn-request)
@@ -292,16 +292,16 @@ some+filter 那种两阶段扫描。"
         (eligibility (kernel-eligibility-fn kernel))
         (gate (kernel-tool-gate kernel)))
     (loop for iter from iteration
-          for prompt = (cl-agent.core:make-prompt messages :options options)
+          for prompt = (cl-agent/core:make-prompt messages :options options)
           ;; exec-options = :chat 链改写后**真正发给模型**的那份。
           ;; 工具执行必须用它，否则模型看到的工具集与可执行的不一致
           ;; （tool-search-filter 注入的 search_tools 就会「找不到工具」）。
           for exec-options = nil
           for response = (multiple-value-bind (r eff) (invoke-chat kernel prompt)
-                           (setf exec-options (cl-agent.core:prompt-options eff))
+                           (setf exec-options (cl-agent/core:prompt-options eff))
                            r)
           do (cond
-               ((and (cl-agent.core:chat-response-has-tool-calls-p response)
+               ((and (cl-agent/core:chat-response-has-tool-calls-p response)
                      (funcall eligibility response context))
                 ;; 上限检查放在**要执行工具**这个分支里，而不是循环顶部：
                 ;;   1. 无工具的最终答复轮不受限——否则一个正好在边界给出
@@ -310,9 +310,9 @@ some+filter 那种两阶段扫描。"
                 ;; 此前两处都错：检查在 cond 外（无工具轮也计入并多调一次
                 ;; 模型），且用 >（又松一层）——上限 3 实际调了 5 次模型。
                 (when (>= iter max-iter)
-                  (error 'cl-agent.core:max-tool-iterations-exceeded-error
+                  (error 'cl-agent/core:max-tool-iterations-exceeded-error
                          :limit max-iter))
-                (let ((tool-calls (cl-agent.core:chat-response-tool-calls response)))
+                (let ((tool-calls (cl-agent/core:chat-response-tool-calls response)))
                   ;; HITL 闸门：在**执行之前**评估。判 :pause 就整批不执行，
                   ;; 把续跑所需的一切装进 loop-state 交出去。
                   (multiple-value-bind (paused-call reason)
@@ -323,20 +323,20 @@ some+filter 那种两阶段扫描。"
                            :paused
                            :pause-reason (or reason
                                              (format nil "需要审批：~A"
-                                                     (cl-agent.core:tool-call-name paused-call)))
+                                                     (cl-agent/core:tool-call-name paused-call)))
                            :loop-state (make-loop-state
                                         :messages messages
                                         :response response
                                         :tool-calls tool-calls
-                                        :pending-id (cl-agent.core:tool-call-id paused-call)
+                                        :pending-id (cl-agent/core:tool-call-id paused-call)
                                         :iteration iter
                                         :options exec-options
                                         :context context)
                            :pending-tool (make-pending-tool
-                                          :name (cl-agent.core:tool-call-name paused-call)
-                                          :args (cl-agent.core:arguments->plist
-                                                 (cl-agent.core:tool-call-arguments paused-call))
-                                          :id (cl-agent.core:tool-call-id paused-call))
+                                          :name (cl-agent/core:tool-call-name paused-call)
+                                          :args (cl-agent/core:arguments->plist
+                                                 (cl-agent/core:tool-call-arguments paused-call))
+                                          :id (cl-agent/core:tool-call-id paused-call))
                            :tool-calls-made iter))
                         ;; 放行：执行整批
                         (multiple-value-bind (result done new-context)
@@ -380,17 +380,17 @@ some+filter 那种两阶段扫描。"
                                            (list :tool-context context)))
                (return-direct (getf result :return-direct))
                (new-context (or (getf result :context) context))
-               (tool-msg (cl-agent.core:tool-response-message (getf result :messages))))
+               (tool-msg (cl-agent/core:tool-response-message (getf result :messages))))
           (if return-direct
               ;; return-direct：工具结果即最终答案，不再回传模型。
               ;; 写意图照常折叠（与非 manager 路径一致）
               (values (make-turn-result
                        :completed
-                       :response (cl-agent.core:make-chat-response
-                                  (cl-agent.core:make-generation
-                                   (cl-agent.core:assistant-message
+                       :response (cl-agent/core:make-chat-response
+                                  (cl-agent/core:make-generation
+                                   (cl-agent/core:assistant-message
                                     (format nil "~{~A~^~%~}"
-                                            (mapcar #'cl-agent.core:tool-response-text
+                                            (mapcar #'cl-agent/core:tool-response-text
                                                     (getf result :messages))))
                                    :finish-reason :stop))
                        :tool-context new-context
@@ -398,7 +398,7 @@ some+filter 那种两阶段扫描。"
                       t
                       new-context)
               (values (append messages
-                              (list (cl-agent.core:chat-response-message response) tool-msg))
+                              (list (cl-agent/core:chat-response-message response) tool-msg))
                       nil
                       new-context)))
         ;; === 原路径（invoke-tool-batch）===
@@ -411,9 +411,9 @@ some+filter 那种两阶段扫描。"
                 ;; 写意图照常折叠——工具确实执行了，状态不能丢
                 (values (make-turn-result
                          :completed
-                         :response (cl-agent.core:make-chat-response
-                                    (cl-agent.core:make-generation
-                                     (cl-agent.core:assistant-message
+                         :response (cl-agent/core:make-chat-response
+                                    (cl-agent/core:make-generation
+                                     (cl-agent/core:assistant-message
                                       (format nil "~{~A~^~%~}"
                                               (mapcar #'tool-result-value tool-results)))
                                      :finish-reason :stop))
@@ -422,7 +422,7 @@ some+filter 那种两阶段扫描。"
                         t
                         new-context)
                 (values (append messages
-                                (list (cl-agent.core:chat-response-message response) tool-msg))
+                                (list (cl-agent/core:chat-response-message response) tool-msg))
                         nil
                         new-context)))))))
 
@@ -442,13 +442,13 @@ some+filter 那种两阶段扫描。"
               (unless (stringp msg)
                 (error ":reply 需要 payload 里的 :message（答复文本）"))
               (lambda (tc)
-                (if (equal (cl-agent.core:tool-call-id tc) pending-id)
+                (if (equal (cl-agent/core:tool-call-id tc) pending-id)
                     (cons :reply msg)
                     :proceed))))
     ;; 拒绝：只拒 pending 那个，其余照常执行
     (:rejected (let ((reason (getf payload :message)))
                  (lambda (tc)
-                   (if (equal (cl-agent.core:tool-call-id tc) pending-id)
+                   (if (equal (cl-agent/core:tool-call-id tc) pending-id)
                        (cons :reject reason)
                        :proceed))))))
 
@@ -482,10 +482,10 @@ some+filter 那种两阶段扫描。"
          (new-args (and (eq decision :approved) (getf payload :args)))
          (tool-calls (if new-args
                          (mapcar (lambda (tc)
-                                   (if (equal (cl-agent.core:tool-call-id tc) pending-id)
-                                       (cl-agent.core:make-tool-call
-                                        :id (cl-agent.core:tool-call-id tc)
-                                        :name (cl-agent.core:tool-call-name tc)
+                                   (if (equal (cl-agent/core:tool-call-id tc) pending-id)
+                                       (cl-agent/core:make-tool-call
+                                        :id (cl-agent/core:tool-call-id tc)
+                                        :name (cl-agent/core:tool-call-name tc)
                                         :arguments new-args)
                                        tc))
                                  tool-calls)
@@ -519,11 +519,11 @@ some+filter 那种两阶段扫描。"
                                    (tool-result->text (nth pos results))
                                    "（未执行）")))))
                      tool-calls))
-             (tool-msg (cl-agent.core:tool-response-message
+             (tool-msg (cl-agent/core:tool-response-message
                         (mapcar (lambda (tc text)
-                                  (cl-agent.core:make-tool-response
-                                   :id (cl-agent.core:tool-call-id tc)
-                                   :name (cl-agent.core:tool-call-name tc)
+                                  (cl-agent/core:make-tool-response
+                                   :id (cl-agent/core:tool-call-id tc)
+                                   :name (cl-agent/core:tool-call-name tc)
                                    :text text))
                                 tool-calls texts))))
         ;; return-direct 短路——正常路径（%execute-and-append）对全批
@@ -536,16 +536,16 @@ some+filter 那种两阶段扫描。"
                  (batch-all-return-direct-p callable options))
             (make-turn-result
              :completed
-             :response (cl-agent.core:make-chat-response
-                        (cl-agent.core:make-generation
-                         (cl-agent.core:assistant-message
+             :response (cl-agent/core:make-chat-response
+                        (cl-agent/core:make-generation
+                         (cl-agent/core:assistant-message
                           (format nil "~{~A~^~%~}" texts))
                          :finish-reason :stop))
              :tool-context context
              :tool-calls-made (1+ iteration))
             (%tool-loop kernel
                         (append messages
-                                (list (cl-agent.core:chat-response-message response) tool-msg))
+                                (list (cl-agent/core:chat-response-message response) tool-msg))
                         ;; context 若被写意图更新，options 的 tool-context 也要跟上
                         (fold-context-into-tool-context options context)
                         context (1+ iteration)))))))

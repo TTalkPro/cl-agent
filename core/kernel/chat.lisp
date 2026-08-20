@@ -13,12 +13,12 @@
 ;;;;     (:conversation "conv-1"))
 ;;;;   ;; => 回复文本
 ;;;;
-;;;; 历史：本 DSL 原属已删除的 cl-agent.client（那一层是 Spring AI 的
+;;;; 历史：本 DSL 原属已删除的 cl-agent/client（那一层是 Spring AI 的
 ;;;; ChatClient + Builder + fluent RequestSpec 移植）。Builder 与 fluent
 ;;;; 链是 Java 的表达习惯，在 Lisp 里由 build-kernel 的关键字参数和这个
 ;;;; 声明式宏覆盖得更直接，故整层退役，只把宏搬到 kernel。
 
-(in-package #:cl-agent.core)
+(in-package #:cl-agent/core)
 
 ;;; ============================================================
 ;;; kernel-chat：函数形态入口（chat 宏展开到它）
@@ -30,10 +30,10 @@
 没有意义，早失败好过让 provider 报一个难懂的 400。"
   (let* ((system (or system (kernel-default-system kernel)))
          (msgs (append
-                (when system (list (cl-agent.core:system-message system)))
+                (when system (list (cl-agent/core:system-message system)))
                 messages
-                (when user (list (cl-agent.core:user-message user))))))
-    (unless (remove-if #'cl-agent.core:system-message-p msgs)
+                (when user (list (cl-agent/core:user-message user))))))
+    (unless (remove-if #'cl-agent/core:system-message-p msgs)
       (error "请求缺少用户输入：请用 (:user ...) 或 (:messages ...) 提供"))
     msgs))
 
@@ -41,7 +41,7 @@
   "请求级 options 盖 kernel 默认 options（merge 的 primary 优先）。"
   (let ((defaults (kernel-default-options kernel)))
     (if defaults
-        (cl-agent.core:merge-chat-options options defaults)
+        (cl-agent/core:merge-chat-options options defaults)
         options)))
 
 (defun kernel-chat (kernel &key system user messages options tools context)
@@ -64,9 +64,9 @@
          ;; run-tool-loop 里 merge-chat-options 对 tool-callbacks 取并集，
          ;; 于是请求级工具与 kernel :tools 自然叠加。
          (options (if tools
-                      (cl-agent.core:merge-chat-options
-                       (cl-agent.core:make-chat-options
-                        :tool-callbacks (cl-agent.core:resolve-tool-callbacks tools))
+                      (cl-agent/core:merge-chat-options
+                       (cl-agent/core:make-chat-options
+                        :tool-callbacks (cl-agent/core:resolve-tool-callbacks tools))
                        options)
                       options))
          (ctx context))
@@ -78,7 +78,7 @@
 (defun kernel-chat-text (kernel &rest args)
   "kernel-chat 的取文本快捷式：返回最终回复文本。"
   (let ((result (apply #'kernel-chat kernel args)))
-    (cl-agent.core:chat-response-text (turn-result-response result))))
+    (cl-agent/core:chat-response-text (turn-result-response result))))
 
 (defun kernel-chat-entity (kernel &rest args)
   "kernel-chat 的结构化输出快捷式：把回复解析为 JSON 值。
@@ -87,14 +87,14 @@
   给 kernel 挂 validation-turn-filter（配 structured-output-validate-fn）。"
   (let* ((args (%append-json-instruction args))
          (text (apply #'kernel-chat-text kernel args)))
-    (cl-agent.core:json-parse (strip-json-fences text))))
+    (cl-agent/core:json-parse (strip-json-fences text))))
 
 (defun %append-json-instruction (args)
   "给 kernel-chat 参数追加一条「只输出 JSON」的系统指令。"
   (let ((messages (getf args :messages)))
     (append (list :messages
                   (append messages
-                          (list (cl-agent.core:system-message
+                          (list (cl-agent/core:system-message
                                  "请只输出 JSON，不要任何多余说明或 markdown 代码围栏。"))))
             (loop for (k v) on args by #'cddr
                   unless (eq k :messages) append (list k v)))))
@@ -132,7 +132,7 @@
     (let ((tool-count (+ (length (getf plist :tools))
                          (length (kernel-tools kernel))
                          (length (and options
-                                      (cl-agent.core:chat-options-tool-callbacks
+                                      (cl-agent/core:chat-options-tool-callbacks
                                        options))))))
       (when (plusp tool-count)
         (error "kernel-chat-stream 不支持工具循环（它是单次流式调用），~@
@@ -142,8 +142,8 @@
                 的 kernel。")))
     ;; 把 context 折进 options 的 tool-context，:chat filter（memory 等）才读得到
     (let* ((options (fold-context-into-tool-context
-                     (or options (cl-agent.core:make-chat-options)) ctx))
-           (prompt (cl-agent.core:make-prompt msgs :options options)))
+                     (or options (cl-agent/core:make-chat-options)) ctx))
+           (prompt (cl-agent/core:make-prompt msgs :options options)))
       (invoke-chat-stream kernel prompt
                           (lambda (token)
                             (let ((text (getf token :token)))
@@ -209,7 +209,7 @@
                             (not (keywordp (second clause))))
                        ;; 单个非关键字实参 = 现成的 chat-options
                        (second clause)
-                       `(cl-agent.core:make-chat-options ,@(rest clause)))))
+                       `(cl-agent/core:make-chat-options ,@(rest clause)))))
             (:tools (setf tools (append tools (rest clause))))
             (:context (setf context (append context (list (second clause)
                                                           (third clause)))))

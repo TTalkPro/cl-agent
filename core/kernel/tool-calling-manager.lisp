@@ -15,7 +15,7 @@
 ;;;;   - virtual-thread-tool-calling-manager：并行默认（lparallel:future，尊重 :serial）
 ;;;;   - thread-pool-tool-calling-manager：线程池（限流场景，可配 pool-size）
 
-(in-package #:cl-agent.core)
+(in-package #:cl-agent/core)
 
 ;;; ============================================================
 ;;; ToolExecutionResult（plain plist，键名冻结）
@@ -82,7 +82,7 @@
   :context 按协议 = 应用 writes 后的 context（fold-batch-writes 折叠，
   失败调用的写意图不生效）。此前该承诺只写在 docstring 里，三个实现
   全部原样透传。"
-  (let* ((tool-calls (cl-agent.core:chat-response-tool-calls response))
+  (let* ((tool-calls (cl-agent/core:chat-response-tool-calls response))
          (options-ctx (getf options :tool-context))
          (resolved-options (resolve-kernel-tools kernel))
          (tool-results (manager-run-batch manager kernel tool-calls
@@ -94,7 +94,7 @@
                            (multiple-value-bind (cb err)
                                (resolve-callback resolved-options tc)
                              (declare (ignore err))
-                             (and cb (cl-agent.core:tool-callback-return-direct-p cb))))
+                             (and cb (cl-agent/core:tool-callback-return-direct-p cb))))
                          tool-calls)))
     (make-tool-execution-result
      :messages (tool-results->responses tool-results tool-calls)

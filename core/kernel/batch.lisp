@@ -25,7 +25,7 @@
 ;;;;   判成 :semantic，于是三类在真实链路上退化成一类。两处都已修，
 ;;;;   并有「回退即失败」的回归测试守着。
 
-(in-package #:cl-agent.core)
+(in-package #:cl-agent/core)
 
 ;;; ============================================================
 ;;; 工具解析（找不到 ≠ 崩掉整轮对话）
@@ -47,9 +47,9 @@ find-callback-for-call 找不到工具时是 signal 而非返回 nil。它的调
 让它自纠（旧 ToolCallingManager 的 process-tool-execution-error 就是
 这么做的，Spring 的默认语义亦然）。安全边界不受影响——找不到就是
 找不到，绝不回退全局注册表去执行未暴露的工具。"
-  (handler-case (values (cl-agent.core:find-callback-for-call options tool-call)
+  (handler-case (values (cl-agent/core:find-callback-for-call options tool-call)
                         nil)
-    (cl-agent.core:tool-not-found-error (e)
+    (cl-agent/core:tool-not-found-error (e)
       (values nil (make-tool-result
                    :error (list :class :semantic
                                 :message (princ-to-string e)))))))
@@ -73,17 +73,17 @@ find-callback-for-call 找不到工具时是 signal 而非返回 nil。它的调
   "由一次 tool-call 构造 tool-request（参数归一化为 plist）。"
   (make-tool-request
    callback
-   :args (cl-agent.core:arguments->plist
-          (cl-agent.core:tool-call-arguments tool-call))
+   :args (cl-agent/core:arguments->plist
+          (cl-agent/core:tool-call-arguments tool-call))
    :context context))
 
 (defun tool-results->responses (tool-results tool-calls)
   "把一批 tool-result 转成协议层 tool-response 列表（与 tool-calls 同序、
 id/name 一一对应——顺序错位 = 回传模型的消息 id 全错）。"
   (mapcar (lambda (tr tc)
-            (cl-agent.core:make-tool-response
-             :id (cl-agent.core:tool-call-id tc)
-             :name (cl-agent.core:tool-call-name tc)
+            (cl-agent/core:make-tool-response
+             :id (cl-agent/core:tool-call-id tc)
+             :name (cl-agent/core:tool-call-name tc)
              :text (tool-result->text tr)))
           tool-results tool-calls))
 
@@ -93,8 +93,8 @@ id/name 一一对应——顺序错位 = 回传模型的消息 id 全错）。"
         for tc in tool-calls
         for err = (tool-result-error tr)
         when err
-          collect (list :id (cl-agent.core:tool-call-id tc)
-                        :name (cl-agent.core:tool-call-name tc)
+          collect (list :id (cl-agent/core:tool-call-id tc)
+                        :name (cl-agent/core:tool-call-name tc)
                         :class (getf err :class)
                         :message (getf err :message))))
 
@@ -111,7 +111,7 @@ id/name 一一对应——顺序错位 = 回传模型的消息 id 全错）。"
   (and tool-calls
        (every (lambda (tc)
                 (let ((cb (resolve-callback options tc)))
-                  (and cb (cl-agent.core:tool-callback-return-direct-p cb))))
+                  (and cb (cl-agent/core:tool-callback-return-direct-p cb))))
               tool-calls)))
 
 (defun batch-has-serial-p (tool-calls options)
@@ -119,7 +119,7 @@ id/name 一一对应——顺序错位 = 回传模型的消息 id 全错）。"
 解析不到的工具当作非 serial——它根本不会被执行。"
   (some (lambda (tc)
           (let ((cb (resolve-callback options tc)))
-            (and cb (cl-agent.core:tool-callback-serial-p cb))))
+            (and cb (cl-agent/core:tool-callback-serial-p cb))))
         tool-calls))
 
 (defun execute-batch-sequential (kernel tool-calls options context)
@@ -130,7 +130,7 @@ id/name 一一对应——顺序错位 = 回传模型的消息 id 全错）。"
         (errors nil))
     (dolist (tc tool-calls)
       (multiple-value-bind (callback resolve-error) (resolve-callback options tc)
-        (let* ((direct-p (and callback (cl-agent.core:tool-callback-return-direct-p callback)))
+        (let* ((direct-p (and callback (cl-agent/core:tool-callback-return-direct-p callback)))
                ;; 解析不到就不进 :tool 链——没有工具可执行，
                ;; 直接产出语义错误结果回传模型。
                ;; 走 %run-one-tool 而非直接 invoke-tool：故障路由（瞬态重试）
@@ -209,8 +209,8 @@ id/name 一一对应——顺序错位 = 回传模型的消息 id 全错）。"
 只有 deftool 里写了 (:retry t) 的工具才会被重试——重试意味着**重复执行
 副作用**，必须由工具作者显式选择加入，框架不能替他决定。"
   (let ((fn (tool-request-function req)))
-    (and (typep fn 'cl-agent.core:tool-callback)
-         (cl-agent.core:tool-callback-retry-p fn))))
+    (and (typep fn 'cl-agent/core:tool-callback)
+         (cl-agent/core:tool-callback-retry-p fn))))
 
 (defun %run-one-tool (kernel req)
   "执行单个工具，任何逃逸的条件都归一化成带分类的错误结果。
@@ -300,7 +300,7 @@ receive-result 不保证顺序，故任务里带上索引，回填到定位数�
                         (multiple-value-bind (callback resolve-error)
                             (resolve-callback options tc)
                           (let ((direct-p (and callback
-                                               (cl-agent.core:tool-callback-return-direct-p callback))))
+                                               (cl-agent/core:tool-callback-return-direct-p callback))))
                             (list direct-p
                                   resolve-error
                                   (when callback

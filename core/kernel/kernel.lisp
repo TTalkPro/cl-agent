@@ -14,7 +14,7 @@
 ;;;;     P2 循环逻辑用它判断是否继续工具迭代
 ;;;;   - settings 是 alist：(:max-tool-iterations . 10) 等任意键值
 
-(in-package #:cl-agent.core)
+(in-package #:cl-agent/core)
 
 ;;; ============================================================
 ;;; Kernel CLOS 类

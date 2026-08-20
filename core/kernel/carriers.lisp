@@ -3,11 +3,11 @@
 ;;;;
 ;;;; 概述：
 ;;;;   Kernel 架构里 chat / tool / turn 三条链各自携带不同的请求/响应
-;;;;   结构。Chat 链不用专门的载体——请求就是 cl-agent.core:prompt，
+;;;;   结构。Chat 链不用专门的载体——请求就是 cl-agent/core:prompt，
 ;;;;   响应就是 chat-response，够用且少一层包装。本文件定义 tool 链与
 ;;;;   turn 链的载体类。
 ;;;;
-;;;;   （历史：早期 chat 链复用过 cl-agent.client 的 client-request /
+;;;;   （历史：早期 chat 链复用过 cl-agent/client 的 client-request /
 ;;;;   client-response；该包已随 Spring AI 移植层一并删除。）
 ;;;;
 ;;;;   Tool 链：
@@ -21,7 +21,7 @@
 ;;;;   所有载体均为普通 CLOS 值对象，零行为、不含协议方法——filter 钩子
 ;;;;   直接对它们做 (req chain) → resp 的函数调用。
 
-(in-package #:cl-agent.core)
+(in-package #:cl-agent/core)
 
 ;;; ============================================================
 ;;; Tool 链载体
@@ -77,7 +77,7 @@
   (:documentation "Tool 链响应载体（kernel 工具执行结果）。
 
 命名：与 turn 链的 turn-request → turn-result 对称。
-曾叫 tool-response——与 cl-agent.core:tool-response（协议消息层的
+曾叫 tool-response——与 cl-agent/core:tool-response（协议消息层的
 「工具响应」值对象：id/name/text）撞名，逼得 kernel 必须 shadow，
 下游想同时 :use 两个包还得自己写 shadowing-import。两者本就是不同
 层的东西：chat 的是发回模型的消息，kernel 的是执行链的结果载体。

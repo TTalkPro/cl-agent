@@ -10,7 +10,7 @@
 ;;;;   classify-tool-error 把任意 condition 映射到三类之一。
 ;;;;   屏障路由（barrier routing）在 invoke-tool-batch 中按分类决定策略。
 
-(in-package #:cl-agent.core)
+(in-package #:cl-agent/core)
 
 ;;; ============================================================
 ;;; 条件层次
@@ -55,7 +55,7 @@
   5. 权限/认证类错误 → :environment
   6. 其他 → :semantic（保守默认，不重试）
 
-  关于第 2 条：cl-agent.core:tool-callback-call 会把工具体内抛出的
+  关于第 2 条：cl-agent/core:tool-callback-call 会把工具体内抛出的
   **一切** condition 包成 tool-execution-error（原件塞进 :cause）。
   此前这里直接把 tool-execution-error 判成 :semantic，于是工具明明
   signal 了 transient-tool-failure，走完真实路径后也只剩 :semantic——
@@ -63,8 +63,8 @@
   必须解包 cause 才拿得到真分类。"
   (etypecase condition
     (tool-failure (tool-failure-class condition))
-    (cl-agent.core:tool-not-found-error :semantic)
-    (cl-agent.core:tool-execution-error
+    (cl-agent/core:tool-not-found-error :semantic)
+    (cl-agent/core:tool-execution-error
      ;; 包装层：真正的分类信息在 cause 里
      (let ((cause (tool-execution-error-cause condition)))
        (if cause
