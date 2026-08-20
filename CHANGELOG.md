@@ -11,10 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes
 
-- **Package consolidation**: `cl-agent.kernel`, `cl-agent.chat`, `cl-agent.http`
-  collapsed into a single `cl-agent.core`. See *Migration* below — most direct
+- **Package consolidation**: `cl-agent/kernel`, `cl-agent/chat`, `cl-agent/http`
+  collapsed into a single `cl-agent/core`. See *Migration* below — most direct
   symbols kept their names.
-- **Removed `cl-agent.protocols`** (the A2A / MCP layer): it was never compiled
+- **Removed `cl-agent/protocols`** (the A2A / MCP layer): it was never compiled
   in the main build and its `.asd` referenced files that didn't exist. Anyone
   importing this package will fail at `ASDF:LOAD-SYSTEM` time.
 - **Tool execution now respects concurrency controls**. `thread-pool-tool-calling-manager`'s
@@ -27,9 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pool on first multi-tool invocation. As a side-effect, prior test setups that
   pinned `lparallel:*kernel*` to a single worker will still observe
   single-threaded execution — but default configs now actually run ≥2 tools.
-- **`cl-agent.llm:chat` is gone**. The low-level Provider SPI was historically
-  named `chat`, shadowing the `cl-agent.core:chat` macro. The function is now
-  `cl-agent.llm:client-chat` and the shadow is removed; `:USE :cl-agent.llm`
+- **`cl-agent/llm:chat` is gone**. The low-level Provider SPI was historically
+  named `chat`, shadowing the `cl-agent/core:chat` macro. The function is now
+  `cl-agent/llm:client-chat` and the shadow is removed; `:USE :cl-agent/llm`
   no longer needs any shadowing.
 - **Tools are now symbols**, not plist specs. `(:tools 'get-weather)` is the
   reference; the old plist form (`(:tools (:get-weather ...))`) no longer works.
@@ -48,25 +48,25 @@ with this release; the table below is canonical.
 
 | Before | After |
 |---|---|
-| `cl-agent.http:*`, `cl-agent.chat:*`, `cl-agent.kernel:*` | `cl-agent.core:*` (single package) |
-| `cl-agent.kernel:build-kernel`, `deftool`, `http-request`, `tool-response` | `cl-agent.core:build-kernel`, `cl-agent.core:deftool`, `cl-agent.core:http-request`, `cl-agent.core:tool-result` |
+| `cl-agent/http:*`, `cl-agent/chat:*`, `cl-agent/kernel:*` | `cl-agent/core:*` (single package) |
+| `cl-agent/kernel:build-kernel`, `deftool`, `http-request`, `tool-response` | `cl-agent/core:build-kernel`, `cl-agent/core:deftool`, `cl-agent/core:http-request`, `cl-agent/core:tool-result` |
 | `defadvisor` / `(:advisors ...)` | `make-filter` / `defilter` + `:filters` |
-| `make-chat-client` / `chat-client-builder` | `build-kernel` (preferred for power) **or** `cl-agent.client:make-agent` (recommended for apps) |
-| `cl-agent.kernel:run-tool-loop` | `cl-agent.core:run-tool-loop` (exposed if you built a custom executor) |
-| `cl-agent.llm:chat` | `cl-agent.llm:client-chat` (low-level SPI; most users did not import this) |
-| `cl-agent.protocols:a2a-*`, `mcp-*` | **removed**; no direct replacement |
+| `make-chat-client` / `chat-client-builder` | `build-kernel` (preferred for power) **or** `cl-agent/client:make-agent` (recommended for apps) |
+| `cl-agent/kernel:run-tool-loop` | `cl-agent/core:run-tool-loop` (exposed if you built a custom executor) |
+| `cl-agent/llm:chat` | `cl-agent/llm:client-chat` (low-level SPI; most users did not import this) |
+| `cl-agent/protocols:a2a-*`, `mcp-*` | **removed**; no direct replacement |
 | `(:tools (:get-weather ...))` plist forms | `(:tools 'get-weather)` (symbol identity) |
 
-You can `:USE :cl-agent.core :cl-agent.client` together with **no shadowing**
+You can `:USE :cl-agent/core :cl-agent/client` together with **no shadowing**
 required.
 
 ### Added
 
 #### Application surface
 
-- **`cl-agent.client`**: `SimpleAgent` — a stateful, callback-driven entry
+- **`cl-agent/client`**: `SimpleAgent` — a stateful, callback-driven entry
   point for applications. `make-agent`, `agent-chat`, `agent-chat-result`,
-  `agent-resume`, `agent-history`, `agent-clear`. The companion `cl-agent.core`
+  `agent-resume`, `agent-history`, `agent-clear`. The companion `cl-agent/core`
   kernel remains available for fully-controlled composition.
 - **HITL / approval workflow**: `make-agent :tool-gate`. When the gate returns
   `(:interrupt . reason)`, the turn is paused — **no tools execute, state is
@@ -123,7 +123,7 @@ required.
 (wraps `tool-gate`), and the `:token-xform` family
 (`redact-pii-token-xform`, `truncate-token-xform`).
 
-#### Providers (`cl-agent.llm`)
+#### Providers (`cl-agent/llm`)
 
 - Anthropic, OpenAI, Zhipu GLM, DeepSeek (incl. prefix-continuation beta),
   Google Gemini, Mistral, Ollama, Alibaba DashScope, **MiniMax** (text &
@@ -219,8 +219,8 @@ required.
   helpers.
 - **Over-engineered error helpers**: 9 macros and 4 `signal-*`
   convenience wrappers from `conditions.lisp`.
-- **`cl-agent.llm:chat`** → renamed `client-chat`.
-- **`:shadow #:chat`** in `cl-agent.llm` (the function and the macro no
+- **`cl-agent/llm:chat`** → renamed `client-chat`.
+- **`:shadow #:chat`** in `cl-agent/llm` (the function and the macro no
   longer collide).
 - **`*default-mock-responses*`** — never defined; was exported anyway.
 - **`cl-agent-test`** secondary system name → replaced by `cl-agent/test`.
@@ -243,9 +243,9 @@ required.
 Captured here for completeness; this entry documents the architectural
 shape that preceded the public release.
 
-- Initial package consolidation: `cl-agent.{http,chat,kernel}` → `cl-agent.core`.
-- New `cl-agent.client` (SimpleAgent).
-- New `cl-agent.mock` (mock providers).
+- Initial package consolidation: `cl-agent/{http,chat,kernel}` → `cl-agent/core`.
+- New `cl-agent/client` (SimpleAgent).
+- New `cl-agent/mock` (mock providers).
 - Per-package `:version` bumped to `10.0.0` (core, client).
 
 > Note: no `git tag` was created at this point; the project moved directly

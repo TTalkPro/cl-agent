@@ -19,7 +19,7 @@
 三模块分层（对标 clj-agent 的 core / provider / client）：
 
 ```
-cl-agent.core（框架本体，单包 477 导出）
+cl-agent/core（框架本体，单包 477 导出）
   ├── Filter CLOS 类（四钩子: :tool/:chat/:turn/:token-xform）
   ├── build-chain（洋葱折叠, 闭包仅下游, 递归重入免费）
   ├── Kernel（model/tools/filters/settings/tool-manager +
@@ -35,10 +35,10 @@ cl-agent.core（框架本体，单包 477 导出）
   ├── HITL：tool-gate + loop-state + resume-turn
   └── 基础设施 + HTTP/SSE + Chat API（原 core/http/chat/kernel 四包合并）
 
-cl-agent.llm（提供商，独立可插拔）
+cl-agent/llm（提供商，独立可插拔）
   └── 9 个 provider + create-chat-model
 
-cl-agent.client（面向应用的易用层，v10 新增）
+cl-agent/client（面向应用的易用层，v10 新增）
   └── SimpleAgent：有状态对话 + callbacks + 错误归一化 + HITL
 ```
 
@@ -141,7 +141,7 @@ cl-agent.client（面向应用的易用层，v10 新增）
       `let` 该写 `let*`——`new-messages` 的初值引用同一个 `let` 里的
       `enhanced`，于是只要检索到任何文档就必然
       `UNBOUND-VARIABLE: ENHANCED`。编译期一直有
-      `undefined variable: CL-AGENT.KERNEL::ENHANCED` 告警，无人理会。
+      `undefined variable: CL-AGENT/KERNEL::ENHANCED` 告警，无人理会。
 
 - [x] **`structured-output-validate-fn` 判据完全反相**
       （`kernel/filters/validation.lisp`）：把
@@ -181,18 +181,18 @@ cl-agent.client（面向应用的易用层，v10 新增）
       测试确认工具没被冲掉）。加 3 个回归测试（可达/隔离/工具共存），
       每个都验证过「去掉折叠即失败」。
 
-> 注：`strip-json-fences` 在 `cl-agent.client` 与 `cl-agent.kernel`
+> 注：`strip-json-fences` 在 `cl-agent/client` 与 `cl-agent/kernel`
 > 各有一份实现（client 那份一直是对的，kernel 那份刚修）。两份都还在，
-> 行为已对齐，但重复本身值得后续收口到 `cl-agent.core`。
+> 行为已对齐，但重复本身值得后续收口到 `cl-agent/core`。
 
 ### 文档全量对齐 kernel+filter ✅
 
 - [x] **README.md / README_EN.md**：架构图/执行路径图/对应表/快速开始
       全部改写；每段 lisp 片段都实跑验证过
-- [x] **core/README.md / core/README_EN.md**：包表加 `cl-agent.kernel`，
+- [x] **core/README.md / core/README_EN.md**：包表加 `cl-agent/kernel`，
       文件树换成 kernel/ + client/carriers.lisp，删掉不存在的 advisor 文件；
       「内部工具执行」错误论断（工具循环住 ChatModel 内）已改正
-- [x] **docs/API.md / API_CN.md**：删 Advisor 章，加 cl-agent.kernel 章
+- [x] **docs/API.md / API_CN.md**：删 Advisor 章，加 cl-agent/kernel 章
       （filter/build-kernel/invoke-*/run-tool-loop/三 manager/10 filter
       真实签名），ChatClient 章收敛到现存 API，补迁移表（子代理完成）
 - [x] **docs/QUICKSTART / tool-calling（CN+EN）**：自定义 Advisor → filter，
@@ -202,7 +202,7 @@ cl-agent.client（面向应用的易用层，v10 新增）
 
 ---
 
-### cl-agent.client 整包退役 ✅（2026-07-16 续二）
+### cl-agent/client 整包退役 ✅（2026-07-16 续二）
 
 > 决策：Advisor 退役后，ChatClient 是 Spring AI 留下的第二个移植层
 > （ChatClient + Builder + fluent RequestSpec）。Builder 与链式 spec 是
@@ -210,7 +210,7 @@ cl-agent.client（面向应用的易用层，v10 新增）
 > 宏覆盖同样的场景，还少一个包、少一层间接。故整包删除，只把 `chat` 宏
 > 搬进 kernel（它本就不是 Spring 写法，是 Lisp 化的 DSL）。
 
-- [x] **`chat` 宏搬入 `cl-agent.kernel`**（新文件 `core/kernel/chat.lisp`）：
+- [x] **`chat` 宏搬入 `cl-agent/kernel`**（新文件 `core/kernel/chat.lisp`）：
       宏 + 函数形态入口 `kernel-chat` / `kernel-chat-text` /
       `kernel-chat-entity` / `kernel-chat-stream`
 - [x] **删除 `core/client/` 整个目录**（package / carriers / chat-client，594 行）
@@ -264,8 +264,8 @@ cl-agent.client（面向应用的易用层，v10 新增）
 
 ### 包设计撞名 + 旧 ToolCallingManager 退役 ✅（2026-07-16 续三）
 
-> 两件是同一个根因，一起做掉。做完 `cl-agent.kernel` **不再需要任何
-> `:shadow`**，下游可以直接 `(:use :cl-agent.chat :cl-agent.kernel)`
+> 两件是同一个根因，一起做掉。做完 `cl-agent/kernel` **不再需要任何
+> `:shadow`**，下游可以直接 `(:use :cl-agent/chat :cl-agent/kernel)`
 > 而不必自己写 shadowing-import（已编译验证）。
 
 - [x] **kernel 载体改名**：`tool-response` → `tool-result`
@@ -275,7 +275,7 @@ cl-agent.client（面向应用的易用层，v10 新增）
       巧合——chat 的 `tool-response` 是**协议消息层**的值对象（id/name/text，
       装进 role=:tool 的消息），kernel 的是**执行链层**的载体
       （value/writes/error），两者分属不同层。
-- [x] **删除 `cl-agent.chat` 的旧 ToolCallingManager**（tool.lisp 766 → 502 行）：
+- [x] **删除 `cl-agent/chat` 的旧 ToolCallingManager**（tool.lisp 766 → 502 行）：
       `tool-calling-manager` / `default-tool-calling-manager` /
       `execute-tool-calls` / `execute-one-tool-call` /
       `process-tool-execution-error` / `concurrent-tool-calling-manager` /
@@ -298,19 +298,19 @@ cl-agent.client（面向应用的易用层，v10 新增）
       「必须 shadowing-import」的说法全部反转
 - [x] **全量回归**：693 checks / 0 failures（冷编译）；MiniMax live 5/5
 
-### cl-agent.core.protocols 并入 cl-agent.core ✅
+### cl-agent/core/protocols 并入 cl-agent/core ✅
 
 > 该包统共只导出 2 个符号（`make-standard-id-generator` /
 > `make-standard-timestamp-provider`），却占着 `protocols` 这个极宽泛的
 > 昵称——还容易与 `protocols/` 子系统（A2A，另一回事）混淆。
 
-- [x] 两个工厂并入 `core/utils.lisp`，从 `cl-agent.core` 导出
+- [x] 两个工厂并入 `core/utils.lisp`，从 `cl-agent/core` 导出
 - [x] 删除 `core/protocols/` 目录 + asd 的 Protocol Layer 模块
 - [x] **消掉一层间接**：该包排在 utils **之后**加载，逼得 utils 里的
       `init-default-id-generator` / `init-default-timestamp-provider`
       只能用 `find-package` + `find-symbol` 动态查找绕开加载顺序。
       合并后直接调用即可。
-- [x] 三个昵称（`cl-agent.core.protocols` / `cla.core.protocols` /
+- [x] 三个昵称（`cl-agent/core/protocols` / `cla/core/protocols` /
       **`protocols`**）随包一并消失
 - [x] DI 可替换性保留：`setf *default-id-generator*` 仍可注入自定义实现
       （已实测验证）
@@ -339,7 +339,7 @@ cl-agent.client（面向应用的易用层，v10 新增）
 
 ### 包合并：三模块分层 ✅
 
-- [x] **http / chat / kernel → cl-agent.core**（477 导出），对齐 clj-agent 的
+- [x] **http / chat / kernel → cl-agent/core**（477 导出），对齐 clj-agent 的
       core / provider / client 三模块
 - [x] **llm 保持独立**（provider 可插拔）；`chat` 与 core 的宏撞名 → llm `:shadow` 之
 - [x] **合并前先清死代码**（否则正面撞名 15 处，SBCL 调用图坐实全是死的）：
@@ -352,7 +352,7 @@ cl-agent.client（面向应用的易用层，v10 新增）
       同名但语义不同的（客户端层累积器）。`:use` 只继承 external 符号——
       不导出即互不干扰
 
-### cl-agent.client：SimpleAgent ✅
+### cl-agent/client：SimpleAgent ✅
 
 - [x] **有状态对话**：`make-agent` / `agent-chat` / `agent-chat-result` /
       `agent-history` / `agent-reset`。内部持 conversation-id + memory-filter，
@@ -426,8 +426,8 @@ cl-agent.client（面向应用的易用层，v10 新增）
 
 ### P0：文档全线过时 ✅（已修）
 
-> 包合并 + 新增 cl-agent.client 后没同步文档，206 处引用已删除的包——
-> 照 README 抄一行就撞 `Package CL-AGENT.KERNEL does not exist`。
+> 包合并 + 新增 cl-agent/client 后没同步文档，206 处引用已删除的包——
+> 照 README 抄一行就撞 `Package CL-AGENT/KERNEL does not exist`。
 > **这是本轮改动造成的回归，已全部修复。**
 
 - [x] **13 个文档全量更新**：README（我改写并逐段实跑）、README_EN、
@@ -435,19 +435,19 @@ cl-agent.client（面向应用的易用层，v10 新增）
       llm README ×2、mock README ×2。已删除包的引用只剩在迁移表的「旧」列。
 - [x] **SimpleAgent 上文档**：README 与 QUICKSTART 都改为 SimpleAgent 打头
       （对标 clj-agent 的「方式一：推荐入门」），kernel 降为「完全控制」。
-      API 加 `cl-agent.client` 章。
+      API 加 `cl-agent/client` 章。
 - [x] **HITL 上文档**：pause/resume、tool-gate、三种 decision、
       「暂停时工具一个都不执行」的不变量。
 - [x] **迁移表**：Advisor→Filter、ChatClient→Kernel/SimpleAgent、包合并
-      三张表；并写明 `cl-agent.client` 这个名字被**复用**了。
-- [x] **过时的 shadowing 建议全部反转**：合并后 `(:use :cl-agent.core
-      :cl-agent.client)` 无需任何 shadowing。
+      三张表；并写明 `cl-agent/client` 这个名字被**复用**了。
+- [x] **过时的 shadowing 建议全部反转**：合并后 `(:use :cl-agent/core
+      :cl-agent/client)` 无需任何 shadowing。
 - [x] 所有片段实跑验证（README 一遍、docs 一遍）
 
 顺带修掉：
 
 - [x] **`agent-result` 类型没导出**（子代理审计发现）：只导出了访问器，
-      用户无法 `(typep r 'cl-agent.client:agent-result)`。已补导出
+      用户无法 `(typep r 'cl-agent/client:agent-result)`。已补导出
       `agent-result` + `agent-result-p`。
 - [x] **QUICKSTART 的 ASDF registry 漏了 `client/`**：照抄会导致
       `(asdf:load-system :cl-agent)` 失败（cl-agent.asd 依赖 cl-agent-client）。
@@ -646,10 +646,10 @@ cl-agent.client（面向应用的易用层，v10 新增）
   kernel-chat 与 kernel-chat-stream 不再重复组装
 
 **命名/Style 合规**：
-- 全库 **shadow 清零**：cl-agent.llm 的 `chat` 函数改名 `client-chat`，
+- 全库 **shadow 清零**：cl-agent/llm 的 `chat` 函数改名 `client-chat`，
   唯一的 `(:shadow #:chat)` 随之删除；导出符号与 CL/SBCL 内置零冲突
   （脚本比对过 COMMON-LISP 包全部外部符号）
-- 删泛昵称 `:core` / `:llm` / `:mock`（霸占全局包名，零使用），保留 `cla.*`
+- 删泛昵称 `:core` / `:llm` / `:mock`（霸占全局包名，零使用），保留 `cla/*`
 - 4 处 load 时 `(export ...)` 收口进 defpackage（conditions/validation/DI）
 - 测试系统更名 `cl-agent-test` → `cl-agent/test`（ASDF 次级系统约定，
   每次加载的告警消失）
@@ -659,7 +659,7 @@ cl-agent.client（面向应用的易用层，v10 新增）
 
 ### 既有遗留 ✅（2026-07-16 大扫除中处理）
 
-- [x] **A2A / MCP 子系统（`protocols/` 目录 + `cl-agent.protocols` 包）**：
+- [x] **A2A / MCP 子系统（`protocols/` 目录 + `cl-agent/protocols` 包）**：
       已整体删除（11 文件）。未完成且加载即报错——asd 列的
       `mcp.lisp` / `mcp-client.lisp` / `mcp-server.lisp` 根本不存在，
       不在主构建里，`tests/test-protocols.lisp` 还引用着不存在的包

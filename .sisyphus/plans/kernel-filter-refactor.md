@@ -28,7 +28,7 @@ The migration builds the new kernel+filter system **adjacent** to the advisor sy
 - **DP1 — Ordering model.** clj-agent dropped numeric `order` in favor of **registration order**. cl-agent's current advisor system uses numeric `order` + constants. **Recommendation:** follow clj-agent — registration order, drop numeric order.
 - **DP2 — End-state of `chat` macro / `ChatClient`.** **(A)** keep `chat`/`ChatClient` as public DSL, reimplemented on kernel+filter; **(B)** deprecate them. **Recommendation: (A)** — `chat` is a good CL-idiomatic DSL; kernel+filter is the lower-level assembly.
 - **DP3 — Memory default behavior shift.** Current default stores only final Q&A (memory outside loop). Target stores full transcript per round (memory inside loop). This is a **real behavior change**. **Recommendation:** shift the default; re-baseline the memory tests in P4.
-- **DP4 — Package placement.** **Recommendation:** new `cl-agent.kernel` package under `core/kernel/`; `cl-agent.chat` and `cl-agent.client` stay.
+- **DP4 — Package placement.** **Recommendation:** new `cl-agent/kernel` package under `core/kernel/`; `cl-agent/chat` and `cl-agent/client` stay.
 - **DP5 — Streaming.** clj-agent's `:token-xform` is a transducer. cl-agent's `advise-stream` currently threads an `on-chunk` callback. **Recommendation:** port `:token-xform` as a transducer; full streaming parity lands in P4/P5.
 
 ## 3. Preserve-unchanged components
