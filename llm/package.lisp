@@ -5,17 +5,17 @@
 ;;;;   定义 LLM 服务相关的包
 ;;;;
 ;;;; 包结构：
-;;;;   - cl-agent.llm: LLM 客户端和工具
-;;;;   - cl-agent.llm.providers: LLM 提供商实现
+;;;;   - cl-agent/llm: LLM 客户端和工具
+;;;;   - cl-agent/llm/providers: LLM 提供商实现
 ;;;;
 ;;;; 设计说明：
-;;;;   - 错误条件从 cl-agent.core 重导出
+;;;;   - 错误条件从 cl-agent/core 重导出
 ;;;;   - 提供统一的 LLM 接口
 ;;;;   - 支持多个提供商（Anthropic、OpenAI、Ollama、智谱 AI）
 
 
 ;;; 定义顺序说明：
-;;;   cl-agent.llm.providers 必须先于 cl-agent.llm 定义——主包用
+;;;   cl-agent/llm/providers 必须先于 cl-agent/llm 定义——主包用
 ;;;   :import-from 引入 providers 的 make-*-provider / response-complete-p
 ;;;   再导出，而 :import-from 要求源包在求值时已存在。
 ;;;   两个包之间没有 :use 关系，所以这个顺序是安全的。
@@ -23,10 +23,10 @@
 ;;; LLM 提供商包
 ;;; ============================================================
 
-(defpackage #:cl-agent.llm.providers
+(defpackage #:cl-agent/llm/providers
   (:use #:common-lisp
-        #:cl-agent.core)
-  (:nicknames #:cla.llm.providers)
+        #:cl-agent/core)
+  (:nicknames #:cla/llm/providers)
   (:export
    ;; ==================== Anthropic 提供商 ====================
    #:anthropic-provider
@@ -128,25 +128,25 @@
 ;;; LLM 主包
 ;;; ============================================================
 
-(defpackage #:cl-agent.llm
+(defpackage #:cl-agent/llm
   (:use #:common-lisp
-        #:cl-agent.core)
-  (:nicknames #:cla.llm)
-  ;; 注：本包曾 (:shadow #:chat)——低层 client 函数与 cl-agent.core 的
+        #:cl-agent/core)
+  (:nicknames #:cla/llm)
+  ;; 注：本包曾 (:shadow #:chat)——低层 client 函数与 cl-agent/core 的
   ;; chat 宏（kernel 声明式 DSL）同名。shadow 是给读者埋雷（同一个名字
   ;; 在不同包里一个是宏一个是函数），函数已改名 client-chat，shadow 随之
   ;; 消失。全库不再 shadow 任何符号。
-  ;; 门面层：这些符号的实现属于 cl-agent.llm.providers，此处引入*同一符号*
+  ;; 门面层：这些符号的实现属于 cl-agent/llm/providers，此处引入*同一符号*
   ;; 再导出，而不是在本包另立同名符号。
   ;;
   ;; 此前是后者：两个包各自导出一套独立的同名符号，后果有三——
-  ;;   1. 用户包一旦 (:use :cl-agent.llm :cl-agent.llm.providers) 就撞 6 个
+  ;;   1. 用户包一旦 (:use :cl-agent/llm :cl-agent/llm/providers) 就撞 6 个
   ;;      name conflict，而这两个包本是「门面 + 实现」，理应能一起 use；
   ;;   2. make-dashscope-provider 在本包只有导出、没有对应的委托定义，
   ;;      调用直接 UNDEFINED-FUNCTION——导出了一个不存在的函数；
   ;;   3. response-complete-p 两处实现语义分叉（本包那份不接受旧式 plist）。
   ;; 改为 :import-from 后，三者同时消失，且新增 provider 无需再手工同步。
-  (:import-from #:cl-agent.llm.providers
+  (:import-from #:cl-agent/llm/providers
                 #:make-anthropic-provider
                 #:make-openai-provider
                 #:make-ollama-provider
@@ -190,7 +190,7 @@
    #:base-provider-stream-endpoint
    #:base-provider-timeout
 
-   ;; 提供商工厂（门面：符号本体来自 cl-agent.llm.providers）
+   ;; 提供商工厂（门面：符号本体来自 cl-agent/llm/providers）
    #:make-provider
    #:make-anthropic-provider
    #:make-openai-provider
@@ -212,7 +212,7 @@
    #:openrouter-extra-params
 
    ;; 提供商访问器（统一接口）
-   ;; provider-name 使用 cl-agent.core 的泛型函数
+   ;; provider-name 使用 cl-agent/core 的泛型函数
    #:provider-api-url
    #:provider-default-model
    #:provider-chat-endpoint
@@ -222,11 +222,11 @@
 
    ;; ==================== Service Layer (响应标准化) ====================
    ;; 归一化（单一来源：provider 自身产出 llm-response，
-   ;; usage/finish-reason 别名归一在 cl-agent.core）
+   ;; usage/finish-reason 别名归一在 cl-agent/core）
    #:ensure-llm-response
    #:normalize-response
    #:chat-with-normalization
-   #:normalize-usage            ; 重导出 cl-agent.core:normalize-usage
+   #:normalize-usage            ; 重导出 cl-agent/core:normalize-usage
    ;; llm-response 工具函数
    #:response-reasoning-content
    #:response-complete-p
@@ -263,7 +263,7 @@
    #:make-stream-context
 
    ;; ==================== 嵌入向量 ====================
-   ;; SPI 与统一响应定义在 cl-agent.core（core/llm/embedding.lisp），
+   ;; SPI 与统一响应定义在 cl-agent/core（core/llm/embedding.lisp），
    ;; 这里是 OpenAI 兼容实现 + 面向应用的便捷函数
    #:llm-embed
    #:embed
@@ -275,7 +275,7 @@
    #:provider-supports-embedding-p
    #:build-embedding-request
    #:parse-embedding-response
-   ;; embedding-response 访问器（重导出 cl-agent.core）
+   ;; embedding-response 访问器（重导出 cl-agent/core）
    #:embedding-response
    #:make-embedding-response
    #:embedding-response-p
@@ -316,7 +316,7 @@
    #:parse-chat-response
 
    ;; ==================== Schema Converters ====================
-   ;; 消息/工具的 wire 格式转换器不在此导出：它们是 cl-agent.llm.providers
+   ;; 消息/工具的 wire 格式转换器不在此导出：它们是 cl-agent/llm/providers
    ;; 的内部实现（convert-messages-for-openai / parse-messages-for-anthropic
    ;; 等），随各 provider 的 API 演进，不作为公开 API。
 

@@ -19,7 +19,7 @@
 ;;;;   响应 data 数组按 index 排序后再产出向量，调用方可以靠位置
 ;;;;   把向量配回原文本。厂商不保证 data 的到达顺序。
 
-(in-package :cl-agent.llm)
+(in-package :cl-agent/llm)
 
 ;;; ============================================================
 ;;; 端点与默认模型
@@ -33,50 +33,50 @@
 ;;; 不给 base-provider 加一个 default-embedding-model 槽位，是因为
 ;;; 那会让每个 make-*-provider 都得多传一个参数；而默认嵌入模型是
 ;;; 厂商级常量，写成方法就够了，调用方需要别的模型时传 :model 即可。
-(defmethod cl-agent.core:provider-default-embedding-model
-    ((provider cl-agent.llm.providers::openai-provider))
+(defmethod cl-agent/core:provider-default-embedding-model
+    ((provider cl-agent/llm/providers::openai-provider))
   "text-embedding-3-small")
 
-(defmethod cl-agent.core:provider-default-embedding-model
-    ((provider cl-agent.llm.providers::siliconflow-provider))
+(defmethod cl-agent/core:provider-default-embedding-model
+    ((provider cl-agent/llm/providers::siliconflow-provider))
   "BAAI/bge-m3")
 
-(defmethod cl-agent.core:provider-default-embedding-model
-    ((provider cl-agent.llm.providers::zhipu-provider))
+(defmethod cl-agent/core:provider-default-embedding-model
+    ((provider cl-agent/llm/providers::zhipu-provider))
   "embedding-3")
 
-(defmethod cl-agent.core:provider-default-embedding-model
-    ((provider cl-agent.llm.providers::mistral-provider))
+(defmethod cl-agent/core:provider-default-embedding-model
+    ((provider cl-agent/llm/providers::mistral-provider))
   "mistral-embed")
 
-(defmethod cl-agent.core:provider-default-embedding-model
-    ((provider cl-agent.llm.providers::gemini-provider))
+(defmethod cl-agent/core:provider-default-embedding-model
+    ((provider cl-agent/llm/providers::gemini-provider))
   "text-embedding-004")
 
-(defmethod cl-agent.core:provider-default-embedding-model
-    ((provider cl-agent.llm.providers::ollama-provider))
+(defmethod cl-agent/core:provider-default-embedding-model
+    ((provider cl-agent/llm/providers::ollama-provider))
   "nomic-embed-text")
 
-(defmethod cl-agent.core:provider-default-embedding-model
-    ((provider cl-agent.llm.providers::dashscope-provider))
+(defmethod cl-agent/core:provider-default-embedding-model
+    ((provider cl-agent/llm/providers::dashscope-provider))
   "text-embedding-v3")
 
 ;;; OpenRouter 只做对话路由，没有嵌入端点；xai / moonshot / deepseek
 ;;; 亦未提供嵌入模型——不给它们方法，默认 NIL，调用时会明确报
 ;;; 「未指定嵌入模型」而不是拿对话模型去撞 400。
 
-(defmethod cl-agent.core:provider-supports-embedding-p
-    ((provider cl-agent.llm.providers::openai-compat-provider))
+(defmethod cl-agent/core:provider-supports-embedding-p
+    ((provider cl-agent/llm/providers::openai-compat-provider))
   "OpenAI 兼容端点是否提供嵌入服务，以是否有默认嵌入模型为准"
-  (not (null (cl-agent.core:provider-default-embedding-model provider))))
+  (not (null (cl-agent/core:provider-default-embedding-model provider))))
 
-(defmethod cl-agent.core:provider-supports-embedding-p
-    ((provider cl-agent.llm.providers::dashscope-provider))
+(defmethod cl-agent/core:provider-supports-embedding-p
+    ((provider cl-agent/llm/providers::dashscope-provider))
   t)
 
 (defmethod provider-embedding-endpoint
-    ((provider cl-agent.llm.providers::dashscope-provider))
-  cl-agent.llm.providers::+dashscope-embedding-endpoint+)
+    ((provider cl-agent/llm/providers::dashscope-provider))
+  cl-agent/llm/providers::+dashscope-embedding-endpoint+)
 
 ;;; ============================================================
 ;;; 请求构建
@@ -92,12 +92,12 @@ text-embedding-3-* 等少数模型支持，强塞给别的模型会 400。"
   (let ((body (make-hash-table :test 'equal))
         (effective-model
           (or model
-              (cl-agent.core:provider-default-embedding-model provider))))
+              (cl-agent/core:provider-default-embedding-model provider))))
     (unless effective-model
-      (cl-agent.core:signal-error
-       'cl-agent.core:embedding-error
+      (cl-agent/core:signal-error
+       'cl-agent/core:embedding-error
        :message (format nil "未指定嵌入模型，且提供商 ~A 没有默认嵌入模型，请传 :model"
-                        (cl-agent.core:provider-name provider))))
+                        (cl-agent/core:provider-name provider))))
     (setf (gethash "model" body) effective-model)
     (setf (gethash "input" body) (coerce texts 'vector))
     (when dimensions
@@ -146,22 +146,22 @@ data 数组按 index 升序排列后再取向量——厂商不保证到达顺�
                               (or (and (hash-table-p item)
                                        (gethash "index" item))
                                   0)))))
-    (cl-agent.core:make-embedding-response
+    (cl-agent/core:make-embedding-response
      :embeddings (mapcar (lambda (item)
                            (parse-embedding-vector
                             (when (hash-table-p item)
                               (gethash "embedding" item))))
                          sorted)
      :model (gethash "model" parsed)
-     :usage (cl-agent.core:normalize-usage (gethash "usage" parsed))
+     :usage (cl-agent/core:normalize-usage (gethash "usage" parsed))
      :raw-response parsed)))
 
 ;;; ============================================================
 ;;; llm-embed 实现（OpenAI 兼容基座）
 ;;; ============================================================
 
-(defmethod cl-agent.core:llm-embed
-    ((provider cl-agent.llm.providers::openai-compat-provider) texts
+(defmethod cl-agent/core:llm-embed
+    ((provider cl-agent/llm/providers::openai-compat-provider) texts
      &key model dimensions encoding-format extra-params)
   "OpenAI 兼容端点的嵌入实现（openai / siliconflow / zhipu / ollama / ...）。
 
@@ -173,11 +173,11 @@ TEXTS 接受单个字符串或字符串列表；返回的 embeddings 顺序与�
                                                 :encoding-format encoding-format
                                                 :extra-params extra-params))
          (url (build-api-url provider (provider-embedding-endpoint provider)))
-         (headers (cl-agent.llm.providers::provider-request-headers provider))
+         (headers (cl-agent/llm/providers::provider-request-headers provider))
          (response (make-http-request
                     url
                     headers
-                    (cl-agent.core:json-stringify request-body)
+                    (cl-agent/core:json-stringify request-body)
                     :timeout (provider-timeout provider))))
     (parse-embedding-response response)))
 
@@ -200,7 +200,7 @@ TEXTS 接受单个字符串或字符串列表；返回的 embeddings 顺序与�
         (parameters (make-hash-table :test 'equal))
         (effective-model
           (or model
-              (cl-agent.core:provider-default-embedding-model provider))))
+              (cl-agent/core:provider-default-embedding-model provider))))
     (setf (gethash "model" body) effective-model)
     (setf (gethash "texts" input) (coerce texts 'vector))
     (setf (gethash "input" body) input)
@@ -236,18 +236,18 @@ TEXTS 接受单个字符串或字符串列表；返回的 embeddings 顺序与�
                               (or (and (hash-table-p item)
                                        (gethash "text_index" item))
                                   0)))))
-    (cl-agent.core:make-embedding-response
+    (cl-agent/core:make-embedding-response
      :embeddings (mapcar (lambda (item)
                            (parse-embedding-vector
                             (when (hash-table-p item)
                               (gethash "embedding" item))))
                          sorted)
      :model (gethash "model" parsed)
-     :usage (cl-agent.core:normalize-usage (gethash "usage" parsed))
+     :usage (cl-agent/core:normalize-usage (gethash "usage" parsed))
      :raw-response parsed)))
 
-(defmethod cl-agent.core:llm-embed
-    ((provider cl-agent.llm.providers::dashscope-provider) texts
+(defmethod cl-agent/core:llm-embed
+    ((provider cl-agent/llm/providers::dashscope-provider) texts
      &key model dimensions encoding-format extra-params)
   "DashScope 原生嵌入实现（text-embedding-v1/v2/v3）。
 
@@ -262,11 +262,11 @@ ENCODING-FORMAT 被忽略——DashScope 只返回 float 数组，没有这个�
                         :dimensions dimensions
                         :extra-params extra-params))
          (url (build-api-url provider (provider-embedding-endpoint provider)))
-         (headers (cl-agent.llm.providers::build-bearer-auth-headers provider))
+         (headers (cl-agent/llm/providers::build-bearer-auth-headers provider))
          (response (make-http-request
                     url
                     headers
-                    (cl-agent.core:json-stringify request-body)
+                    (cl-agent/core:json-stringify request-body)
                     :timeout (provider-timeout provider))))
     (parse-dashscope-embedding-response response)))
 
@@ -296,8 +296,8 @@ ENCODING-FORMAT 被忽略——DashScope 只返回 float 数组，没有这个�
   (embed *gpt* \"Hello, world!\")
   => #(0.123 0.456 ...)"
   (declare (ignore model dimensions encoding-format extra-params))
-  (cl-agent.core:embedding-response-first
-   (apply #'cl-agent.core:llm-embed
+  (cl-agent/core:embedding-response-first
+   (apply #'cl-agent/core:llm-embed
           (embedding-provider provider-or-client)
           (list text)
           args)))
@@ -313,8 +313,8 @@ ENCODING-FORMAT 被忽略——DashScope 只返回 float 数组，没有这个�
   (embed-batch *gpt* '(\"文本1\" \"文本2\" \"文本3\"))
   => (#(...) #(...) #(...))"
   (declare (ignore model dimensions encoding-format extra-params))
-  (cl-agent.core:embedding-response-embeddings
-   (apply #'cl-agent.core:llm-embed
+  (cl-agent/core:embedding-response-embeddings
+   (apply #'cl-agent/core:llm-embed
           (embedding-provider provider-or-client)
           texts
           args)))
@@ -323,7 +323,7 @@ ENCODING-FORMAT 被忽略——DashScope 只返回 float 数组，没有这个�
                        &key model dimensions encoding-format extra-params)
   "同 embed-batch，但返回完整的 embedding-response（含 usage / model）。"
   (declare (ignore model dimensions encoding-format extra-params))
-  (apply #'cl-agent.core:llm-embed
+  (apply #'cl-agent/core:llm-embed
          (embedding-provider provider-or-client)
          (if (stringp texts) (list texts) texts)
          args))
@@ -338,8 +338,8 @@ ENCODING-FORMAT 被忽略——DashScope 只返回 float 数组，没有这个�
 维度不一致时报 validation-error——静默返回一个数会让
 「用错了模型」这类问题一路漂到检索结果排序里才被察觉。"
   (unless (= (length a) (length b))
-    (cl-agent.core:signal-error
-     'cl-agent.core:validation-error
+    (cl-agent/core:signal-error
+     'cl-agent/core:validation-error
      :message (format nil "向量维度不一致：~A vs ~A" (length a) (length b))
      :field "embedding"))
   (let ((dot 0.0) (norm-a 0.0) (norm-b 0.0))
