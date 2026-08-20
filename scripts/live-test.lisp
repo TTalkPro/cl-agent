@@ -23,7 +23,7 @@
   (asdf:load-system :cl-agent))
 
 (defpackage :cl-agent/live
-  (:use :cl :cl-agent.core))
+  (:use :cl :cl-agent/core))
 (in-package :cl-agent/live)
 
 ;;; ============================================================
@@ -61,7 +61,7 @@
          (format t "ERROR~%      ~A~%" e)))))
 
 (defun make-live-model ()
-  (apply #'cl-agent.llm:create-chat-model *provider*
+  (apply #'cl-agent/llm:create-chat-model *provider*
          (when *model-name* (list :model *model-name*))))
 
 (defvar *model*)
@@ -126,7 +126,7 @@
              :model *model*
              :filters (list (validation-turn-filter
                              (structured-output-validate-fn
-                              schema :parse-fn #'cl-agent.core:json-parse)
+                              schema :parse-fn #'cl-agent/core:json-parse)
                              :max-retries 2))))
          (entity (chat k
                    (:user "用 JSON 给出东京的 name 和 population（整数）。")
@@ -146,7 +146,7 @@
   (format nil "已删除 ~A" path))
 
 (defun make-hitl-agent ()
-  (cl-agent.client:make-agent
+  (cl-agent/client:make-agent
    :model *model* :tools '(live-rm-file)
    :system "你是运维助手。删除文件必须用 live-rm-file 工具。"
    :callbacks (list :on-tool-call
@@ -157,33 +157,33 @@
 (deflive check-hitl-pause "[5/11] HITL 暂停（工具不得执行）"
   (let ((*hitl-fired* nil))
     (let* ((a (make-hitl-agent))
-           (r (cl-agent.client:agent-chat-result a "删除 /tmp/report.log")))
+           (r (cl-agent/client:agent-chat-result a "删除 /tmp/report.log")))
       ;; 关键不变量：暂停 ≠ 执行后再问
-      (values (and (eq :paused (cl-agent.client:agent-result-status r))
+      (values (and (eq :paused (cl-agent/client:agent-result-status r))
                    (null *hitl-fired*))
               (format nil "status=~S 工具已执行=~A"
-                      (cl-agent.client:agent-result-status r)
+                      (cl-agent/client:agent-result-status r)
                       (if *hitl-fired* "是（BUG）" "否"))))))
 
 (deflive check-hitl-approve "[6/11] HITL :approved → 执行并续跑"
   (let ((*hitl-fired* nil))
     (let ((a (make-hitl-agent)))
-      (cl-agent.client:agent-chat-result a "删除 /tmp/report.log")
-      (let ((r (cl-agent.client:agent-resume a :approved)))
-        (values (and (eq :completed (cl-agent.client:agent-result-status r))
+      (cl-agent/client:agent-chat-result a "删除 /tmp/report.log")
+      (let ((r (cl-agent/client:agent-resume a :approved)))
+        (values (and (eq :completed (cl-agent/client:agent-result-status r))
                      (equal *hitl-fired* "/tmp/report.log"))
                 (format nil "已删除=~S" *hitl-fired*))))))
 
 (deflive check-hitl-reject "[7/11] HITL :rejected → 不执行，理由回模型"
   (let ((*hitl-fired* nil))
     (let ((a (make-hitl-agent)))
-      (cl-agent.client:agent-chat-result a "删除 /tmp/prod.db")
-      (let ((r (cl-agent.client:agent-resume a :rejected
+      (cl-agent/client:agent-chat-result a "删除 /tmp/prod.db")
+      (let ((r (cl-agent/client:agent-resume a :rejected
                                              :payload '(:message "生产库禁止删除"))))
-        (values (and (eq :completed (cl-agent.client:agent-result-status r))
+        (values (and (eq :completed (cl-agent/client:agent-result-status r))
                      (null *hitl-fired*))
                 (format nil "status=~S 未执行=~A"
-                        (cl-agent.client:agent-result-status r)
+                        (cl-agent/client:agent-result-status r)
                         (if (null *hitl-fired*) "✓" "✗")))))))
 
 (deftool live-lookup-weather (&key city)

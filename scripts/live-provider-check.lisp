@@ -29,6 +29,11 @@
 ;;;;   --vision-model     多模态模型（不给则跳过多模态检查）
 ;;;;   --embedding-model  嵌入模型（不给则取 provider 的默认嵌入模型）
 ;;;;   --image-url        测试图片 URL（默认一张公开的小图）
+;;;;   --max-tokens       每次调用的输出上限（默认 2048）
+;;;;                      不要为省钱调太小：推理模型（M2.7 / DeepSeek-R1 类）
+;;;;                      的思维链也吃这个额度，给 256 会在正文刚起头就截断，
+;;;;                      流式检查看到的分片数因此失真——那是额度不够，
+;;;;                      不是厂商不增量。
 ;;;;
 ;;;; 退出码：0 全通过（跳过不算失败），1 有失败。
 
@@ -43,7 +48,7 @@
   (asdf:load-system :cl-agent))
 
 (defpackage :cl-agent/live-provider
-  (:use :cl :cl-agent.core))
+  (:use :cl :cl-agent/core))
 (in-package :cl-agent/live-provider)
 
 ;;; ============================================================
@@ -59,6 +64,8 @@
 (defparameter *model* (argv-value "--model" nil))
 (defparameter *vision-model* (argv-value "--vision-model" nil))
 (defparameter *embedding-model* (argv-value "--embedding-model" nil))
+(defparameter *max-tokens*
+  (parse-integer (argv-value "--max-tokens" "2048")))
 (defparameter *image-url*
   (argv-value "--image-url"
               "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4d/Cat_November_2010-1a.jpg/320px-Cat_November_2010-1a.jpg"))
@@ -97,7 +104,7 @@
   (let ((message (append (list :role :user :content text)
                          (when media (list :media media)))))
     (apply #'llm-chat *provider* (list message)
-           :max-tokens 256
+           :max-tokens *max-tokens*
            (append (when model (list :model model))
                    (when tools (list :tools tools))
                    (when extra-params (list :extra-params extra-params))))))
@@ -107,11 +114,11 @@
 ;;; ============================================================
 
 (defcheck check-provider-created "[1/8] provider 可创建（密钥就位、端点已解析）"
-  (values (typep *provider* 'cl-agent.llm:base-provider)
+  (values (typep *provider* 'cl-agent/llm:base-provider)
           (format nil "~A → ~A~A"
                   (provider-name *provider*)
-                  (cl-agent.llm:provider-api-url *provider*)
-                  (cl-agent.llm:provider-chat-endpoint *provider*))))
+                  (cl-agent/llm:provider-api-url *provider*)
+                  (cl-agent/llm:provider-chat-endpoint *provider*))))
 
 (defcheck check-single-turn "[2/8] 单轮对话（base-url + 鉴权头 + 默认模型名）"
   (let* ((response (chat-once "只回答一个词，不要标点：法国的首都是？"
@@ -156,20 +163,27 @@
 (defcheck check-streaming "[5/8] SSE 流式（分片拼接）"
   (if (not (provider-supports-streaming-p *provider*))
       (values :skip "该 provider 未声明流式支持")
-      (let ((chunks nil))
+      (let ((text-chunks 0) (reasoning-chunks 0))
         (let ((response
                 (llm-chat-stream *provider*
                                  (list (list :role :user
                                              :content "从 1 数到 30，用空格分隔，只输出数字。"))
                                  (lambda (chunk)
-                                   (let ((delta (getf chunk :delta)))
-                                     (when delta (push delta chunks))))
-                                 :max-tokens 256
+                                   (cond ((getf chunk :delta) (incf text-chunks))
+                                         ((getf chunk :reasoning-delta)
+                                          (incf reasoning-chunks))))
+                                 :max-tokens *max-tokens*
                                  :model *model*)))
-          ;; 多个分片 ⇒ 确实是增量流式；末态 response 与非流式同构
-          (values (and (> (length chunks) 1)
-                       (stringp (llm-response-content response)))
-                  (format nil "~A 个分片" (length chunks)))))))
+          ;; 多个分片 ⇒ 确实是增量流式；末态 response 与非流式同构。
+          ;; 推理模型的思维链也是增量流（:reasoning-delta），同样算数——
+          ;; 否则思维链一长，正文的分片数就被 max-tokens 截没了，
+          ;; 明明在增量却判成不增量。
+          (values (and (> (+ text-chunks reasoning-chunks) 1)
+                       (stringp (llm-response-content response))
+                       (plusp (length (llm-response-content response))))
+                  (format nil "~A 个正文分片~@[ + ~A 个思维链分片~]"
+                          text-chunks
+                          (when (plusp reasoning-chunks) reasoning-chunks)))))))
 
 (defcheck check-multimodal "[6/8] 多模态输入（图片分片厂商认不认）"
   (if (null *vision-model*)
@@ -192,12 +206,12 @@
         (values (and (= 2 (length vectors))
                      (plusp (length (first vectors)))
                      ;; 两句语义相近，相似度应明显高于 0
-                     (> (cl-agent.llm:cosine-similarity (first vectors)
+                     (> (cl-agent/llm:cosine-similarity (first vectors)
                                                         (second vectors))
                         0.3))
                 (format nil "dim=~A 相似度=~,3F"
                         (embedding-dimensions response)
-                        (cl-agent.llm:cosine-similarity (first vectors)
+                        (cl-agent/llm:cosine-similarity (first vectors)
                                                         (second vectors)))))))
 
 (defcheck check-error-message-surfaced "[8/8] 厂商错误原文透出（不是光一个状态码）"
@@ -206,8 +220,8 @@
   (handler-case
       (progn (chat-once "hi" :model "definitely-not-a-real-model-zzz")
              (values nil "预期报错却成功返回了"))
-    (cl-agent.core:llm-error (e)
-      (let ((message (cl-agent.core:error-message e)))
+    (cl-agent/core:llm-error (e)
+      (let ((message (cl-agent/core:error-message e)))
         (values (and (stringp message)
                      ;; 带了「-」分隔的厂商原话，说明 body 被解析出来了
                      (search " - " message))
@@ -219,15 +233,15 @@
 
 (defun main ()
   (format t "~&=== CL-Agent Provider 层真实链路验证 ===~%")
-  (format t "provider: ~A~@[  model: ~A~]~@[  vision: ~A~]~%~%"
-          *provider-name* *model* *vision-model*)
+  (format t "provider: ~A~@[  model: ~A~]~@[  vision: ~A~]  max-tokens: ~A~%~%"
+          *provider-name* *model* *vision-model* *max-tokens*)
   (handler-case
-      (setf *provider* (cl-agent.llm:create-provider *provider-name*))
+      (setf *provider* (cl-agent/llm:create-provider *provider-name*))
     (error (e)
       (format t "无法创建 provider：~A~%~%~
                  提示：确认已设置对应的 API key 环境变量；~%~
                  已注册的 provider：~{~A~^ ~}~%"
-              e (cl-agent.llm:list-providers))
+              e (cl-agent/llm:list-providers))
       (uiop:quit 1)))
   (check-provider-created)
   (check-single-turn)
