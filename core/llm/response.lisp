@@ -21,7 +21,7 @@
 ;;;;   llm-tool-call). Plist support has been removed. Use plist-to-llm-response
 ;;;;   to convert provider output to unified objects.
 
-(in-package #:cl-agent.core)
+(in-package #:cl-agent/core)
 
 ;;; ============================================================
 ;;; Finish Reason Type
