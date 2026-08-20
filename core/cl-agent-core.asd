@@ -5,7 +5,7 @@
 ;;;; Author: David
 ;;;;
 ;;;; Overview:
-;;;;   CL-Agent 框架本体，全部装在**单一包 cl-agent.core** 里：
+;;;;   CL-Agent 框架本体，全部装在**单一包 cl-agent/core** 里：
 ;;;;
 ;;;;   - 基础设施：条件系统、宏、工具函数、数据转换、JSON Schema 生成与校验
 ;;;;   - HTTP 客户端 + SSE 流式 + 重试
@@ -16,14 +16,14 @@
 ;;;;     Kernel / build-kernel / invoke-chat|tool|turn / run-tool-loop /
 ;;;;     ToolCallingManager / 10 个内置 filter / chat 宏 DSL
 ;;;;
-;;;; v10.0.0 包合并：cl-agent.http / cl-agent.chat / cl-agent.kernel 三个包
-;;;; 并入 cl-agent.core，对齐 clj-agent 的 core/provider/client 三模块分层。
+;;;; v10.0.0 包合并：cl-agent/http / cl-agent/chat / cl-agent/kernel 三个包
+;;;; 并入 cl-agent/core，对齐 clj-agent 的 core/provider/client 三模块分层。
 ;;;; 合并前先清掉了三处死代码，否则会正面撞名：
 ;;;;   - types.lisp 整个文件（34 个零调用符号，与 chat 的 CLOS 消息体系撞 11 个）
 ;;;;   - core 的 build-url（零调用，与 http 的活实现撞名）
 ;;;;   - core 的 with-retry（零使用，与 http 的活实现撞名）
 ;;;;
-;;;; v9.0.0 移除了 cl-agent.client（Spring AI 的 ChatClient + Builder +
+;;;; v9.0.0 移除了 cl-agent/client（Spring AI 的 ChatClient + Builder +
 ;;;; fluent RequestSpec 移植）。该名字在 v10 被复用为 SimpleAgent 层。
 
 (asdf:defsystem #:cl-agent-core
@@ -65,7 +65,7 @@
    ;; 注：曾有 types.lisp（旧消息/ToolCall/Response/Usage/InvokeResult
    ;; + 5 个从未实现的 plugin-* defgeneric，共 34 个符号）。SBCL 调用图
    ;; 显示全部零调用——只有文件内部的自闭环，没有外部入口。它与
-   ;; cl-agent.chat 在用的 CLOS 消息体系有 11 个同名符号，是合并的正面
+   ;; cl-agent/chat 在用的 CLOS 消息体系有 11 个同名符号，是合并的正面
    ;; 障碍。已整体删除。
    ;; 注：曾有 documentation.lisp（「文档宏系统」：defsection /
    ;; defun-documented / defstruct-documented 等 11 个宏与函数）。
@@ -77,7 +77,7 @@
    ;; 照导出列表使用的人会直接撞上。已整体删除。
    ;; 文档请写在各自的 docstring 里，包导出用 defpackage 的 :export。
    (:file "utils")                ; 工具函数 + ID 生成器/时间戳提供者
-   ;; 注：曾有独立的 cl-agent.core.protocols 包（core/protocols/protocols.lisp），
+   ;; 注：曾有独立的 cl-agent/core/protocols 包（core/protocols/protocols.lisp），
    ;; 统共只导出 make-standard-id-generator / make-standard-timestamp-provider
    ;; 两个符号，却占着 `protocols` 这个极宽泛的昵称，还容易与 protocols/
    ;; 子系统（A2A，另一回事）混淆。它排在 utils 之后加载，逼得 utils 里的
@@ -161,7 +161,7 @@
 ;; Changelog
 ;; ============================================================
 ;;
-;; v8.2.0 —— Phase P1：Filter 机制 + Kernel 骨架（新增 cl-agent.kernel）：
+;; v8.2.0 —— Phase P1：Filter 机制 + Kernel 骨架（新增 cl-agent/kernel）：
 ;; - filter CLOS 类，四钩子槽（:tool/:chat/:turn/:token-xform）
 ;; - build-chain 洋葱折叠函数（reduce → 嵌套闭包），对标 clj-agent
 ;; - defilter 宏（对标 defadvisor，简化版）
@@ -176,7 +176,7 @@
 ;; - 新增 structured-output-validation-advisor（对标
 ;;   StructuredOutputValidationAdvisor）：JSON Schema 校验 + 失败自我纠正重试；
 ;;   call-entity / (:call :entity schema) 可自动挂载
-;; - 新增 JSON Schema 校验器（cl-agent.core:validate-json-schema /
+;; - 新增 JSON Schema 校验器（cl-agent/core:validate-json-schema /
 ;;   validate-json-text），支持 type/required/properties/items/enum/const/
 ;;   数值与字符串约束/allOf-anyOf-oneOf-not
 ;; - 移除 prompt-chat-memory-advisor：Spring AI 2.0 已移除
@@ -195,10 +195,10 @@
 ;;
 ;; v8.0.0:
 ;; - 全面对标 Spring AI 2.0：删除 Kernel/Filter/SimpleAgent 体系，
-;;   新增 cl-agent.chat（消息/Prompt/ChatOptions/ChatResponse/
-;;   deftool 工具体系/ChatModel/ChatMemory）与 cl-agent.client
+;;   新增 cl-agent/chat（消息/Prompt/ChatOptions/ChatResponse/
+;;   deftool 工具体系/ChatModel/ChatMemory）与 cl-agent/client
 ;;   （Advisor 协议 + defadvisor + 内置 Advisor + ChatClient + chat 宏）
 ;; - Process 框架与 Checkpoint 存储体系随 cl-agent-extra 一并移除
-;; - JSON Schema 工具函数（params->json-schema 等）上移至 cl-agent.core
+;; - JSON Schema 工具函数（params->json-schema 等）上移至 cl-agent/core
 ;;
 ;; v6.x/v5.x/v4.x/v3.x: 见 git 历史（Semantic Kernel 时期）

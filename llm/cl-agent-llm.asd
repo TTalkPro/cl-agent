@@ -25,7 +25,7 @@
 ;;;;   - 嵌入向量：embeddings.lisp（llm-embed SPI + embed / embed-batch）
 ;;;;
 ;;;; Usage:
-;;;;   (cl-agent.llm:create-chat-model :anthropic
+;;;;   (cl-agent/llm:create-chat-model :anthropic
 ;;;;                                   :model "claude-sonnet-4-20250514")
 
 (asdf:defsystem #:cl-agent-llm
@@ -122,7 +122,7 @@
 ;; - Kernel integration via llm-chat generic function
 ;;
 ;; v2.0.0:
-;; - HTTP client from cl-agent.http
+;; - HTTP client from cl-agent/http
 ;;
 ;; v1.0.0:
 ;; - Initial multi-provider support

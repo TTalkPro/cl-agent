@@ -10,9 +10,9 @@
 ;;;;
 ;;;; Architecture:
 ;;;;   Layer 1 - Core: cl-agent-core
-;;;;     基础设施 + cl-agent.chat（消息/Prompt/ChatOptions/ChatResponse/
+;;;;     基础设施 + cl-agent/chat（消息/Prompt/ChatOptions/ChatResponse/
 ;;;;     deftool 工具体系/ChatModel/ChatMemory）
-;;;;     + cl-agent.kernel（Filter 三链 + Kernel + invoke-* +
+;;;;     + cl-agent/kernel（Filter 三链 + Kernel + invoke-* +
 ;;;;       run-tool-loop + 10 个内置 filter + chat 宏 DSL）
 ;;;;   Layer 2 - LLM: cl-agent-llm
 ;;;;     提供商实现（Anthropic/OpenAI/智谱/Ollama/DashScope/MiniMax...），
@@ -22,8 +22,8 @@
 ;;;;   (asdf:load-system :cl-agent)
 ;;;;
 ;;;; Changelog:
-;;;;   v9.0.0 - 移除 cl-agent.client（Spring AI 的 ChatClient + Builder +
-;;;;            fluent RequestSpec 移植）；chat 宏搬入 cl-agent.kernel。
+;;;;   v9.0.0 - 移除 cl-agent/client（Spring AI 的 ChatClient + Builder +
+;;;;            fluent RequestSpec 移植）；chat 宏搬入 cl-agent/kernel。
 ;;;;            至此 Spring AI 的两大移植层（Advisor、ChatClient）全部退役，
 ;;;;            kernel+filter 成为唯一编程模型。
 ;;;;   v8.0.0 - Spring AI 2.0 对标重构：删除 Process/Checkpoint/Kernel/
@@ -94,10 +94,10 @@
 
                ;; kernel chat 宏 DSL + 端到端集成
                ;; （前身 test-chat-client：Builder / fluent spec 随
-               ;;   cl-agent.client 一并退役）
+               ;;   cl-agent/client 一并退役）
                (:file "tests/test-kernel-chat")
 
-               ;; SimpleAgent（cl-agent.client）
+               ;; SimpleAgent（cl-agent/client）
                (:file "tests/test-agent")
 
                ;; Mock 模块自身的测试
