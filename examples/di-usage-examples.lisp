@@ -26,22 +26,22 @@
 
   ;; 1. 创建容器
   (defparameter *simple-container*
-    (cl-agent.core:make-di-container :name "simple"))
+    (cl-agent/core:make-di-container :name "simple"))
 
   ;; 2. 绑定服务（工厂函数）
-  (cl-agent.core:di-bind *simple-container* :greeting
+  (cl-agent/core:di-bind *simple-container* :greeting
     (lambda ()
       "Hello from DI Container!")
     :singleton t)
 
   ;; 3. 解析服务
-  (let ((greeting (cl-agent.core:di-resolve *simple-container* :greeting)))
+  (let ((greeting (cl-agent/core:di-resolve *simple-container* :greeting)))
     (format t "~&Greeting: ~A~%" greeting))
   ;; => Greeting: Hello from DI Container!
 
   ;; 4. 验证单例：两次解析返回相同实例
-  (let ((g1 (cl-agent.core:di-resolve *simple-container* :greeting))
-        (g2 (cl-agent.core:di-resolve *simple-container* :greeting)))
+  (let ((g1 (cl-agent/core:di-resolve *simple-container* :greeting))
+        (g2 (cl-agent/core:di-resolve *simple-container* :greeting)))
     (format t "Same instance? ~A~%" (eq g1 g2)))
   ;; => Same instance? T
 
@@ -59,23 +59,23 @@
   - 原型模式（不同实例）"
 
   (defparameter *scope-container*
-    (cl-agent.core:make-di-container :name "scope"))
+    (cl-agent/core:make-di-container :name "scope"))
 
   ;; 1. 绑定单例服务
-  (cl-agent.core:di-bind *scope-container* :singleton-service
+  (cl-agent/core:di-bind *scope-container* :singleton-service
     (lambda ()
       (cons :singleton (random 100)))
     :singleton t)
 
   ;; 2. 绑定原型服务
-  (cl-agent.core:di-bind *scope-container* :prototype-service
+  (cl-agent/core:di-bind *scope-container* :prototype-service
     (lambda ()
       (cons :prototype (random 100)))
     :singleton nil)
 
   ;; 3. 测试单例：两次解析返回相同实例
-  (let ((s1 (cl-agent.core:di-resolve *scope-container* :singleton-service))
-        (s2 (cl-agent.core:di-resolve *scope-container* :singleton-service)))
+  (let ((s1 (cl-agent/core:di-resolve *scope-container* :singleton-service))
+        (s2 (cl-agent/core:di-resolve *scope-container* :singleton-service)))
     (format t "~&Singleton service:~%")
     (format t "  First:  ~A~%" s1)
     (format t "  Second: ~A~%" s2)
@@ -83,8 +83,8 @@
   ;; => Same? T
 
   ;; 4. 测试原型：两次解析返回不同实例
-  (let ((p1 (cl-agent.core:di-resolve *scope-container* :prototype-service))
-        (p2 (cl-agent.core:di-resolve *scope-container* :prototype-service)))
+  (let ((p1 (cl-agent/core:di-resolve *scope-container* :prototype-service))
+        (p2 (cl-agent/core:di-resolve *scope-container* :prototype-service)))
     (format t "~&Prototype service:~%")
     (format t "  First:  ~A~%" p1)
     (format t "  Second: ~A~%" p2)
@@ -105,10 +105,10 @@
   - 混合单例和原型作用域"
 
   (defparameter *batch-container*
-    (cl-agent.core:make-di-container :name "batch"))
+    (cl-agent/core:make-di-container :name "batch"))
 
   ;; 批量绑定服务
-  (cl-agent.core:di-bind* *batch-container*
+  (cl-agent/core:di-bind* *batch-container*
     (:config
      (lambda () (list :debug t :verbose t))
      :singleton t)
@@ -127,12 +127,12 @@
 
   ;; 验证绑定
   (format t "~&Services bound: ~A~%"
-          (cl-agent.core:di-list-services *batch-container*))
+          (cl-agent/core:di-list-services *batch-container*))
   ;; => (:CONFIG :DATABASE :CACHE :LOGGER)
 
   ;; 测试原型作用域
-  (let ((cache1 (cl-agent.core:di-resolve *batch-container* :cache))
-        (cache2 (cl-agent.core:di-resolve *batch-container* :cache)))
+  (let ((cache1 (cl-agent/core:di-resolve *batch-container* :cache))
+        (cache2 (cl-agent/core:di-resolve *batch-container* :cache)))
     (format t "Cache is prototype? ~A~%" (not (eq cache1 cache2))))
   ;; => Cache is prototype? T
 
@@ -152,30 +152,30 @@
 
   ;; 1. 创建全局容器（父容器）
   (defparameter *global-container*
-    (cl-agent.core:make-di-container :name "global"))
+    (cl-agent/core:make-di-container :name "global"))
 
   ;; 绑定全局服务
-  (cl-agent.core:di-bind *global-container* :logger
+  (cl-agent/core:di-bind *global-container* :logger
     (lambda () (list :level :info :name "global-logger"))
     :singleton t)
 
-  (cl-agent.core:di-bind *global-container* :config
+  (cl-agent/core:di-bind *global-container* :config
     (lambda () (list :version "2.0.0"))
     :singleton t)
 
   ;; 2. 创建应用容器（子容器）
   (defparameter *app-container*
-    (cl-agent.core:make-di-container
+    (cl-agent/core:make-di-container
      :parent *global-container*
      :name "app"))
 
   ;; 绑定应用特定服务
-  (cl-agent.core:di-bind *app-container* :database
+  (cl-agent/core:di-bind *app-container* :database
     (lambda () (list :connection "app-db"))
     :singleton t)
 
   ;; 3. 子容器可以访问父容器的服务
-  (cl-agent.core:di-with-dependencies *app-container*
+  (cl-agent/core:di-with-dependencies *app-container*
       ((logger (:logger))
        (config (:config))
        (database (:database)))
@@ -185,7 +185,7 @@
 
   ;; 4. 验证层级关系
   (format t "~&App container parent: ~A~%"
-          (cl-agent.core:di-container-parent *app-container*))
+          (cl-agent/core:di-container-parent *app-container*))
 
   :success)
 
@@ -201,18 +201,18 @@
   - 在 di-with-dependencies 中使用 :default"
 
   (defparameter *optional-container*
-    (cl-agent.core:make-di-container :name "optional"))
+    (cl-agent/core:make-di-container :name "optional"))
 
   ;; 只绑定部分服务
-  (cl-agent.core:di-bind *optional-container* :required-service
+  (cl-agent/core:di-bind *optional-container* :required-service
     (lambda () "Required service is available")
     :singleton t)
 
   ;; 1. 使用 di-resolve-or-default
-  (let ((required (cl-agent.core:di-resolve-or-default
+  (let ((required (cl-agent/core:di-resolve-or-default
                    *optional-container* :required-service
                    :default "Not found"))
-        (optional (cl-agent.core:di-resolve-or-default
+        (optional (cl-agent/core:di-resolve-or-default
                    *optional-container* :optional-service
                    :default "Default optional service")))
 
@@ -223,7 +223,7 @@
   ;; => Optional: Default optional service
 
   ;; 2. 在 di-with-dependencies 中使用默认值
-  (cl-agent.core:di-with-dependencies *optional-container*
+  (cl-agent/core:di-with-dependencies *optional-container*
       ((required (:required-service))
        (optional (:optional-service :default "Default value")))
     (format t "~&In macro - Required: ~A~%" required)
@@ -244,24 +244,24 @@
   - 检查绑定状态"
 
   (defparameter *lifecycle-container*
-    (cl-agent.core:make-di-container :name "lifecycle"))
+    (cl-agent/core:make-di-container :name "lifecycle"))
 
   ;; 绑定服务
-  (cl-agent.core:di-bind *lifecycle-container* :service1
+  (cl-agent/core:di-bind *lifecycle-container* :service1
     (lambda () "Service 1")
     :singleton t)
 
-  (cl-agent.core:di-bind *lifecycle-container* :service2
+  (cl-agent/core:di-bind *lifecycle-container* :service2
     (lambda () "Service 2")
     :singleton t)
 
   ;; 1. 检查绑定状态
   (format t "~&Service1 bound? ~A~%"
-          (cl-agent.core:di-boundp *lifecycle-container* :service1))
+          (cl-agent/core:di-boundp *lifecycle-container* :service1))
   ;; => Service1 bound? T
 
   ;; 2. 获取容器统计
-  (let ((stats (cl-agent.core:di-container-stats *lifecycle-container*)))
+  (let ((stats (cl-agent/core:di-container-stats *lifecycle-container*)))
     (format t "~&Container stats:~%")
     (format t "  Name: ~A~%" (getf stats :name))
     (format t "  Bindings: ~A~%" (getf stats :bindings))
@@ -272,26 +272,26 @@
   ;;    Singletons: 0 (before resolution)
 
   ;; 3. 解析服务（创建单例）
-  (cl-agent.core:di-resolve *lifecycle-container* :service1)
-  (cl-agent.core:di-resolve *lifecycle-container* :service2)
+  (cl-agent/core:di-resolve *lifecycle-container* :service1)
+  (cl-agent/core:di-resolve *lifecycle-container* :service2)
 
-  (let ((stats (cl-agent.core:di-container-stats *lifecycle-container*)))
+  (let ((stats (cl-agent/core:di-container-stats *lifecycle-container*)))
     (format t "~&After resolution:~%")
     (format t "  Singletons: ~A~%" (getf stats :singletons)))
   ;; => Singletons: 2
 
   ;; 4. 释放单个服务
-  (cl-agent.core:di-release *lifecycle-container* :service1)
+  (cl-agent/core:di-release *lifecycle-container* :service1)
 
-  (let ((stats (cl-agent.core:di-container-stats *lifecycle-container*)))
+  (let ((stats (cl-agent/core:di-container-stats *lifecycle-container*)))
     (format t "~&After releasing service1:~%")
     (format t "  Singletons: ~A~%" (getf stats :singletons)))
   ;; => Singletons: 1
 
   ;; 5. 清空容器
-  (cl-agent.core:di-clear *lifecycle-container*)
+  (cl-agent/core:di-clear *lifecycle-container*)
 
-  (let ((stats (cl-agent.core:di-container-stats *lifecycle-container*)))
+  (let ((stats (cl-agent/core:di-container-stats *lifecycle-container*)))
     (format t "~&After clear:~%")
     (format t "  Singletons: ~A~%" (getf stats :singletons)))
   ;; => Singletons: 0
@@ -312,9 +312,9 @@
 
   ;; 1. 全局服务层
   (defparameter *global-services*
-    (cl-agent.core:make-di-container :name "global"))
+    (cl-agent/core:make-di-container :name "global"))
 
-  (cl-agent.core:di-bind* *global-services*
+  (cl-agent/core:di-bind* *global-services*
     (:logger
      (lambda () (list :level :debug))
      :singleton t)
@@ -325,11 +325,11 @@
 
   ;; 2. 核心服务层
   (defparameter *core-services*
-    (cl-agent.core:make-di-container
+    (cl-agent/core:make-di-container
      :parent *global-services*
      :name "core"))
 
-  (cl-agent.core:di-bind* *core-services*
+  (cl-agent/core:di-bind* *core-services*
     (:memory
      (lambda () (list :type "in-memory"))
      :singleton t)
@@ -340,11 +340,11 @@
 
   ;; 3. 应用层
   (defparameter *app-services*
-    (cl-agent.core:make-di-container
+    (cl-agent/core:make-di-container
      :parent *core-services*
      :name "app"))
 
-  (cl-agent.core:di-bind* *app-services*
+  (cl-agent/core:di-bind* *app-services*
     (:config
      (lambda ()
        (list :max-iterations 10
@@ -352,7 +352,7 @@
      :singleton t))
 
   ;; 4. 使用服务
-  (cl-agent.core:di-with-dependencies *app-services*
+  (cl-agent/core:di-with-dependencies *app-services*
       ((memory (:memory))
        (tools (:tools))
        (config (:config))
@@ -377,7 +377,7 @@
   ;; 5. 打印容器层级结构
   (format t "~%~%Container Hierarchy:~%")
   (format t "==================~%")
-  (cl-agent.core:di-print-container *app-services*)
+  (cl-agent/core:di-print-container *app-services*)
 
   :success)
 
@@ -393,18 +393,18 @@
   - di-lazy-service: 延迟绑定"
 
   (defparameter *lazy-container*
-    (cl-agent.core:make-di-container :name "lazy"))
+    (cl-agent/core:make-di-container :name "lazy"))
 
   ;; 绑定昂贵的服务
-  (cl-agent.core:di-bind *lazy-container* :expensive-service
+  (cl-agent/core:di-bind *lazy-container* :expensive-service
     (lambda ()
       (format t "~&[Creating expensive service...]~%")
       (list :data "expensive-data"))
     :singleton t)
 
   ;; 1. 使用懒加载依赖
-  (cl-agent.core:di-with-dependencies *lazy-container*
-      ((cheap-service (cl-agent.core:di-lazy-dependency
+  (cl-agent/core:di-with-dependencies *lazy-container*
+      ((cheap-service (cl-agent/core:di-lazy-dependency
                        :expensive-service)))
     (format t "~&Dependency created (not resolved yet)~%")
 

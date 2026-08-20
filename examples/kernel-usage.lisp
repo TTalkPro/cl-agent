@@ -6,7 +6,7 @@
 ;;;;   然后逐个调用 (example-1) ... (example-8)
 ;;;;
 ;;;; 接真实提供商时把 *model* 换成：
-;;;;   (cl-agent.llm:create-chat-model :anthropic
+;;;;   (cl-agent/llm:create-chat-model :anthropic
 ;;;;     :model "claude-sonnet-4-20250514")
 ;;;;   （API 密钥自动读 ANTHROPIC_API_KEY 环境变量）
 ;;;;   真实调用的可执行验证见 scripts/live-test.lisp。
@@ -22,7 +22,7 @@
 (asdf:load-system :cl-agent-mock)
 
 (defpackage :kernel-examples
-  (:use :cl :cl-agent.core))
+  (:use :cl :cl-agent/core))
 (in-package :kernel-examples)
 
 ;;; ============================================================
@@ -30,9 +30,9 @@
 ;;; ============================================================
 
 (defvar *model*
-  (make-provider-chat-model (cl-agent.mock:make-mock-llm))
+  (make-provider-chat-model (cl-agent/mock:make-mock-llm))
   "ChatModel：mock provider 适配。生产环境换成
-(cl-agent.llm:create-chat-model :anthropic ...) 等。")
+(cl-agent/llm:create-chat-model :anthropic ...) 等。")
 
 ;;; ============================================================
 ;;; 示例 1：最简单的调用 —— chat 宏
@@ -165,7 +165,7 @@
           "```json
 {\"name\": \"东京\", \"population\": 37000000}
 ```")
-    (make-provider-chat-model (cl-agent.mock:make-mock-llm :responses responses)))
+    (make-provider-chat-model (cl-agent/mock:make-mock-llm :responses responses)))
   "只为示例 7 准备的、会返回 JSON 的 mock 模型。")
 
 (defun example-7 ()
@@ -177,7 +177,7 @@
             :filters (list (validation-turn-filter
                             (structured-output-validate-fn
                              +city-schema+
-                             :parse-fn #'cl-agent.core:json-parse)
+                             :parse-fn #'cl-agent/core:json-parse)
                             :max-retries 2)))))
     (chat k
       (:user "~A" +entity-prompt+)
