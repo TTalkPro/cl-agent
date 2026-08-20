@@ -1,12 +1,12 @@
 ;;;; package.lisp
 ;;;; CL-Agent Mock - 包定义
 
-(defpackage :cl-agent.mock
+(defpackage :cl-agent/mock
   (:use :common-lisp)
-  (:import-from #:cl-agent.core #:llm-chat)
+  (:import-from #:cl-agent/core #:llm-chat)
   (:documentation "Mock LLM provider（测试/离线开发用）。
 
-实现 cl-agent.core 的 llm-chat SPI，返回真 llm-response——
+实现 cl-agent/core 的 llm-chat SPI，返回真 llm-response——
 经 provider-chat-model 适配后与任何真实 provider 等价可换。
 
 历史：曾有 tools.lisp（mock-tool 类 + define-mock-tool 宏 + 4 个

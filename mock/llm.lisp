@@ -10,7 +10,7 @@
 ;;;;   - 可预测的输出
 ;;;;   - 支持工具调用模拟
 
-(in-package :cl-agent.mock)
+(in-package :cl-agent/mock)
 
 ;;; ============================================================
 ;;; Mock LLM 提供商
@@ -81,9 +81,9 @@
   (when (> (mock-error-rate provider) 0)
     (when (< (random 1.0) (mock-error-rate provider))
       (return-from llm-chat
-        (cl-agent.core:make-llm-response
+        (cl-agent/core:make-llm-response
          :content ""
-         :usage (cl-agent.core:make-llm-usage :input-tokens 0 :output-tokens 0)
+         :usage (cl-agent/core:make-llm-usage :input-tokens 0 :output-tokens 0)
          :model "mock-model-v1"
          :finish-reason :error
          :raw-response (list :error "Mock LLM API error")))))
@@ -99,21 +99,21 @@
     (if response
         ;; 返回预定义的响应（转换为 llm-response）
         (cond
-          ((cl-agent.core:llm-response-p response)
+          ((cl-agent/core:llm-response-p response)
            response)
           ((consp response)
-           (cl-agent.core:make-llm-response
+           (cl-agent/core:make-llm-response
             :content (or (getf response :content) "")
             :tool-calls (getf response :tool-calls)
-            :usage (cl-agent.core:make-llm-usage
+            :usage (cl-agent/core:make-llm-usage
                     :input-tokens (length prompt)
                     :output-tokens (length (or (getf response :content) "")))
             :model "mock-model-v1"
             :finish-reason (if (getf response :tool-calls) :tool-call :stop)))
           (t
-           (cl-agent.core:make-llm-response
+           (cl-agent/core:make-llm-response
             :content response
-            :usage (cl-agent.core:make-llm-usage
+            :usage (cl-agent/core:make-llm-usage
                     :input-tokens (length prompt)
                     :output-tokens (length response))
             :model "mock-model-v1"
@@ -163,44 +163,44 @@
 
       ;; 问答场景
       ((cl-ppcre:scan "你是|what are you|介绍|introduce" lower-prompt)
-       (cl-agent.core:make-llm-response
+       (cl-agent/core:make-llm-response
         :content "我是 Mock LLM，用于测试和演示。我不会调用真实的 API，但可以模拟各种交互场景。"
-        :usage (cl-agent.core:make-llm-usage :input-tokens 10 :output-tokens 30)
+        :usage (cl-agent/core:make-llm-usage :input-tokens 10 :output-tokens 30)
         :model "mock-model-v1"
         :finish-reason :stop))
 
       ;; 代码生成场景
       ((cl-ppcre:scan "代码|code|函数|function|实现|implement" lower-prompt)
-       (cl-agent.core:make-llm-response
+       (cl-agent/core:make-llm-response
         :content (format nil "~%// Mock 代码实现~%(defun mock-function ()~%  \"这是一个 mock 函数\"~%  (return \"mock result\"))~%"
                          (generate-mock-code-snippet prompt))
-        :usage (cl-agent.core:make-llm-usage :input-tokens 20 :output-tokens 50)
+        :usage (cl-agent/core:make-llm-usage :input-tokens 20 :output-tokens 50)
         :model "mock-model-v1"
         :finish-reason :stop))
 
       ;; 笑话场景
       ((cl-ppcre:scan "笑话|joke|幽默|humor" lower-prompt)
-       (cl-agent.core:make-llm-response
+       (cl-agent/core:make-llm-response
         :content (generate-joke-response)
-        :usage (cl-agent.core:make-llm-usage :input-tokens 10 :output-tokens 40)
+        :usage (cl-agent/core:make-llm-usage :input-tokens 10 :output-tokens 40)
         :model "mock-model-v1"
         :finish-reason :stop))
 
       ;; 总结场景
       ((cl-ppcre:scan "总结|summary|摘要|abstract" lower-prompt)
-       (cl-agent.core:make-llm-response
+       (cl-agent/core:make-llm-response
         :content (format nil "总结：~%~A~%~%这是一个基于输入内容生成的 mock 总结。"
                          (truncate-string prompt 50))
-        :usage (cl-agent.core:make-llm-usage :input-tokens 15 :output-tokens 30)
+        :usage (cl-agent/core:make-llm-usage :input-tokens 15 :output-tokens 30)
         :model "mock-model-v1"
         :finish-reason :stop))
 
       ;; 默认响应
       (t
-       (cl-agent.core:make-llm-response
+       (cl-agent/core:make-llm-response
         :content (format nil "Mock LLM 响应：~%~A~%~%(这是模拟的响应，用于测试和演示)"
                          (truncate-string prompt 100))
-        :usage (cl-agent.core:make-llm-usage
+        :usage (cl-agent/core:make-llm-usage
                 :input-tokens (length prompt)
                 :output-tokens 20)
         :model "mock-model-v1"
@@ -229,12 +229,12 @@
          (args-ht (make-hash-table :test 'equal)))
     (setf (gethash "input" args-ht) "test")
 
-    (cl-agent.core:make-llm-response
+    (cl-agent/core:make-llm-response
      :content (format nil "我将调用 ~A 工具来处理你的请求。" tool-name)
      :tool-calls (list (list :id tool-call-id
                              :name tool-name
                              :arguments args-ht))
-     :usage (cl-agent.core:make-llm-usage :input-tokens 20 :output-tokens 10)
+     :usage (cl-agent/core:make-llm-usage :input-tokens 20 :output-tokens 10)
      :model "mock-model-v1"
      :finish-reason :tool-call)))
 
