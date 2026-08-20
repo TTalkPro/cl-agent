@@ -18,7 +18,7 @@
 ;;;;     ;; 多轮对话
 ;;;;     (client-chat client '((:user . "Hi") (:assistant . "Hello!") (:user . "How are you?"))))
 
-(in-package :cl-agent.llm)
+(in-package :cl-agent/llm)
 
 ;;; ============================================================
 ;;; 客户端类（CLOS 重构）
@@ -160,8 +160,8 @@
   会直接 ECASE 落空报错，除非显式传 :api-key。又一个手工同步终将漂移的清单：
   新增 provider 时没人记得回来改它。"
   (or provided-key
-      ;; provider-api-key 是 cl-agent.core 的协议，各 provider 均已实现
-      (cl-agent.core:provider-api-key provider)))
+      ;; provider-api-key 是 cl-agent/core 的协议，各 provider 均已实现
+      (cl-agent/core:provider-api-key provider)))
 
 ;;; ============================================================
 ;;; 核心聊天 API
@@ -270,7 +270,7 @@
                    (retryable-error-p condition))
               (progn
                 ;; 记录重试信息
-                (cl-agent.core:log-warn
+                (cl-agent/core:log-warn
                  "LLM request failed (attempt ~A/~A): ~A. Retrying in ~,1F seconds..."
                  attempt max-retries condition delay)
                 ;; 等待后重试
@@ -279,13 +279,13 @@
                 (setf delay (* delay backoff-multiplier)))
               ;; 不可重试或超过重试次数
               (progn
-                (cl-agent.core:log-error
+                (cl-agent/core:log-error
                  "LLM request failed after ~A attempts: ~A"
                  attempt condition)
                 (error condition))))))))
 
 (defun retryable-error-p (condition)
-  "检查错误是否可重试（委托 cl-agent.core:error-retryable-p 统一分类）
+  "检查错误是否可重试（委托 cl-agent/core:error-retryable-p 统一分类）
 
 参数：
   CONDITION - 错误条件
@@ -298,13 +298,13 @@
   - 鉴权/参数错误（400/401/403/404 等）不可重试
   - 无状态码的网络层失败、超时可重试"
   (typecase condition
-    ;; 裸 HTTP 错误（cl-agent.http 条件，不在 core 体系内）
-    (cl-agent.core:http-error
-     (let ((status (cl-agent.core:http-error-status condition)))
+    ;; 裸 HTTP 错误（cl-agent/http 条件，不在 core 体系内）
+    (cl-agent/core:http-error
+     (let ((status (cl-agent/core:http-error-status condition)))
        (or (null status)
-           (cl-agent.core:transient-status-p status))))
+           (cl-agent/core:transient-status-p status))))
     ;; core 条件体系：统一分类
-    (otherwise (cl-agent.core:error-retryable-p condition))))
+    (otherwise (cl-agent/core:error-retryable-p condition))))
 
 (defun normalize-messages (messages)
   "标准化消息格式
@@ -355,7 +355,7 @@
   (let ((response (client-chat client `((:user . ,prompt))
                        :system system
                        :temperature temperature)))
-    (cl-agent.core:llm-response-content response)))
+    (cl-agent/core:llm-response-content response)))
 
 (defun chat-with-tools (client prompt tools &key (system nil))
   "带工具的聊天
@@ -507,7 +507,7 @@ ecase 落空报错。成本估算这种边角功能不该把调用方整个打�
   CLIENT 也可以直接传 provider 实例"
   (let* ((provider (if (typep client 'client)
                        (client-provider-name client)
-                       (cl-agent.core:provider-name client)))
+                       (cl-agent/core:provider-name client)))
          (pricing (cdr (assoc provider *provider-pricing*)))
          (input-price (if pricing (car pricing) 0.0))
          (output-price (if pricing (cdr pricing) 0.0)))

@@ -15,7 +15,7 @@
 ;;;;                (lambda (event)
 ;;;;                  (format t "~A" (getf event :text))))
 
-(in-package :cl-agent.llm)
+(in-package :cl-agent/llm)
 
 ;;; ============================================================
 ;;; 流式上下文结构
@@ -109,7 +109,7 @@ SSE 格式：
   - message_start: 消息开始
   - content_block_delta: 内容增量
   - message_stop: 消息停止"
-  (let ((data (cl-agent.core:json-parse json-data)))
+  (let ((data (cl-agent/core:json-parse json-data)))
     (let ((type (alist-get data "type")))
       (cond
         ((string= type "message_start")
@@ -137,7 +137,7 @@ SSE 格式：
   (when (string= (string-trim '(#\Space) json-data) "[DONE]")
     (return-from parse-openai-stream-event `(:type :stop)))
 
-  (let ((data (cl-agent.core:json-parse json-data)))
+  (let ((data (cl-agent/core:json-parse json-data)))
     (let ((choices (alist-get data "choices")))
       (when choices
         (let* ((choice (first choices))
@@ -155,7 +155,7 @@ SSE 格式：
 
 返回：
   解析后的事件 plist"
-  (let ((data (cl-agent.core:json-parse json-data)))
+  (let ((data (cl-agent/core:json-parse json-data)))
     (if (alist-get data "done")
         `(:type :stop)
         (let ((message (alist-get data "message")))
@@ -177,7 +177,7 @@ SSE 格式：
   (when (string= (string-trim '(#\Space) json-data) "[DONE]")
     (return-from parse-zhipu-stream-event `(:type :stop)))
 
-  (let ((data (cl-agent.core:json-parse json-data)))
+  (let ((data (cl-agent/core:json-parse json-data)))
     (let ((choices (alist-get data "choices")))
       (when choices
         (let* ((choice (first choices))
@@ -258,7 +258,7 @@ SSE 格式：
             (dexador:request
              request-url
              :method :post
-             :content (cl-agent.core:json-stringify request-body)
+             :content (cl-agent/core:json-stringify request-body)
              :headers request-headers
              :want-stream t
              :keep-alive nil)
@@ -274,17 +274,17 @@ SSE 格式：
               (close body-stream))))
 
       ;; HTTP 错误处理
-      (cl-agent.core:http-error (condition)
-        (cl-agent.core:signal-error 'cl-agent.core:llm-error
+      (cl-agent/core:http-error (condition)
+        (cl-agent/core:signal-error 'cl-agent/core:llm-error
                                     :message (format nil "HTTP 流式请求失败: ~A"
-                                                     (cl-agent.core:http-error-status condition))
+                                                     (cl-agent/core:http-error-status condition))
                                     :provider provider-type
-                                    :status-code (cl-agent.core:http-error-status condition)
+                                    :status-code (cl-agent/core:http-error-status condition)
                                     :url request-url
                                     :cause condition))
 
       (dexador:http-request-failed (condition)
-        (cl-agent.core:signal-error 'cl-agent.core:llm-error
+        (cl-agent/core:signal-error 'cl-agent/core:llm-error
                                     :message (format nil "HTTP 流式请求失败: ~A"
                                                      (dexador:response-status condition))
                                     :provider provider-type
@@ -293,7 +293,7 @@ SSE 格式：
                                     :cause condition))
 
       (error (condition)
-        (cl-agent.core:signal-error 'cl-agent.core:llm-error
+        (cl-agent/core:signal-error 'cl-agent/core:llm-error
                                     :message (format nil "流式处理错误: ~A" condition)
                                     :provider provider-type
                                     :url request-url

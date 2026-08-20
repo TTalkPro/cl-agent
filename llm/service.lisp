@@ -4,7 +4,7 @@
 ;;;; Overview:
 ;;;;   Provider 层现在自身就产出统一的 llm-response 对象
 ;;;;   （openai-compat 基座 / anthropic / dashscope 各自归一化，
-;;;;   usage 别名与 finish-reason 的单一来源在 cl-agent.core）。
+;;;;   usage 别名与 finish-reason 的单一来源在 cl-agent/core）。
 ;;;;
 ;;;;   本文件退化为薄兼容层：
 ;;;;   - ensure-llm-response：幂等转换（plist -> llm-response）
@@ -14,7 +14,7 @@
 ;;;;   参照 clj-agent design/response-path-consolidation.md：
 ;;;;   响应归一化收敛为单一活路径，不再按 provider 各写一份。
 
-(in-package :cl-agent.llm)
+(in-package :cl-agent/llm)
 
 ;;; ============================================================
 ;;; Response Normalization（幂等单一入口）
@@ -28,9 +28,9 @@
 
 返回：
   llm-response 对象"
-  (if (cl-agent.core:llm-response-p response)
+  (if (cl-agent/core:llm-response-p response)
       response
-      (cl-agent.core:plist-to-llm-response response)))
+      (cl-agent/core:plist-to-llm-response response)))
 
 (defun normalize-response (raw-response &optional provider-type)
   "将响应归一化为 llm-response 对象（旧 API 兼容壳）。
@@ -67,9 +67,9 @@ Anthropic thinking）。
 
 返回：
   思维链字符串，没有则 NIL"
-  (or (cl-agent.core:llm-response-reasoning response)
+  (or (cl-agent/core:llm-response-reasoning response)
       ;; 旧版兼容：reasoning 曾被塞进扩展的 raw-response
-      (let ((raw (cl-agent.core:llm-response-raw response)))
+      (let ((raw (cl-agent/core:llm-response-raw response)))
         (when (hash-table-p raw)
           (gethash "reasoning_content" raw)))))
 

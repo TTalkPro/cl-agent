@@ -19,7 +19,7 @@
 ;;;; 回调协议（chunk plist）：
 ;;;;   :delta / :reasoning-delta / :done（与 Anthropic 流式一致）
 
-(in-package :cl-agent.llm.providers)
+(in-package :cl-agent/llm/providers)
 
 ;;; ============================================================
 ;;; 累积状态
@@ -125,15 +125,15 @@
                                 (handler-case
                                     (if (string= json-str "")
                                         (make-hash-table :test 'equal)
-                                        (cl-agent.core:json-parse json-str))
+                                        (cl-agent/core:json-parse json-str))
                                   (error () (make-hash-table :test 'equal)))))))
         (reasoning (get-output-stream-string (ostream-reasoning state))))
-    (cl-agent.core:make-llm-response
+    (cl-agent/core:make-llm-response
      :content (get-output-stream-string (ostream-text state))
      :tool-calls tool-calls
-     :usage (cl-agent.core:normalize-usage (ostream-usage state))
+     :usage (cl-agent/core:normalize-usage (ostream-usage state))
      :model (ostream-model state)
-     :finish-reason (cl-agent.core:normalize-finish-reason
+     :finish-reason (cl-agent/core:normalize-finish-reason
                      (or (ostream-finish-reason state)
                          (when tool-calls "tool_calls")))
      :reasoning (when (string/= reasoning "") reasoning)
@@ -143,10 +143,10 @@
 ;;; llm-chat-stream 实现（openai-compat-provider 全部子类）
 ;;; ============================================================
 
-(defmethod cl-agent.core:provider-supports-streaming-p ((provider openai-compat-provider))
+(defmethod cl-agent/core:provider-supports-streaming-p ((provider openai-compat-provider))
   t)
 
-(defmethod cl-agent.core:llm-chat-stream ((provider openai-compat-provider) messages callback
+(defmethod cl-agent/core:llm-chat-stream ((provider openai-compat-provider) messages callback
                                           &key max-tokens
                                                ;; NIL 时不下发（SPI「存在才发送」契约）
                                                temperature
@@ -186,23 +186,23 @@ CALLBACK 收到 chunk plist：
                          :tool-choice tool-choice
                          :extra-params extra-params
                          :stream t)))
-         (url (cl-agent.llm:build-api-url
+         (url (cl-agent/llm:build-api-url
                provider
-               (cl-agent.llm:provider-chat-endpoint provider)))
+               (cl-agent/llm:provider-chat-endpoint provider)))
          (state (make-openai-stream-state)))
-    (cl-agent.core:http-stream-sse
+    (cl-agent/core:http-stream-sse
      url
      :headers (provider-request-headers provider)
-     :body (cl-agent.core:json-stringify request-body)
+     :body (cl-agent/core:json-stringify request-body)
      :content-type "application/json"
-     :timeout (max 300 (cl-agent.llm:provider-timeout provider))
+     :timeout (max 300 (cl-agent/llm:provider-timeout provider))
      :on-event (lambda (event)
                  (let ((data-str (getf event :data)))
                    (when (and data-str
                               (string/= data-str "")
                               (not (string= data-str "[DONE]")))
                      (let ((data (handler-case
-                                     (cl-agent.core:json-parse data-str)
+                                     (cl-agent/core:json-parse data-str)
                                    (error () nil))))
                        (when (hash-table-p data)
                          (process-openai-chunk state data callback)))))))

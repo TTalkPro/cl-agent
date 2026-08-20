@@ -5,7 +5,7 @@
 ;;;;   Central registry for LLM providers.
 ;;;;   Allows registration and lookup of provider factories.
 
-(in-package #:cl-agent.llm)
+(in-package #:cl-agent/llm)
 
 ;;; ============================================================
 ;;; Provider Registry
@@ -79,23 +79,23 @@ Returns:
 
 (defparameter +builtin-provider-factories+
   '(;; —— Anthropic 格式 ——
-    (:anthropic   . cl-agent.llm.providers:make-anthropic-provider)
-    (:minimax     . cl-agent.llm.providers:make-minimax-provider)
+    (:anthropic   . cl-agent/llm/providers:make-anthropic-provider)
+    (:minimax     . cl-agent/llm/providers:make-minimax-provider)
 
     ;; —— OpenAI 兼容 ——
-    (:openai      . cl-agent.llm.providers:make-openai-provider)
-    (:zhipu       . cl-agent.llm.providers:make-zhipu-provider)
-    (:deepseek    . cl-agent.llm.providers:make-deepseek-provider)
-    (:gemini      . cl-agent.llm.providers:make-gemini-provider)
-    (:mistral     . cl-agent.llm.providers:make-mistral-provider)
-    (:xai         . cl-agent.llm.providers:make-xai-provider)
-    (:moonshot    . cl-agent.llm.providers:make-moonshot-provider)
-    (:siliconflow . cl-agent.llm.providers:make-siliconflow-provider)
-    (:openrouter  . cl-agent.llm.providers:make-openrouter-provider)
-    (:ollama      . cl-agent.llm.providers:make-ollama-provider)
+    (:openai      . cl-agent/llm/providers:make-openai-provider)
+    (:zhipu       . cl-agent/llm/providers:make-zhipu-provider)
+    (:deepseek    . cl-agent/llm/providers:make-deepseek-provider)
+    (:gemini      . cl-agent/llm/providers:make-gemini-provider)
+    (:mistral     . cl-agent/llm/providers:make-mistral-provider)
+    (:xai         . cl-agent/llm/providers:make-xai-provider)
+    (:moonshot    . cl-agent/llm/providers:make-moonshot-provider)
+    (:siliconflow . cl-agent/llm/providers:make-siliconflow-provider)
+    (:openrouter  . cl-agent/llm/providers:make-openrouter-provider)
+    (:ollama      . cl-agent/llm/providers:make-ollama-provider)
 
     ;; —— 厂商原生格式 ——
-    (:dashscope   . cl-agent.llm.providers:make-dashscope-provider))
+    (:dashscope   . cl-agent/llm/providers:make-dashscope-provider))
   "内置 provider 关键字 → 工厂函数名。")
 
 (dolist (entry +builtin-provider-factories+)
@@ -183,7 +183,7 @@ Returns:
 (register-provider-alias "guiji" :siliconflow)
 
 ;;; ============================================================
-;;; ChatModel 桥接（cl-agent-llm ↔ cl-agent.core 的 ChatModel 协议）
+;;; ChatModel 桥接（cl-agent-llm ↔ cl-agent/core 的 ChatModel 协议）
 ;;; ============================================================
 ;;; 历史：本函数原在 factory/builder.lisp——那里还有一个 provider-builder
 ;;; 类 + 8 个 fluent 泛型（with-api-key / with-model / ...）。Builder 与
@@ -193,7 +193,7 @@ Returns:
 
 (defun create-chat-model (provider-name &rest args
                           &key model api-key api-url options &allow-other-keys)
-  "从提供商规格创建 ChatModel（cl-agent-llm 与 cl-agent.chat 的桥梁）。
+  "从提供商规格创建 ChatModel（cl-agent-llm 与 cl-agent/chat 的桥梁）。
 
 参数：
   PROVIDER-NAME - 提供商关键字（:anthropic、:openai 等）或别名
@@ -204,14 +204,14 @@ Returns:
   其余关键字参数透传给提供商工厂。
 
 返回：
-  cl-agent.core:provider-chat-model 实例
+  cl-agent/core:provider-chat-model 实例
 
 用法：
   (create-chat-model :anthropic :model \"claude-sonnet-4-20250514\")
   (create-chat-model :openai :model \"gpt-4o\"
-                     :options (cl-agent.core:make-chat-options :temperature 0.3))"
+                     :options (cl-agent/core:make-chat-options :temperature 0.3))"
   (declare (ignore model api-key api-url))
   (let* ((resolved-name (resolve-provider-name provider-name))
          (provider (apply #'create-provider resolved-name
                           (alexandria:remove-from-plist args :options))))
-    (cl-agent.core:make-provider-chat-model provider :default-options options)))
+    (cl-agent/core:make-provider-chat-model provider :default-options options)))

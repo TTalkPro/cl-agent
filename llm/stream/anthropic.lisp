@@ -21,7 +21,7 @@
 ;;;;   :reasoning-delta 思考/推理增量（extended thinking，与答案流分离）
 ;;;;   :done            流结束标志（最后一次回调）
 
-(in-package :cl-agent.llm.providers)
+(in-package :cl-agent/llm/providers)
 
 ;;; ============================================================
 ;;; 累积状态
@@ -128,7 +128,7 @@
                    (handler-case
                        (if (string= json-str "")
                            (make-hash-table :test 'equal)
-                           (cl-agent.core:json-parse json-str))
+                           (cl-agent/core:json-parse json-str))
                      (error () (make-hash-table :test 'equal))))
              (setf (astream-block state index) block)))))
 
@@ -187,8 +187,8 @@ redacted_thinking 没有增量事件，直接返回 start 事件里的原始块�
 (defun build-anthropic-stream-response (state)
   "从最终累积状态构建统一 llm-response（与非流式调用兼容）"
   (when (astream-error state)
-    (cl-agent.core:signal-error
-     'cl-agent.core:llm-error
+    (cl-agent/core:signal-error
+     'cl-agent/core:llm-error
      :message (format nil "Anthropic 流式错误：~A"
                       (or (and (hash-table-p (astream-error state))
                                (gethash "message" (astream-error state)))
@@ -213,12 +213,12 @@ redacted_thinking 没有增量事件，直接返回 start 事件里的原始块�
                  when (member (getf block :type) '("thinking" "redacted_thinking")
                               :test #'equal)
                    collect (rebuild-thinking-block block))))
-    (cl-agent.core:make-llm-response
+    (cl-agent/core:make-llm-response
      :content text
      :tool-calls tool-calls
-     :usage (cl-agent.core:normalize-usage (merged-anthropic-usage state))
+     :usage (cl-agent/core:normalize-usage (merged-anthropic-usage state))
      :model (when message (gethash "model" message))
-     :finish-reason (cl-agent.core:normalize-finish-reason
+     :finish-reason (cl-agent/core:normalize-finish-reason
                      (astream-stop-reason state))
      :reasoning (when (string/= reasoning "") reasoning)
      :reasoning-blocks reasoning-blocks
@@ -229,10 +229,10 @@ redacted_thinking 没有增量事件，直接返回 start 事件里的原始块�
 ;;; llm-chat-stream 实现（anthropic-provider 及子类）
 ;;; ============================================================
 
-(defmethod cl-agent.core:provider-supports-streaming-p ((provider anthropic-provider))
+(defmethod cl-agent/core:provider-supports-streaming-p ((provider anthropic-provider))
   t)
 
-(defmethod cl-agent.core:llm-chat-stream ((provider anthropic-provider) messages callback
+(defmethod cl-agent/core:llm-chat-stream ((provider anthropic-provider) messages callback
                                           &key
                                           (max-tokens 4096)
                                           ;; NIL 时不下发（SPI「存在才发送」契约）
@@ -265,24 +265,24 @@ CALLBACK 收到 chunk plist：
                         :stop stop
                         :thinking thinking
                         :extra-params extra-params))
-         (url (cl-agent.llm:build-api-url
+         (url (cl-agent/llm:build-api-url
                provider
-               (cl-agent.llm:base-provider-stream-endpoint provider)))
+               (cl-agent/llm:base-provider-stream-endpoint provider)))
          (state (make-anthropic-stream-state)))
     ;; 启用流式
     (setf (gethash "stream" request-body) t)
-    (cl-agent.core:http-stream-sse
+    (cl-agent/core:http-stream-sse
      url
      :headers (build-anthropic-headers provider)
-     :body (cl-agent.core:json-stringify request-body)
+     :body (cl-agent/core:json-stringify request-body)
      :content-type "application/json"
      ;; 长生成给足超时（对齐 clj 流式 300s）
-     :timeout (max 300 (cl-agent.llm:base-provider-timeout provider))
+     :timeout (max 300 (cl-agent/llm:base-provider-timeout provider))
      :on-event (lambda (event)
                  (let ((data-str (getf event :data)))
                    (when (and data-str (string/= data-str ""))
                      (let ((data (handler-case
-                                     (cl-agent.core:json-parse data-str)
+                                     (cl-agent/core:json-parse data-str)
                                    (error () nil))))
                        (when (hash-table-p data)
                          (process-anthropic-event
