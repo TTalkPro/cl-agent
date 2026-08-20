@@ -26,7 +26,7 @@ sbcl --load examples/kernel-usage.lisp
 接真实提供商时把 `*model*` 换成：
 
 ```lisp
-(cl-agent.llm:create-chat-model :anthropic
+(cl-agent/llm:create-chat-model :anthropic
   :model "claude-sonnet-4-20250514")
 ```
 
@@ -44,8 +44,8 @@ MINIMAX_API_KEY=... sbcl --script scripts/live-test.lisp
 
 ## llm-usage.lisp —— 底层 Provider SPI 直接调用
 
-不经过 kernel，直接使用 `cl-agent.llm` 的客户端与 Provider。
+不经过 kernel，直接使用 `cl-agent/llm` 的客户端与 Provider。
 
 ## di-usage-examples.lisp —— DI 容器（可选设施）
 
-`cl-agent.core` 自带的依赖注入容器示例（独立设施，库内部不使用）。
+`cl-agent/core` 自带的依赖注入容器示例（独立设施，库内部不使用）。

@@ -18,7 +18,7 @@ run-tool-loop:  invoke-chat → 有 tool-calls 且 eligible? → 执行一批工
                                                               批内每个工具再过 :tool 链
 ```
 
-循环在 `cl-agent.core:run-tool-loop`（`core/kernel/invoke.lisp`）里——它是
+循环在 `cl-agent/core:run-tool-loop`（`core/kernel/invoke.lisp`）里——它是
 **`:turn` 链的 terminal，不是 filter**，也**不在 ChatModel 里**
 （`chat-model-call` 是严格的单次调用语义）。
 
@@ -31,7 +31,7 @@ run-tool-loop:  invoke-chat → 有 tool-calls 且 eligible? → 执行一批工
 |---|---|---|
 | `ToolCallingAdvisor`（2.0） | `run-tool-loop`（`core/kernel/invoke.lisp`，`:turn` 链终端） | **是** |
 | `CallAdvisor` / `AdvisorChain` | `make-filter` / `defilter` + `build-chain` 三链 | 否（环绕） |
-| `ToolCallingManager` | `cl-agent.core:tool-calling-manager`（三实现） | 否 |
+| `ToolCallingManager` | `cl-agent/core:tool-calling-manager`（三实现） | 否 |
 | `ToolExecutionResult` | `make-tool-execution-result` plist | 结果对象 |
 | `ToolExecutionExceptionProcessor` | 无对应；kernel 用三故障分类（见下） | 错误处理 |
 
@@ -41,7 +41,7 @@ run-tool-loop:  invoke-chat → 有 tool-calls 且 eligible? → 执行一批工
 > **cl-agent 的 Advisor 与 ChatClient 两层移植物均已退役。**
 > `defadvisor` / `advise-call` / `chain-next` / `tool-calling-advisor` /
 > `+*-advisor-order+` 等符号已整体删除；ChatClient 移植层（ChatClient /
-> Builder / fluent RequestSpec）亦已删除（`cl-agent.client` 这个**包名被复用**
+> Builder / fluent RequestSpec）亦已删除（`cl-agent/client` 这个**包名被复用**
 > 了：现在是 SimpleAgent）。我们用 kernel + filter 三链表达
 > Spring 的 Advisor 语义：`:advisors (list ...)` →
 > `build-kernel :filters (list ...)`；入口则是 `build-kernel` + `chat` 宏。
@@ -83,20 +83,20 @@ cl-agent 吸取的是同一个教训，但落点更靠外：循环被提到 **ke
 
 ```lisp
 ;; 1. Framework-controlled
-(cl-agent.core:build-kernel
+(cl-agent/core:build-kernel
   :model model
-  :filters (list (cl-agent.core:timeout-filter 5000))
+  :filters (list (cl-agent/core:timeout-filter 5000))
   :tools '(get-weather))
 
 ;; 2. Kernel-controlled：注入执行策略
-(cl-agent.core:build-kernel
+(cl-agent/core:build-kernel
   :model model
   :tools '(get-weather)
-  :tool-manager (cl-agent.core:make-sequential-tool-calling-manager))
+  :tool-manager (cl-agent/core:make-sequential-tool-calling-manager))
 ```
 
 > **曾经还有第三种「User-controlled」模式**——自己调 `chat-model-call`，再拿
-> 合并前 `cl-agent.chat` 的 ToolCallingManager 驱动循环。它已不存在：chat 层那套
+> 合并前 `cl-agent/chat` 的 ToolCallingManager 驱动循环。它已不存在：chat 层那套
 > manager（`default-tool-calling-manager` / `concurrent-tool-calling-manager` /
 > `(manager prompt response)` 签名的 `execute-tool-calls` /
 > `tool-execution-result` 及其读取器）已整体删除。工具执行现在**只**住在
@@ -105,7 +105,7 @@ cl-agent 吸取的是同一个教训，但落点更靠外：循环被提到 **ke
 >
 > 附带的好处：chat 层的 `execute-tool-calls` 消失、kernel 载体改名为
 > `tool-result` 之后，两个包再无同名导出，`:shadow` 随之删除——这正是
-> `cl-agent.http` / `.chat` / `.kernel` 三包得以合并为 `cl-agent.core` 的前提。
+> `cl-agent/http` / `/chat` / `/kernel` 三包得以合并为 `cl-agent/core` 的前提。
 
 ## 执行层做的事
 
@@ -159,13 +159,13 @@ cl-agent 吸取的是同一个教训，但落点更靠外：循环被提到 **ke
 工具作者可以直接发精确的条件，绕开启发式：
 
 ```lisp
-(cl-agent.core:deftool fetch-quote (&key symbol)
+(cl-agent/core:deftool fetch-quote (&key symbol)
   "抓取股票报价"
   (:param symbol :string "股票代码" :required t)
   (:retry t)
   (handler-case (http-get-quote symbol)
     (error (e)
-      (error 'cl-agent.core:transient-tool-failure
+      (error 'cl-agent/core:transient-tool-failure
              :message (princ-to-string e)))))
 ```
 

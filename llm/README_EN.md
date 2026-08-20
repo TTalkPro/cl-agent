@@ -322,16 +322,16 @@ Different providers have different tool schema formats, the module handles conve
 ```lisp
 ;; Create a ChatModel in one step (recommended entry point)
 (defvar *model*
-  (cl-agent.llm:create-chat-model :anthropic
+  (cl-agent/llm:create-chat-model :anthropic
     :model "claude-sonnet-4-20250514"))
 
 ;; Or adapt an existing provider
 (defvar *model*
-  (cl-agent.core:make-provider-chat-model
+  (cl-agent/core:make-provider-chat-model
     (make-anthropic-provider)
-    :default-options (cl-agent.core:make-chat-options :temperature 0.3)))
+    :default-options (cl-agent/core:make-chat-options :temperature 0.3)))
 
 ;; Assemble a kernel, then chat
-(defvar *kernel* (cl-agent.core:build-kernel :model *model*))
-(cl-agent.core:chat *kernel* "Hello")
+(defvar *kernel* (cl-agent/core:build-kernel :model *model*))
+(cl-agent/core:chat *kernel* "Hello")
 ```

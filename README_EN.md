@@ -49,25 +49,25 @@ Three packages, mirroring clj-agent's core / provider / client layering:
 
 ```
 ┌──────────────────────────────────────────────────────┐
-│  cl-agent.client   SimpleAgent (stateful chat + HITL) │
+│  cl-agent/client   SimpleAgent (stateful chat + HITL) │
 │                    make-agent / agent-chat            │
 ├──────────────────────────────────────────────────────┤
-│  cl-agent.core     the framework proper (one package) │
+│  cl-agent/core     the framework proper (one package) │
 │                    Kernel + Filter tri-chain + chat   │
 │                    Message/Prompt/Options/Response     │
 │                    deftool / ChatModel / ChatMemory    │
 │                    infrastructure + HTTP/SSE + Schema  │
 ├──────────────────────────────────────────────────────┤
-│  cl-agent.llm      providers (Anthropic/OpenAI/...)   │
+│  cl-agent/llm      providers (Anthropic/OpenAI/...)   │
 └──────────────────────────────────────────────────────┘
 ```
 
-`cl-agent.core` and `cl-agent.client` can be `:use`d together directly, with no
+`cl-agent/core` and `cl-agent/client` can be `:use`d together directly, with no
 shadowing whatsoever:
 
 ```lisp
 (defpackage :my-app
-  (:use :cl :cl-agent.core :cl-agent.client))
+  (:use :cl :cl-agent/core :cl-agent/client))
 ```
 
 How one conversation executes:
@@ -90,12 +90,12 @@ How one conversation executes:
 (asdf:load-system :cl-agent)
 
 (defpackage :my-app
-  (:use :cl :cl-agent.core :cl-agent.client))
+  (:use :cl :cl-agent/core :cl-agent/client))
 (in-package :my-app)
 
 ;; 1. Create a ChatModel (API key read from env var automatically)
 (defvar *model*
-  (cl-agent.llm:create-chat-model :anthropic
+  (cl-agent/llm:create-chat-model :anthropic
     :model "claude-sonnet-4-20250514"))
 
 ;; 2. Define a tool (mirrors @Tool)
@@ -275,10 +275,10 @@ only parses:
 
 | Module | Package | Description |
 |------|---|------|
-| **core** | `cl-agent.core` | The framework proper (one package): infrastructure + HTTP/SSE + JSON Schema + `llm-chat` SPI + Chat API (messages/Prompt/Options/Response/deftool/ChatModel/ChatMemory) + Kernel/Filter tri-chain + the `chat` macro |
-| **llm** | `cl-agent.llm` | Provider implementations; `create-chat-model` builds a ChatModel in one step |
-| **client** | `cl-agent.client` | SimpleAgent: stateful chat + callbacks + error normalization + HITL |
-| **mock** | `cl-agent.mock` | Mock provider (tests/demos, no API key needed) |
+| **core** | `cl-agent/core` | The framework proper (one package): infrastructure + HTTP/SSE + JSON Schema + `llm-chat` SPI + Chat API (messages/Prompt/Options/Response/deftool/ChatModel/ChatMemory) + Kernel/Filter tri-chain + the `chat` macro |
+| **llm** | `cl-agent/llm` | Provider implementations; `create-chat-model` builds a ChatModel in one step |
+| **client** | `cl-agent/client` | SimpleAgent: stateful chat + callbacks + error normalization + HITL |
+| **mock** | `cl-agent/mock` | Mock provider (tests/demos, no API key needed) |
 
 ## Install & Test
 
@@ -351,16 +351,16 @@ has been through a round of merging.
 | fluent spec (`client-prompt` → `prompt-user` → `call-content`) | `chat` macro clauses, or `kernel-chat-text` |
 | `(:call :client-response)` | `(:call :result)` (returns a turn-result) |
 
-**Package merge** (`cl-agent.http` / `.chat` / `.kernel` → `cl-agent.core`)
+**Package merge** (`cl-agent/http` / `/chat` / `/kernel` → `cl-agent/core`)
 
 | Old | New |
 |---|---|
-| `cl-agent.kernel:build-kernel` | `cl-agent.core:build-kernel` |
-| `cl-agent.chat:deftool` | `cl-agent.core:deftool` |
-| `cl-agent.http:http-request` | `cl-agent.core:http-request` |
-| `cl-agent.kernel:tool-response` | `cl-agent.core:tool-result` (`make-tool-result :value ...`) |
+| `cl-agent/kernel:build-kernel` | `cl-agent/core:build-kernel` |
+| `cl-agent/chat:deftool` | `cl-agent/core:deftool` |
+| `cl-agent/http:http-request` | `cl-agent/core:http-request` |
+| `cl-agent/kernel:tool-response` | `cl-agent/core:tool-result` (`make-tool-result :value ...`) |
 
-The name `cl-agent.client` has been **reused**: it used to be the ChatClient
+The name `cl-agent/client` has been **reused**: it used to be the ChatClient
 porting layer (deleted); it is now SimpleAgent.
 
 For the capability mapping against Spring AI see

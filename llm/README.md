@@ -317,16 +317,16 @@ Service 层负责将各 Provider 返回的原始响应转换为统一的 `llm-re
 ```lisp
 ;; 一步创建 ChatModel（推荐入口）
 (defvar *model*
-  (cl-agent.llm:create-chat-model :anthropic
+  (cl-agent/llm:create-chat-model :anthropic
     :model "claude-sonnet-4-20250514"))
 
 ;; 或从已有 provider 适配
 (defvar *model*
-  (cl-agent.core:make-provider-chat-model
+  (cl-agent/core:make-provider-chat-model
     (make-anthropic-provider)
-    :default-options (cl-agent.core:make-chat-options :temperature 0.3)))
+    :default-options (cl-agent/core:make-chat-options :temperature 0.3)))
 
 ;; 装配 kernel 后即可对话
-(defvar *kernel* (cl-agent.core:build-kernel :model *model*))
-(cl-agent.core:chat *kernel* "你好")
+(defvar *kernel* (cl-agent/core:build-kernel :model *model*))
+(cl-agent/core:chat *kernel* "你好")
 ```

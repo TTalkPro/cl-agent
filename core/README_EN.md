@@ -7,10 +7,10 @@ architecture follows clj-agent.
 
 ## Packages
 
-**One package**: `cl-agent.core` (nickname `cla.core`). The former
-`cl-agent.http` / `cl-agent.chat` / `cl-agent.kernel` have all been merged into
+**One package**: `cl-agent/core` (nickname `cla/core`). The former
+`cl-agent/http` / `cl-agent/chat` / `cl-agent/kernel` have all been merged into
 it — `http/`, `chat/` and `kernel/` under `core/` are now just asd modules (file
-grouping), no longer packages; every file is `(in-package #:cl-agent.core)`.
+grouping), no longer packages; every file is `(in-package #:cl-agent/core)`.
 
 | Layer | Counterpart | Contents |
 |---|---|---|
@@ -18,19 +18,19 @@ grouping), no longer packages; every file is `(in-package #:cl-agent.core)`.
 | Chat API | `org.springframework.ai.chat.*` | CLOS message hierarchy, Prompt, ChatOptions, ChatResponse, `deftool` tooling, ChatModel protocol, ChatMemory |
 | Kernel | `chat.client.*` + `chat.client.advisor.*` | Filter tri-chain + `build-chain`, Kernel + `build-kernel`, `invoke-chat/tool/turn`, `run-tool-loop`, `resume-turn`, ToolCallingManager, 10 built-in filters, `chat` macro DSL |
 
-After the merge, `cl-agent.core` and `cl-agent.client` (SimpleAgent) can be
+After the merge, `cl-agent/core` and `cl-agent/client` (SimpleAgent) can be
 `:use`d together directly, with no shadowing whatsoever:
 
 ```lisp
 (defpackage :my-app
-  (:use :cl :cl-agent.core :cl-agent.client))
+  (:use :cl :cl-agent/core :cl-agent/client))
 ```
 
 ## Layout
 
 ```
 core/
-├── package-core.lisp        cl-agent.core package (single package)
+├── package-core.lisp        cl-agent/core package (single package)
 ├── conditions.lisp          condition system
 ├── macros.lisp              when-let + logging (log-debug/info/warn/error)
 ├── utils.lisp               utilities + ID generator / timestamp provider
@@ -100,15 +100,15 @@ core/
   `advise-call` / `order` system, and the old ChatClient / Builder / fluent
   RequestSpec. Kernel + filter is the sole execution path; the entry point is
   `build-kernel`'s keyword args plus the `chat` macro. (The name
-  `cl-agent.client` has been **reused**: it is now SimpleAgent.)
-- **The merge eliminated all shadowing**: `cl-agent.chat` and `cl-agent.kernel`
+  `cl-agent/client` has been **reused**: it is now SimpleAgent.)
+- **The merge eliminated all shadowing**: `cl-agent/chat` and `cl-agent/kernel`
   used to share three exported names: `tool-response` / `make-tool-response`
   (chat's is the protocol-level "tool response" value object with id/name/text;
   kernel's was the tool-chain response carrier) and `execute-tool-calls` (two
   manager protocols with different signatures). Fixed at the root: the kernel
   carrier was renamed to `tool-request` / `tool-result` (symmetric with the turn
   chain's `turn-request` / `turn-result`), and chat's old ToolCallingManager was
-  deleted outright. The three packages were then merged into `cl-agent.core`,
+  deleted outright. The three packages were then merged into `cl-agent/core`,
   and every `:shadow` disappeared.
 
 See the [API reference](../docs/API.md).

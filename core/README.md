@@ -6,10 +6,10 @@
 
 ## 包结构
 
-**一个包**：`cl-agent.core`（昵称 `cla.core`）。曾经的 `cl-agent.http` /
-`cl-agent.chat` / `cl-agent.kernel` 已全部合并进来——`core/` 下的
+**一个包**：`cl-agent/core`（昵称 `cla/core`）。曾经的 `cl-agent/http` /
+`cl-agent/chat` / `cl-agent/kernel` 已全部合并进来——`core/` 下的
 `http/` `chat/` `kernel/` 现在只是 asd 的模块（文件分组），不再是包，
-所有文件一律 `(in-package #:cl-agent.core)`。
+所有文件一律 `(in-package #:cl-agent/core)`。
 
 | 分层 | 对标 | 内容 |
 |---|---|---|
@@ -17,19 +17,19 @@
 | Chat API | `org.springframework.ai.chat.*` | CLOS 消息体系、Prompt、ChatOptions、ChatResponse、`deftool` 工具体系、ChatModel 协议、ChatMemory |
 | Kernel | `chat.client.*` + `chat.client.advisor.*` | Filter 三链 + `build-chain`、Kernel + `build-kernel`、`invoke-chat/tool/turn`、`run-tool-loop`、`resume-turn`、ToolCallingManager、10 个内置 filter、`chat` 宏 DSL |
 
-合并后 `cl-agent.core` 与 `cl-agent.client`（SimpleAgent）可以直接一起
+合并后 `cl-agent/core` 与 `cl-agent/client`（SimpleAgent）可以直接一起
 `:use`，无需任何 shadowing：
 
 ```lisp
 (defpackage :my-app
-  (:use :cl :cl-agent.core :cl-agent.client))
+  (:use :cl :cl-agent/core :cl-agent/client))
 ```
 
 ## 文件布局
 
 ```
 core/
-├── package-core.lisp        cl-agent.core 包定义（单包）
+├── package-core.lisp        cl-agent/core 包定义（单包）
 ├── conditions.lisp          条件系统
 ├── macros.lisp              when-let + 日志系统（log-debug/info/warn/error）
 ├── utils.lisp               工具函数 + ID 生成器 / 时间戳提供者
@@ -96,13 +96,13 @@ core/
 - **Spring AI 的两层移植都已退役**：`defadvisor` / `advise-call` / `order`
   排序体系，以及旧的 ChatClient / Builder / fluent RequestSpec。执行路径
   唯一为 kernel + filter，入口是 `build-kernel` 的关键字参数 + `chat` 宏。
-  （`cl-agent.client` 这个名字已被**复用**：现在是 SimpleAgent。）
-- **包合并消除了所有 shadowing**：曾经 `cl-agent.chat` 与
-  `cl-agent.kernel` 有三个同名导出：`tool-response` / `make-tool-response`
+  （`cl-agent/client` 这个名字已被**复用**：现在是 SimpleAgent。）
+- **包合并消除了所有 shadowing**：曾经 `cl-agent/chat` 与
+  `cl-agent/kernel` 有三个同名导出：`tool-response` / `make-tool-response`
   （chat 是协议消息层的「工具响应」值对象 id/name/text，kernel 是执行链的
   响应载体）与 `execute-tool-calls`（两套不同签名的 manager 协议）。已从
   根上消除：kernel 的载体改名为 `tool-request` / `tool-result`（与 turn 链
   的 `turn-request` / `turn-result` 对称），chat 的旧 ToolCallingManager
-  整体删除。三包随后合并为 `cl-agent.core`，`:shadow` 全部消失。
+  整体删除。三包随后合并为 `cl-agent/core`，`:shadow` 全部消失。
 
 详见 [API 参考](../docs/API_CN.md)。

@@ -6,11 +6,11 @@ API quick reference by package. Spring AI 2.0 counterparts noted per section.
 
 Two entry points:
 
-- **SimpleAgent** (`cl-agent.client`): stateful chat + callbacks + error
+- **SimpleAgent** (`cl-agent/client`): stateful chat + callbacks + error
   normalization + HITL. See
-  [cl-agent.client](#cl-agentclient--simpleagent-stateful-chat--hitl).
-- **Kernel + Filter** (`cl-agent.core`): the `chat` macro / `kernel-chat` →
-  `cl-agent.core:invoke-turn` tri-chain. The former is a thin wrapper over the
+  [cl-agent/client](#cl-agentclient--simpleagent-stateful-chat--hitl).
+- **Kernel + Filter** (`cl-agent/core`): the `chat` macro / `kernel-chat` →
+  `cl-agent/core:invoke-turn` tri-chain. The former is a thin wrapper over the
   latter.
 
 Both Spring AI porting layers — Advisor and ChatClient — are retired entirely;
@@ -22,26 +22,26 @@ These are all the packages there are:
 
 | Package | Nickname | Role |
 |---|---|---|
-| `cl-agent.core` | `cla.core` | The framework proper (one package): infrastructure + HTTP/SSE + JSON Schema + `llm-chat` SPI + Chat API + Kernel/Filter tri-chain + the `chat` macro |
-| `cl-agent.client` | `cla.client` | SimpleAgent |
-| `cl-agent.llm` | `cla.llm` | Provider implementations, `create-chat-model` |
-| `cl-agent.llm.providers` | — | The nine provider implementations |
-| `cl-agent.mock` | `mock` | Mock provider (tests/demos) |
+| `cl-agent/core` | `cla/core` | The framework proper (one package): infrastructure + HTTP/SSE + JSON Schema + `llm-chat` SPI + Chat API + Kernel/Filter tri-chain + the `chat` macro |
+| `cl-agent/client` | `cla/client` | SimpleAgent |
+| `cl-agent/llm` | `cla/llm` | Provider implementations, `create-chat-model` |
+| `cl-agent/llm/providers` | — | The nine provider implementations |
+| `cl-agent/mock` | `mock` | Mock provider (tests/demos) |
 
-`cl-agent.core` and `cl-agent.client` **share no exported names**. `:use` both
+`cl-agent/core` and `cl-agent/client` **share no exported names**. `:use` both
 directly; no shadowing of any kind is needed:
 
 ```lisp
 (defpackage :my-app
-  (:use :cl :cl-agent.core :cl-agent.client))
+  (:use :cl :cl-agent/core :cl-agent/client))
 ```
 
 This is exactly the `defpackage` used by `examples/kernel-usage.lisp` and
 `scripts/live-test.lisp` (they `:use` core only).
 
-> **The `cl-agent.http` / `cl-agent.chat` / `cl-agent.kernel` packages have been
-> merged into `cl-agent.core`**, and the nicknames `cla.http` / `cla.chat` /
-> `cla.kernel` all collapse into `cla.core`. Before the merge, chat and kernel
+> **The `cl-agent/http` / `cl-agent/chat` / `cl-agent/kernel` packages have been
+> merged into `cl-agent/core`**, and the nicknames `cla/http` / `cla/chat` /
+> `cla/kernel` all collapse into `cla/core`. Before the merge, chat and kernel
 > shared three exported names: `tool-response` / `make-tool-response` (chat's is
 > the protocol-level message value object; the kernel's was the execution-chain
 > response carrier) and `execute-tool-calls` (two manager protocols with
@@ -52,12 +52,12 @@ This is exactly the `defpackage` used by `examples/kernel-usage.lisp` and
 > merged. **Every "you must shadowing-import" claim in older docs is obsolete.**
 > See [Migration](#migration).
 >
-> The library is now **shadow-free**: `cl-agent.llm` used to `(:shadow #:chat)`
+> The library is now **shadow-free**: `cl-agent/llm` used to `(:shadow #:chat)`
 > because its low-level function collided with core's `chat` macro; that
 > function is now `client-chat` and the shadow is gone. You can `:use` any
 > combination of this library's packages without name conflicts.
 
-## cl-agent.core — Chat Model API
+## cl-agent/core — Chat Model API
 
 ### Messages (`org.springframework.ai.chat.messages`)
 
@@ -76,7 +76,7 @@ This is exactly the `defpackage` used by `examples/kernel-usage.lisp` and
 > This `tool-response` is the **protocol-level** value object (id/name/text) that
 > goes inside a role=:tool message sent back to the model. It is a **different
 > thing at a different layer** from the kernel's execution-chain response carrier
-> `cl-agent.core:tool-result` (value/writes/error, see
+> `cl-agent/core:tool-result` (value/writes/error, see
 > [Chain carriers](#chain-carriers)) — and the two no longer share a name.
 
 ### Prompt / ChatOptions
@@ -225,7 +225,7 @@ Conditions: `tool-execution-error`, `tool-not-found-error`,
 >
 > `*inherited-special-variables*` / `with-inherited-specials` did not belong to
 > the deleted manager: they still live in `core/utils.lisp`, sharing one list
-> with the HTTP async requests. Take them from `cl-agent.core`.
+> with the HTTP async requests. Take them from `cl-agent/core`.
 
 ### ChatModel protocol
 
@@ -238,7 +238,7 @@ Conditions: `tool-execution-error`, `tool-not-found-error`,
 
 The ChatModel makes a **single** model call — it resolves tool references and
 injects schemas but never executes tools. Responses carrying tool calls are
-returned as-is; the loop belongs to `cl-agent.core:run-tool-loop` (the terminal
+returned as-is; the loop belongs to `cl-agent/core:run-tool-loop` (the terminal
 of the `:turn` chain).
 
 ### ChatMemory
@@ -260,9 +260,9 @@ Window truncation is pairing-safe: system messages are kept and don't count;
 orphaned leading tool messages are dropped.
 
 Memory is **not** a kernel field — attach it as a filter:
-`(cl-agent.core:memory-filter memory)`.
+`(cl-agent/core:memory-filter memory)`.
 
-## cl-agent.core — Kernel + Filter tri-chain (execution core)
+## cl-agent/core — Kernel + Filter tri-chain (execution core)
 
 Three onion chains, each with its own carriers and terminal:
 
@@ -304,7 +304,7 @@ building the corresponding chain — one filter may serve several chains, or jus
 
 ```lisp
 ;; all four hook slots are optional
-(cl-agent.core:make-filter
+(cl-agent/core:make-filter
  :timing
  :turn (lambda (req chain)
          (let ((start (get-internal-real-time)))
@@ -387,12 +387,12 @@ downstream** — upstream can never be re-run, and recursive re-entry is free.
 ```
 
 > The `:chat` chain has **no** wrapper carrier: the request is a
-> `cl-agent.core:prompt` and the response is a `chat-response`.
+> `cl-agent/core:prompt` and the response is a `chat-response`.
 >
 > Naming: `tool-request` → `tool-result` is symmetric with the turn chain's
 > `turn-request` → `turn-result`. `tool-result` was once called `tool-response`
 > (initarg `:result`, reader `tool-response-result`), which collided with
-> `cl-agent.core:tool-response` — a protocol-level value object at a different
+> `cl-agent/core:tool-response` — a protocol-level value object at a different
 > layer. The rename removed the collision.
 
 ### Kernel
@@ -484,7 +484,7 @@ How the two levels combine:
 ### HITL: pause and resume (kernel primitive)
 
 `:tool-gate` is the low-level primitive behind human approval
-(`cl-agent.client`'s [SimpleAgent HITL](#human-approval-hitl) wraps it).
+(`cl-agent/client`'s [SimpleAgent HITL](#human-approval-hitl) wraps it).
 
 ```lisp
 (build-kernel
@@ -615,7 +615,7 @@ Appends a "JSON only" system instruction → takes the text back →
 no schema parameter).
 
 ```lisp
-(cl-agent.core:strip-json-fences text)   ; strip ```json ... ``` fences; usable on its own
+(cl-agent/core:strip-json-fences text)   ; strip ```json ... ``` fences; usable on its own
 ```
 
 To get "re-prompt the model with the validation error until it complies", attach a
@@ -629,14 +629,14 @@ To get "re-prompt the model with the validation error until it complies", attach
     \"required\":[\"name\",\"population\"]}")
 
 (defvar *validating-kernel*
-  (cl-agent.core:build-kernel
+  (cl-agent/core:build-kernel
     :model *model*
-    :filters (list (cl-agent.core:validation-turn-filter
-                    (cl-agent.core:structured-output-validate-fn
-                     *schema* :parse-fn #'cl-agent.core:json-parse)
+    :filters (list (cl-agent/core:validation-turn-filter
+                    (cl-agent/core:structured-output-validate-fn
+                     *schema* :parse-fn #'cl-agent/core:json-parse)
                     :max-retries 2))))
 
-(cl-agent.core:chat *validating-kernel*
+(cl-agent/core:chat *validating-kernel*
   (:user "Give me Tokyo's info as JSON")
   (:call :entity))
 ```
@@ -686,7 +686,7 @@ message and the tool-result message → next iteration; otherwise return
 `turn-result(:completed)`.
 
 - The cap comes from settings `:max-tool-iterations` (default 10); exceeding it
-  signals `cl-agent.core:max-tool-iterations-exceeded-error`
+  signals `cl-agent/core:max-tool-iterations-exceeded-error`
 - `:return-direct` tools: when the whole batch declares it, the loop short-circuits
   and the tool output becomes the final answer without going back to the model
 - A non-nil `kernel-tool-manager` routes execution through `execute-tool-calls`;
@@ -707,7 +707,7 @@ stay on the kernel side; the manager only picks the scheduling strategy. This is
 the project's **only** ToolCallingManager (chat's old one is deleted).
 
 ```lisp
-(cl-agent.core:execute-tool-calls manager kernel response options)
+(cl-agent/core:execute-tool-calls manager kernel response options)
 ;; options plist: (:tool-context ctx ...)
 ;; → tool-execution-result plist: (:messages ... :records ... :context ... :errors ...)
 (make-tool-execution-result &key messages records context errors)
@@ -719,10 +719,10 @@ the project's **only** ToolCallingManager (chat's old one is deleted).
 ```
 
 > There is only one signature now: `(manager kernel response options)`.
-> The pre-merge `cl-agent.chat` once had a same-named generic function taking
+> The pre-merge `cl-agent/chat` once had a same-named generic function taking
 > `(manager prompt response)`, which forced the kernel to `shadow` the symbol;
 > that layer is deleted, so `execute-tool-calls` now belongs solely to
-> `cl-agent.core`.
+> `cl-agent/core`.
 >
 > `thread-pool-tool-calling-manager` currently behaves exactly like
 > virtual-thread (lparallel is already pool-backed); `pool-size` does not yet bind
@@ -754,7 +754,7 @@ action**:
 | `:transient` | `nil` | Feed the error text back to the model |
 | `:environment` | any | Feed the error text back to the model (see divergence below) |
 
-Retry knobs (both are `defparameter`s on `cl-agent.core`):
+Retry knobs (both are `defparameter`s on `cl-agent/core`):
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -809,11 +809,11 @@ the tool author.
 ;; once retries are exhausted the last result is returned as-is.
 (structured-output-validate-fn schema &key parse-fn)  ; → validate-fn
 ;; schema    JSON Schema (hash-table / plist / string)
-;; parse-fn  e.g. #'cl-agent.core:json-parse; default nil = no structured value
+;; parse-fn  e.g. #'cl-agent/core:json-parse; default nil = no structured value
 ;;           to judge, so everything passes
 ;; Verdict order: empty text → fail; no parse-fn → pass; parse-fn present but
 ;; parsing fails → fail; parsed → validate against the schema, feeding each error back
-(cl-agent.core:strip-json-fences text)  ; strip ```json ... ``` fences
+(cl-agent/core:strip-json-fences text)  ; strip ```json ... ``` fences
 
 ;; 6. re-reading-filter (:turn) — mirrors ReReadingAdvisor (RE2)
 (re-reading-filter &key template)
@@ -874,7 +874,7 @@ the tool author.
 > `:token-xform` is assembled inside the streaming terminal — it does **not** go
 > through `build-chain`.
 
-## cl-agent.client — SimpleAgent (stateful chat + HITL)
+## cl-agent/client — SimpleAgent (stateful chat + HITL)
 
 The application-facing convenience layer: a stateful agent object that handles
 the conversation, observability, error normalization and human approval. It is a
@@ -1029,24 +1029,24 @@ Calling `agent-resume` while not paused signals an error (check
 
 ## Migration
 
-### Package merge (`cl-agent.http` / `.chat` / `.kernel` → `cl-agent.core`)
+### Package merge (`cl-agent/http` / `/chat` / `/kernel` → `cl-agent/core`)
 
-The three packages have been merged into a single `cl-agent.core`. A mechanical
+The three packages have been merged into a single `cl-agent/core`. A mechanical
 rename, one for one:
 
 | Old | New |
 |---|---|
-| `cl-agent.kernel:X` | `cl-agent.core:X` |
-| `cl-agent.chat:X` | `cl-agent.core:X` |
-| `cl-agent.http:X` | `cl-agent.core:X` |
-| nicknames `cla.kernel` / `cla.chat` / `cla.http` | `cla.core` |
-| `cl-agent.kernel:build-kernel` | `cl-agent.core:build-kernel` |
-| `cl-agent.chat:deftool` | `cl-agent.core:deftool` |
-| `cl-agent.http:http-request` | `cl-agent.core:http-request` |
+| `cl-agent/kernel:X` | `cl-agent/core:X` |
+| `cl-agent/chat:X` | `cl-agent/core:X` |
+| `cl-agent/http:X` | `cl-agent/core:X` |
+| nicknames `cla/kernel` / `cla/chat` / `cla/http` | `cla/core` |
+| `cl-agent/kernel:build-kernel` | `cl-agent/core:build-kernel` |
+| `cl-agent/chat:deftool` | `cl-agent/core:deftool` |
+| `cl-agent/http:http-request` | `cl-agent/core:http-request` |
 | any `:shadowing-import-from` incantation | **no longer needed** — delete it |
 
 Code written against the old package names hits
-`Package CL-AGENT.KERNEL does not exist` immediately.
+`Package CL-AGENT/KERNEL does not exist` immediately.
 
 ### Migrating from ChatClient
 
@@ -1055,9 +1055,9 @@ ChatClient + Builder + fluent RequestSpec. Builders and chained specs are a Java
 idiom; in Lisp, `build-kernel`'s keyword arguments plus the declarative `chat`
 macro cover the same ground with one layer less.
 
-> **Note: the package name `cl-agent.client` has been reused.** It used to be
+> **Note: the package name `cl-agent/client` has been reused.** It used to be
 > the ChatClient porting layer (deleted); it is **now SimpleAgent** (see
-> [cl-agent.client](#cl-agentclient--simpleagent-stateful-chat--hitl)). The
+> [cl-agent/client](#cl-agentclient--simpleagent-stateful-chat--hitl)). The
 > package and the name are still there, but what is inside is a completely
 > different thing — not one of the old ChatClient symbols remains.
 
@@ -1072,7 +1072,7 @@ These symbols **no longer exist**:
 `client-default-system`, `client-default-options`, `client-default-tools`.
 
 The `chat` macro **survived** — the syntax is unchanged, the symbol just comes
-from `cl-agent.core` now.
+from `cl-agent/core` now.
 
 For the "stateful conversation, one object holding the session" feel (the common
 ChatClient usage), use
@@ -1132,8 +1132,8 @@ was gone, the three packages could be merged).
 
 | Old (gone) | New |
 |---|---|
-| `cl-agent.kernel:tool-response` (the class) | `cl-agent.core:tool-result` |
-| `cl-agent.kernel:make-tool-response` | `cl-agent.core:make-tool-result` |
+| `cl-agent/kernel:tool-response` (the class) | `cl-agent/core:tool-result` |
+| `cl-agent/kernel:make-tool-response` | `cl-agent/core:make-tool-result` |
 | `(make-tool-response :result X)` | `(make-tool-result :value X)` — **the initarg changed from `:result` to `:value`** |
 | `tool-response-result` | `tool-result-value` |
 | `tool-response-writes` | `tool-result-writes` |
@@ -1141,19 +1141,19 @@ was gone, the three packages could be merged).
 
 `tool-request` / `make-tool-request` / `tool-request-function` /
 `tool-request-args` / `tool-request-context` are **unchanged** (the prefix
-becomes `cl-agent.core:`). `cl-agent.core:tool-result->text` is a new export.
+becomes `cl-agent/core:`). `cl-agent/core:tool-result->text` is a new export.
 
-> **Do not confuse the two**: `cl-agent.core:tool-response` /
+> **Do not confuse the two**: `cl-agent/core:tool-response` /
 > `make-tool-response` / `tool-response-message` / `tool-response-text` **still
 > exist** — that is the **protocol-message-layer** value object (id/name/text)
 > that goes inside a role=:tool message back to the model, a different thing at a
 > different layer from the kernel's `tool-result` (value/writes/error). It lived
-> in `cl-agent.chat` before the merge and now shares `cl-agent.core` with
+> in `cl-agent/chat` before the merge and now shares `cl-agent/core` with
 > `tool-result`; since they no longer share a name, both coexist.
 
 ### Migrating from chat's ToolCallingManager (deleted)
 
-These pre-merge `cl-agent.chat` symbols **no longer exist**: `tool-calling-manager`,
+These pre-merge `cl-agent/chat` symbols **no longer exist**: `tool-calling-manager`,
 `default-tool-calling-manager`, `make-default-tool-calling-manager`,
 `execute-tool-calls` (the `(manager prompt response)` arity),
 `execute-one-tool-call`, `process-tool-execution-error`,
@@ -1173,13 +1173,13 @@ These pre-merge `cl-agent.chat` symbols **no longer exist**: `tool-calling-manag
 | `(shutdown-tool-calling-manager mgr)` / `with-concurrent-tool-calling-manager` | not needed — kernel managers hold no pool requiring explicit release |
 | `tool-execution-conversation-history` / `-last-message` / `-return-direct-p` | `turn-result-response` / `turn-result-tool-context`; at the manager layer, `make-tool-execution-result`'s `:messages` |
 | specializing `process-tool-execution-error` | a `:tool` filter, or read `tool-result-error`'s `:class` |
-| `:inherit-specials` / `manager-inherit-specials` | `cl-agent.core:with-inherited-specials` + `*inherited-special-variables*` |
+| `:inherit-specials` / `manager-inherit-specials` | `cl-agent/core:with-inherited-specials` + `*inherited-special-variables*` |
 
-> **Note**: `cl-agent.core` now also exports a `default-tool-calling-manager`, but
+> **Note**: `cl-agent/core` now also exports a `default-tool-calling-manager`, but
 > it is a **zero-argument factory function** (returning a virtual-thread manager),
 > unrelated to the deleted chat-level **class** of the same name.
 
-## cl-agent.llm — Providers
+## cl-agent/llm — Providers
 
 ```lisp
 (create-chat-model :anthropic :model "..." :api-key "..." :options opts)
@@ -1192,7 +1192,7 @@ DeepSeek prefix completion (beta):
 ```lisp
 ;; The last assistant message is the prefix; the model continues from it
 ;; (pair it with :stop)
-(cl-agent.llm.providers:deepseek-prefix-chat provider
+(cl-agent/llm/providers:deepseek-prefix-chat provider
   (list (list :role :user :content "Write a line of poetry")
         (list :role :assistant :content "The spring wind"))
   :max-tokens 256)
@@ -1201,17 +1201,17 @@ DeepSeek prefix completion (beta):
 Provider SPI for custom providers:
 
 ```lisp
-(defmethod cl-agent.core:llm-chat ((p my-provider) messages
+(defmethod cl-agent/core:llm-chat ((p my-provider) messages
                                    &key max-tokens temperature model tools system)
   ;; messages are neutral plists (:role :user :content "...")
-  ;; return a cl-agent.core:llm-response
+  ;; return a cl-agent/core:llm-response
   ...)
 ```
 
-## cl-agent.mock — Test Support
+## cl-agent/mock — Test Support
 
 ```lisp
-(cl-agent.mock:make-mock-llm)   ; rule-based responses, no API key
-(cl-agent.mock:make-quick-mock :smart)
+(cl-agent/mock:make-mock-llm)   ; rule-based responses, no API key
+(cl-agent/mock:make-quick-mock :smart)
 ;; wrap with (make-provider-chat-model (make-mock-llm)) for full-stack demos
 ```

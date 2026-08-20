@@ -26,7 +26,7 @@ Then run any of:
 To use a real provider, replace `*model*` with:
 
 ```lisp
-(cl-agent.llm:create-chat-model :anthropic
+(cl-agent/llm:create-chat-model :anthropic
   :model "claude-sonnet-4-20250514")
 ```
 
@@ -45,9 +45,9 @@ multi-turn memory / structured-output schema validation / real SSE chunking.
 
 ## llm-usage.lisp — Low-level Provider SPI
 
-Direct use of the `cl-agent.llm` client and providers, bypassing the kernel.
+Direct use of the `cl-agent/llm` client and providers, bypassing the kernel.
 
 ## di-usage-examples.lisp — DI Container (optional facility)
 
-Examples for the dependency-injection container in `cl-agent.core`
+Examples for the dependency-injection container in `cl-agent/core`
 (a standalone facility; the library itself does not use it).

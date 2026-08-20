@@ -41,24 +41,24 @@
 
 ```
 ┌──────────────────────────────────────────────────────┐
-│  cl-agent.client   SimpleAgent（有状态对话 + HITL）    │
+│  cl-agent/client   SimpleAgent（有状态对话 + HITL）    │
 │                    make-agent / agent-chat            │
 ├──────────────────────────────────────────────────────┤
-│  cl-agent.core     框架本体（单包）                    │
+│  cl-agent/core     框架本体（单包）                    │
 │                    Kernel + Filter 三链 + chat 宏      │
 │                    Message/Prompt/Options/Response     │
 │                    deftool / ChatModel / ChatMemory    │
 │                    基础设施 + HTTP/SSE + JSON Schema   │
 ├──────────────────────────────────────────────────────┤
-│  cl-agent.llm      提供商实现（Anthropic/OpenAI/...）  │
+│  cl-agent/llm      提供商实现（Anthropic/OpenAI/...）  │
 └──────────────────────────────────────────────────────┘
 ```
 
-`cl-agent.core` 与 `cl-agent.client` 可以直接一起 `:use`，无需任何 shadowing：
+`cl-agent/core` 与 `cl-agent/client` 可以直接一起 `:use`，无需任何 shadowing：
 
 ```lisp
 (defpackage :my-app
-  (:use :cl :cl-agent.core :cl-agent.client))
+  (:use :cl :cl-agent/core :cl-agent/client))
 ```
 
 一次对话的执行路径：
@@ -79,12 +79,12 @@
 (asdf:load-system :cl-agent)
 
 (defpackage :my-app
-  (:use :cl :cl-agent.core :cl-agent.client))
+  (:use :cl :cl-agent/core :cl-agent/client))
 (in-package :my-app)
 
 ;; 1. 创建 ChatModel（API 密钥自动读环境变量）
 (defvar *model*
-  (cl-agent.llm:create-chat-model :anthropic
+  (cl-agent/llm:create-chat-model :anthropic
     :model "claude-sonnet-4-20250514"))
 
 ;; 2. 定义工具（对标 @Tool）
@@ -255,10 +255,10 @@
 
 | 模块 | 包 | 描述 |
 |------|---|------|
-| **core** | `cl-agent.core` | 框架本体（单包）：基础设施 + HTTP/SSE + JSON Schema + `llm-chat` SPI + Chat API（消息/Prompt/Options/Response/deftool/ChatModel/ChatMemory）+ Kernel/Filter 三链 + `chat` 宏 |
-| **llm** | `cl-agent.llm` | 提供商实现，`create-chat-model` 一步创建 ChatModel |
-| **client** | `cl-agent.client` | SimpleAgent：有状态对话 + callbacks + 错误归一化 + HITL |
-| **mock** | `cl-agent.mock` | Mock provider（测试/演示，无需 API 密钥） |
+| **core** | `cl-agent/core` | 框架本体（单包）：基础设施 + HTTP/SSE + JSON Schema + `llm-chat` SPI + Chat API（消息/Prompt/Options/Response/deftool/ChatModel/ChatMemory）+ Kernel/Filter 三链 + `chat` 宏 |
+| **llm** | `cl-agent/llm` | 提供商实现，`create-chat-model` 一步创建 ChatModel |
+| **client** | `cl-agent/client` | SimpleAgent：有状态对话 + callbacks + 错误归一化 + HITL |
+| **mock** | `cl-agent/mock` | Mock provider（测试/演示，无需 API 密钥） |
 
 ## 安装与测试
 
@@ -326,16 +326,16 @@ Spring AI 的两大移植层已整体退役，包结构也做过一轮合并。
 | fluent spec（`client-prompt` → `prompt-user` → `call-content`） | `chat` 宏子句，或 `kernel-chat-text` |
 | `(:call :client-response)` | `(:call :result)`（返回 turn-result） |
 
-**包合并**（`cl-agent.http` / `.chat` / `.kernel` → `cl-agent.core`）
+**包合并**（`cl-agent/http` / `/chat` / `/kernel` → `cl-agent/core`）
 
 | 旧 | 新 |
 |---|---|
-| `cl-agent.kernel:build-kernel` | `cl-agent.core:build-kernel` |
-| `cl-agent.chat:deftool` | `cl-agent.core:deftool` |
-| `cl-agent.http:http-request` | `cl-agent.core:http-request` |
-| `cl-agent.kernel:tool-response` | `cl-agent.core:tool-result`（`make-tool-result :value ...`） |
+| `cl-agent/kernel:build-kernel` | `cl-agent/core:build-kernel` |
+| `cl-agent/chat:deftool` | `cl-agent/core:deftool` |
+| `cl-agent/http:http-request` | `cl-agent/core:http-request` |
+| `cl-agent/kernel:tool-response` | `cl-agent/core:tool-result`（`make-tool-result :value ...`） |
 
-`cl-agent.client` 这个名字被**复用**了：它曾是 ChatClient 移植层（已删），
+`cl-agent/client` 这个名字被**复用**了：它曾是 ChatClient 移植层（已删），
 现在是 SimpleAgent。
 
 与 Spring AI 的能力对应关系见 [docs/tool-calling_CN.md](docs/tool-calling_CN.md)。
