@@ -50,7 +50,7 @@
   "创建顺序响应 provider"
   (make-instance 'seq-provider :queue responses))
 
-(defmethod cl-agent.core:llm-chat ((provider seq-provider) messages
+(defmethod cl-agent/core:llm-chat ((provider seq-provider) messages
                                    &key max-tokens temperature model tools system
                                         top-p top-k stop
                                         frequency-penalty presence-penalty
@@ -69,15 +69,15 @@
       (error "seq-provider 响应队列已空"))
     (etypecase next
       (function (funcall next messages))
-      (cl-agent.core:llm-response next))))
+      (cl-agent/core:llm-response next))))
 
 (defun text-response (text &key (finish-reason :stop))
   "构造纯文本 llm-response"
-  (cl-agent.core:make-llm-response
+  (cl-agent/core:make-llm-response
    :content text
    :finish-reason finish-reason
    :model "seq-model"
-   :usage (cl-agent.core:make-llm-usage :input-tokens 10 :output-tokens 5)))
+   :usage (cl-agent/core:make-llm-usage :input-tokens 10 :output-tokens 5)))
 
 (defun tool-call-response (name arguments &key (id "call-1") (content ""))
   "构造携带单个工具调用的 llm-response。
@@ -85,7 +85,7 @@ ARGUMENTS 为 alist（(\"city\" . \"东京\")...），自动转 hash-table。"
   (let ((args-ht (make-hash-table :test #'equal)))
     (loop for (k . v) in arguments
           do (setf (gethash k args-ht) v))
-    (cl-agent.core:make-llm-response
+    (cl-agent/core:make-llm-response
      :content content
      :tool-calls (list (list :id id :name name :arguments args-ht))
      :finish-reason :tool-call

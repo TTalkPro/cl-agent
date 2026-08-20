@@ -16,8 +16,8 @@
 
 (defun js-valid-p (json schema)
   "JSON 文本是否通过 SCHEMA 校验"
-  (null (cl-agent.core:validate-json-schema
-         (cl-agent.core:json-parse json) schema)))
+  (null (cl-agent/core:validate-json-schema
+         (cl-agent/core:json-parse json) schema)))
 
 (defparameter +person-schema+
   "{\"type\":\"object\",
@@ -51,8 +51,8 @@
 
 (test json-schema-error-messages-mention-path
   "错误消息带上出错路径，便于模型自我纠正"
-  (let ((errors (cl-agent.core:validate-json-schema
-                 (cl-agent.core:json-parse "{\"name\":\"a\",\"age\":1,\"tags\":[1]}")
+  (let ((errors (cl-agent/core:validate-json-schema
+                 (cl-agent/core:json-parse "{\"name\":\"a\",\"age\":1,\"tags\":[1]}")
                  +person-schema+)))
     (is (= 1 (length errors)))
     (is (search "$.tags[0]" (first errors)))))
@@ -139,7 +139,7 @@
 
 (test json-schema-accepts-plist-schema
   "params->json-schema 的 plist 输出可直接用作 schema"
-  (let ((schema (cl-agent.core:params->json-schema
+  (let ((schema (cl-agent/core:params->json-schema
                  '((city :string "城市" :required-p t)))))
     (is (js-valid-p "{\"city\":\"东京\"}" schema))
     (is (not (js-valid-p "{}" schema)))))
@@ -147,7 +147,7 @@
 (test json-schema-validate-json-text-reports-parse-error
   "validate-json-text 对非法 JSON 返回解析错误而非发条件"
   (multiple-value-bind (errors instance)
-      (cl-agent.core:validate-json-text "{不是 JSON" "{\"type\":\"object\"}")
+      (cl-agent/core:validate-json-text "{不是 JSON" "{\"type\":\"object\"}")
     (is (not (null errors)))
     (is (null instance))
     (is (search "解析失败" (first errors)))))

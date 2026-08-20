@@ -20,47 +20,47 @@
 
 (test media-type-guessed-from-extension
   "MIME 由扩展名推断，未知扩展名退化为 octet-stream"
-  (is (string= "image/png" (cl-agent.core:guess-media-type "/tmp/a.png")))
-  (is (string= "image/jpeg" (cl-agent.core:guess-media-type "/tmp/a.JPG")))
-  (is (string= "application/pdf" (cl-agent.core:guess-media-type "/tmp/r.pdf")))
-  (is (string= "audio/mpeg" (cl-agent.core:guess-media-type "/tmp/s.mp3")))
+  (is (string= "image/png" (cl-agent/core:guess-media-type "/tmp/a.png")))
+  (is (string= "image/jpeg" (cl-agent/core:guess-media-type "/tmp/a.JPG")))
+  (is (string= "application/pdf" (cl-agent/core:guess-media-type "/tmp/r.pdf")))
+  (is (string= "audio/mpeg" (cl-agent/core:guess-media-type "/tmp/s.mp3")))
   (is (string= "application/octet-stream"
-               (cl-agent.core:guess-media-type "/tmp/x.unknown"))))
+               (cl-agent/core:guess-media-type "/tmp/x.unknown"))))
 
 (test media-kind-inferred-from-mime
   "种类由 MIME 前缀推断"
-  (is (eq :image (cl-agent.core:media-kind-from-type "image/png")))
-  (is (eq :audio (cl-agent.core:media-kind-from-type "audio/wav")))
-  (is (eq :video (cl-agent.core:media-kind-from-type "video/mp4")))
-  (is (eq :document (cl-agent.core:media-kind-from-type "application/pdf")))
+  (is (eq :image (cl-agent/core:media-kind-from-type "image/png")))
+  (is (eq :audio (cl-agent/core:media-kind-from-type "audio/wav")))
+  (is (eq :video (cl-agent/core:media-kind-from-type "video/mp4")))
+  (is (eq :document (cl-agent/core:media-kind-from-type "application/pdf")))
   ;; MIME 缺失时按文档处理
-  (is (eq :document (cl-agent.core:media-kind-from-type nil))))
+  (is (eq :document (cl-agent/core:media-kind-from-type nil))))
 
 (test media-format-maps-mpeg-to-mp3
   "OpenAI 的 input_audio.format 只认 mp3/wav，audio/mpeg 需映射"
-  (is (string= "mp3" (cl-agent.core:media-format-from-type "audio/mpeg")))
-  (is (string= "wav" (cl-agent.core:media-format-from-type "audio/wav")))
-  (is (string= "m4a" (cl-agent.core:media-format-from-type "audio/mp4"))))
+  (is (string= "mp3" (cl-agent/core:media-format-from-type "audio/mpeg")))
+  (is (string= "wav" (cl-agent/core:media-format-from-type "audio/wav")))
+  (is (string= "m4a" (cl-agent/core:media-format-from-type "audio/mp4"))))
 
 (test media-requires-content
   "既无 data 也无 url 时报 validation-error"
-  (signals cl-agent.core:validation-error
-    (cl-agent.core:make-media :kind :image)))
+  (signals cl-agent/core:validation-error
+    (cl-agent/core:make-media :kind :image)))
 
 (test media-url-constructor
   "URL 形态：data URI 即 URL 本身"
-  (let ((m (cl-agent.core:image-media :url "https://example.com/cat.png")))
-    (is (eq :image (cl-agent.core:media-kind m)))
-    (is (string= "https://example.com/cat.png" (cl-agent.core:media-url m)))
+  (let ((m (cl-agent/core:image-media :url "https://example.com/cat.png")))
+    (is (eq :image (cl-agent/core:media-kind m)))
+    (is (string= "https://example.com/cat.png" (cl-agent/core:media-url m)))
     (is (string= "https://example.com/cat.png"
-                 (cl-agent.core:media-data-uri m)))))
+                 (cl-agent/core:media-data-uri m)))))
 
 (test media-bytes-encoded-to-data-uri
   "字节形态：编码为 data URI"
   (let* ((bytes (make-array 3 :element-type '(unsigned-byte 8)
                               :initial-contents '(1 2 3)))
-         (m (cl-agent.core:image-media :data bytes :media-type "image/png"))
-         (uri (cl-agent.core:media-data-uri m)))
+         (m (cl-agent/core:image-media :data bytes :media-type "image/png"))
+         (uri (cl-agent/core:media-data-uri m)))
     (is (eql 0 (search "data:image/png;base64," uri)))
     ;; base64 内容可解回原字节
     (is (equalp bytes
@@ -69,10 +69,10 @@
 
 (test media-string-data-treated-as-base64
   "data 已是字符串时视为 base64，不再二次编码"
-  (let ((m (cl-agent.core:image-media :data "QUJD" :media-type "image/png")))
-    (is (string= "QUJD" (cl-agent.core:media-neutral-base64
-                         (cl-agent.core:media->neutral m))))
-    (is (string= "data:image/png;base64,QUJD" (cl-agent.core:media-data-uri m)))))
+  (let ((m (cl-agent/core:image-media :data "QUJD" :media-type "image/png")))
+    (is (string= "QUJD" (cl-agent/core:media-neutral-base64
+                         (cl-agent/core:media->neutral m))))
+    (is (string= "data:image/png;base64,QUJD" (cl-agent/core:media-data-uri m)))))
 
 (test media-from-file-reads-bytes-and-mime
   "media-from-file 读入字节并推断 MIME / 文件名"
@@ -86,11 +86,11 @@
              (write-sequence (make-array 4 :element-type '(unsigned-byte 8)
                                            :initial-contents '(10 20 30 40))
                              out))
-           (let ((m (cl-agent.core:media-from-file path)))
-             (is (eq :image (cl-agent.core:media-kind m)))
-             (is (string= "image/png" (cl-agent.core:media-content-type m)))
-             (is (string= "cl-agent-media-test.png" (cl-agent.core:media-name m)))
-             (is (= 4 (length (cl-agent.core:media-data m))))))
+           (let ((m (cl-agent/core:media-from-file path)))
+             (is (eq :image (cl-agent/core:media-kind m)))
+             (is (string= "image/png" (cl-agent/core:media-content-type m)))
+             (is (string= "cl-agent-media-test.png" (cl-agent/core:media-name m)))
+             (is (= 4 (length (cl-agent/core:media-data m))))))
       (ignore-errors (delete-file path)))))
 
 ;;; ============================================================
@@ -99,27 +99,27 @@
 
 (test user-message-carries-media
   "user-message 接受单个 media 或列表，统一存为列表"
-  (let ((one (cl-agent.core:user-message
-              "看图" :media (cl-agent.core:image-media :url "u1")))
-        (two (cl-agent.core:user-message
-              "看图" :media (list (cl-agent.core:image-media :url "u1")
-                                  (cl-agent.core:image-media :url "u2")))))
-    (is (= 1 (length (cl-agent.core:message-media one))))
-    (is (= 2 (length (cl-agent.core:message-media two))))))
+  (let ((one (cl-agent/core:user-message
+              "看图" :media (cl-agent/core:image-media :url "u1")))
+        (two (cl-agent/core:user-message
+              "看图" :media (list (cl-agent/core:image-media :url "u1")
+                                  (cl-agent/core:image-media :url "u2")))))
+    (is (= 1 (length (cl-agent/core:message-media one))))
+    (is (= 2 (length (cl-agent/core:message-media two))))))
 
 (test message-media-defaults-to-nil
   "非 user 消息的 message-media 恒为 NIL（调用方无需判类型）"
-  (is (null (cl-agent.core:message-media (cl-agent.core:system-message "s"))))
-  (is (null (cl-agent.core:message-media (cl-agent.core:assistant-message "a"))))
-  (is (null (cl-agent.core:message-media (cl-agent.core:user-message "u")))))
+  (is (null (cl-agent/core:message-media (cl-agent/core:system-message "s"))))
+  (is (null (cl-agent/core:message-media (cl-agent/core:assistant-message "a"))))
+  (is (null (cl-agent/core:message-media (cl-agent/core:user-message "u")))))
 
 (test message->neutral-carries-media
   "message->neutral 把 media 降为中立 plist"
-  (let* ((msg (cl-agent.core:user-message
+  (let* ((msg (cl-agent/core:user-message
                "这是什么"
-               :media (cl-agent.core:image-media :url "https://x/y.png"
+               :media (cl-agent/core:image-media :url "https://x/y.png"
                                                  :media-type "image/png")))
-         (neutral (first (cl-agent.core:message->neutral msg)))
+         (neutral (first (cl-agent/core:message->neutral msg)))
          (media (first (getf neutral :media))))
     (is (equal "这是什么" (getf neutral :content)))
     ;; 中立层是 plist，不是 CLOS 实例（SPI 边界纪律）
@@ -130,21 +130,21 @@
 
 (test message->neutral-omits-media-key-when-absent
   "没有附件时不出现 :media 键"
-  (let ((neutral (first (cl-agent.core:message->neutral
-                         (cl-agent.core:user-message "纯文本")))))
+  (let ((neutral (first (cl-agent/core:message->neutral
+                         (cl-agent/core:user-message "纯文本")))))
     (is (null (getf neutral :media)))))
 
 (test neutral->message-roundtrips-media
   "中立 plist → CLOS 消息，media 不丢"
-  (let* ((original (cl-agent.core:user-message
+  (let* ((original (cl-agent/core:user-message
                     "看图"
-                    :media (cl-agent.core:image-media :url "u" :media-type "image/png")))
-         (neutral (first (cl-agent.core:message->neutral original)))
-         (restored (cl-agent.core:neutral->message neutral))
-         (media (first (cl-agent.core:message-media restored))))
-    (is (cl-agent.core:mediap media))
-    (is (eq :image (cl-agent.core:media-kind media)))
-    (is (string= "u" (cl-agent.core:media-url media)))))
+                    :media (cl-agent/core:image-media :url "u" :media-type "image/png")))
+         (neutral (first (cl-agent/core:message->neutral original)))
+         (restored (cl-agent/core:neutral->message neutral))
+         (media (first (cl-agent/core:message-media restored))))
+    (is (cl-agent/core:mediap media))
+    (is (eq :image (cl-agent/core:media-kind media)))
+    (is (string= "u" (cl-agent/core:media-url media)))))
 
 ;;; ============================================================
 ;;; OpenAI 兼容 wire
@@ -152,7 +152,7 @@
 
 (defun openai-wire-message (msg)
   "取单条中立消息的 OpenAI wire 形态"
-  (elt (cl-agent.llm.providers::convert-messages-for-openai (list msg)) 0))
+  (elt (cl-agent/llm/providers::convert-messages-for-openai (list msg)) 0))
 
 (test openai-plain-message-content-stays-string
   "无附件的消息 content 仍是字符串（不无端升级为数组）"
@@ -227,7 +227,7 @@
 
 (defun anthropic-wire-message (msg)
   "取单条中立消息的 Anthropic wire 形态"
-  (first (getf (cl-agent.llm.providers::parse-messages-for-anthropic (list msg))
+  (first (getf (cl-agent/llm/providers::parse-messages-for-anthropic (list msg))
                :messages)))
 
 (test anthropic-image-url-source
@@ -303,8 +303,8 @@
 
 (defun dashscope-request (msg)
   "取单条中立消息的 DashScope 原生请求体"
-  (cl-agent.llm.providers::build-dashscope-request
-   (cl-agent.llm.providers:make-dashscope-provider :api-key "k")
+  (cl-agent/llm/providers::build-dashscope-request
+   (cl-agent/llm/providers:make-dashscope-provider :api-key "k")
    (list msg)
    :model "qwen-vl-max"))
 
@@ -375,30 +375,30 @@
 
 (test dashscope-media-routes-to-multimodal-endpoint
   "带附件的请求必须走多模态端点（两个端点不通用）"
-  (is (cl-agent.llm.providers::messages-have-media-p
+  (is (cl-agent/llm/providers::messages-have-media-p
        (list (list :role :user :content "看"
                    :media (list (list :kind :image :url "u"))))))
-  (is-false (cl-agent.llm.providers::messages-have-media-p
+  (is-false (cl-agent/llm/providers::messages-have-media-p
              (list (list :role :user :content "hi"))))
   (is (string= "/api/v1/services/aigc/multimodal-generation/generation"
-               cl-agent.llm.providers::+dashscope-multimodal-endpoint+)))
+               cl-agent/llm/providers::+dashscope-multimodal-endpoint+)))
 
 (test dashscope-multimodal-response-content-flattened
   "多模态响应的 content 是分片数组，必须归一为字符串"
-  (let ((response (cl-agent.llm.providers::parse-dashscope-response
+  (let ((response (cl-agent/llm/providers::parse-dashscope-response
                    "{\"output\":{\"choices\":[{\"finish_reason\":\"stop\",
                      \"message\":{\"role\":\"assistant\",
                      \"content\":[{\"text\":\"一只猫\"}]}}]},
                      \"usage\":{\"input_tokens\":10,\"output_tokens\":3}}")))
-    (is (stringp (cl-agent.core:llm-response-content response)))
-    (is (string= "一只猫" (cl-agent.core:llm-response-content response)))))
+    (is (stringp (cl-agent/core:llm-response-content response)))
+    (is (string= "一只猫" (cl-agent/core:llm-response-content response)))))
 
 (test dashscope-text-response-content-unchanged
   "纯文本响应的 content 仍按字符串解析（归一化不能改坏老路径）"
-  (let ((response (cl-agent.llm.providers::parse-dashscope-response
+  (let ((response (cl-agent/llm/providers::parse-dashscope-response
                    "{\"output\":{\"choices\":[{\"finish_reason\":\"stop\",
                      \"message\":{\"role\":\"assistant\",\"content\":\"你好\"}}]}}")))
-    (is (string= "你好" (cl-agent.core:llm-response-content response)))))
+    (is (string= "你好" (cl-agent/core:llm-response-content response)))))
 
 ;;; ============================================================
 ;;; 端到端：ChatModel → SPI
@@ -407,13 +407,13 @@
 (test media-reaches-provider-spi
   "prompt 里的 media 一路穿过 ChatModel 适配层到达 llm-chat SPI"
   (let* ((provider (make-seq-provider (text-response "ok")))
-         (model (cl-agent.core:make-provider-chat-model provider)))
-    (cl-agent.core:chat-model-call
+         (model (cl-agent/core:make-provider-chat-model provider)))
+    (cl-agent/core:chat-model-call
      model
-     (cl-agent.core:make-prompt
-      (list (cl-agent.core:user-message
+     (cl-agent/core:make-prompt
+      (list (cl-agent/core:user-message
              "这是什么"
-             :media (cl-agent.core:image-media :url "https://x/y.png")))))
+             :media (cl-agent/core:image-media :url "https://x/y.png")))))
     (let* ((request (first (seq-provider-requests provider)))
            (msg (first (getf request :messages))))
       (is (string= "https://x/y.png" (getf (first (getf msg :media)) :url))))))

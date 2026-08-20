@@ -34,7 +34,7 @@
   "非流式解析：thinking 块连同 signature 原样保留"
   (let* ((blocks (vector (ht "type" "thinking" "thinking" "先想想" "signature" "sig-abc")
                          (ht "type" "text" "text" "答案")))
-         (kept (cl-agent.llm.providers::extract-thinking-blocks blocks)))
+         (kept (cl-agent/llm/providers::extract-thinking-blocks blocks)))
     (is (= 1 (length kept)))
     (is (string= "thinking" (gethash "type" (first kept))))
     (is (string= "先想想" (gethash "thinking" (first kept))))
@@ -45,14 +45,14 @@
   "redacted_thinking（密文思考）同样必须保留回传"
   (let* ((blocks (vector (ht "type" "redacted_thinking" "data" "encrypted-payload")
                          (ht "type" "text" "text" "答案")))
-         (kept (cl-agent.llm.providers::extract-thinking-blocks blocks)))
+         (kept (cl-agent/llm/providers::extract-thinking-blocks blocks)))
     (is (= 1 (length kept)))
     (is (string= "redacted_thinking" (gethash "type" (first kept))))
     (is (string= "encrypted-payload" (gethash "data" (first kept))))))
 
 (test thinking-blocks-empty-when-absent
   "没有思考块时为 NIL，不影响不产生此类块的 provider"
-  (is (null (cl-agent.llm.providers::extract-thinking-blocks
+  (is (null (cl-agent/llm/providers::extract-thinking-blocks
              (vector (ht "type" "text" "text" "答案"))))))
 
 ;;; ============================================================
@@ -72,14 +72,14 @@
                          "{\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}"
                          "{\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"答案\"}}"
                          "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":2}}"))))
-    (let ((blocks (cl-agent.core:llm-response-reasoning-blocks response)))
+    (let ((blocks (cl-agent/core:llm-response-reasoning-blocks response)))
       (is (= 1 (length blocks)))
       (is (string= "thinking" (gethash "type" (first blocks))))
       (is (string= "先想想" (gethash "thinking" (first blocks))))
       ;; 分片签名被拼接完整
       (is (string= "sig-xyz" (gethash "signature" (first blocks)))))
     ;; 思考仍不污染答案流
-    (is (string= "答案" (cl-agent.core:llm-response-content response)))))
+    (is (string= "答案" (cl-agent/core:llm-response-content response)))))
 
 (test stream-thinking-block-omits-empty-signature
   "签名缺失时不写 signature 键——宁可让 API 明确报错，也不塞空签名"
@@ -88,7 +88,7 @@
                          "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\"}}"
                          "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"想\"}}"
                          "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}"))))
-    (let ((block (first (cl-agent.core:llm-response-reasoning-blocks response))))
+    (let ((block (first (cl-agent/core:llm-response-reasoning-blocks response))))
       (is (not (nth-value 1 (gethash "signature" block)))))))
 
 ;;; ============================================================
@@ -98,25 +98,25 @@
 (test reasoning-blocks-reach-assistant-metadata
   "llm-response->chat-response 把推理块放进 assistant-message 的 metadata"
   (let* ((blocks (list (ht "type" "thinking" "thinking" "想" "signature" "s1")))
-         (response (cl-agent.core:llm-response->chat-response
-                    (cl-agent.core:make-llm-response
+         (response (cl-agent/core:llm-response->chat-response
+                    (cl-agent/core:make-llm-response
                      :content "答案"
                      :reasoning "想"
                      :reasoning-blocks blocks)))
-         (msg (cl-agent.core:chat-response-message response)))
-    (is (eq blocks (getf (cl-agent.core:message-metadata msg) :reasoning-blocks)))
+         (msg (cl-agent/core:chat-response-message response)))
+    (is (eq blocks (getf (cl-agent/core:message-metadata msg) :reasoning-blocks)))
     ;; 展示用文本仍在
-    (is (string= "想" (getf (cl-agent.core:message-metadata msg) :reasoning)))))
+    (is (string= "想" (getf (cl-agent/core:message-metadata msg) :reasoning)))))
 
 (test message->neutral-carries-reasoning-blocks
   "message->neutral 把推理块带过中立层——此前这里丢失，导致回传无从谈起"
   (let* ((blocks (list (ht "type" "thinking" "thinking" "想" "signature" "s1")))
-         (msg (cl-agent.core:assistant-message
+         (msg (cl-agent/core:assistant-message
                "答案"
-               :tool-calls (list (cl-agent.core:make-tool-call
+               :tool-calls (list (cl-agent/core:make-tool-call
                                   :id "c1" :name "t" :arguments (ht)))
                :metadata (list :reasoning-blocks blocks)))
-         (neutral (first (cl-agent.core:message->neutral msg))))
+         (neutral (first (cl-agent/core:message->neutral msg))))
     (is (eq blocks (getf neutral :reasoning-blocks)))
     (is (string= "答案" (getf neutral :content)))
     (is (= 1 (length (getf neutral :tool-calls))))))
@@ -124,11 +124,11 @@
 (test neutral->message-roundtrips-reasoning-blocks
   "CLOS ↔ 中立往返不丢推理块"
   (let* ((blocks (list (ht "type" "thinking" "thinking" "想" "signature" "s1")))
-         (msg (cl-agent.core:assistant-message
+         (msg (cl-agent/core:assistant-message
                "答案" :metadata (list :reasoning-blocks blocks)))
-         (back (cl-agent.core:neutral->message
-                (first (cl-agent.core:message->neutral msg)))))
-    (is (eq blocks (getf (cl-agent.core:message-metadata back) :reasoning-blocks)))))
+         (back (cl-agent/core:neutral->message
+                (first (cl-agent/core:message->neutral msg)))))
+    (is (eq blocks (getf (cl-agent/core:message-metadata back) :reasoning-blocks)))))
 
 ;;; ============================================================
 ;;; 最后一层：写进 Anthropic 请求体
@@ -143,7 +143,7 @@
 (defun assistant-blocks-of (neutral-messages)
   "取 parse-messages-for-anthropic 产出的 assistant 消息 content 块类型列表，
 以及块本身"
-  (let* ((parsed (cl-agent.llm.providers::parse-messages-for-anthropic
+  (let* ((parsed (cl-agent/llm/providers::parse-messages-for-anthropic
                   neutral-messages))
          (msg (find "assistant" (getf parsed :messages)
                     :key (lambda (m) (gethash "role" m)) :test #'equal))
@@ -199,9 +199,9 @@
 这会直接坏在两处：temperature/top_p/top_k 在 Claude Opus 4.7 及以后
 （含 4.8）不受支持，设非默认值返回 400；且 Claude 4.1 Opus / 4.5 Sonnet
 起 temperature 与 top_p 不能同时指定，调用方一传 :top-p 就被连坐。"
-  (let* ((provider (cl-agent.llm.providers:make-anthropic-provider
+  (let* ((provider (cl-agent/llm/providers:make-anthropic-provider
                     :api-key "test-key" :model "claude-sonnet-4-20250514"))
-         (body (cl-agent.llm.providers::build-anthropic-request-body
+         (body (cl-agent/llm/providers::build-anthropic-request-body
                 provider
                 (list (list :role :user :content "hi"))
                 :max-tokens 1024)))
@@ -211,9 +211,9 @@
 
 (test temperature-sent-when-specified
   "显式指定 temperature 时正常下发"
-  (let* ((provider (cl-agent.llm.providers:make-anthropic-provider
+  (let* ((provider (cl-agent/llm/providers:make-anthropic-provider
                     :api-key "test-key" :model "claude-sonnet-4-20250514"))
-         (body (cl-agent.llm.providers::build-anthropic-request-body
+         (body (cl-agent/llm/providers::build-anthropic-request-body
                 provider
                 (list (list :role :user :content "hi"))
                 :max-tokens 1024
@@ -226,19 +226,19 @@
 
 (test llm-readme-accessors-are-exported
   "llm/README 的「llm-response 对象」一节列出的访问器必须真的从
-cl-agent.llm 导出。
+cl-agent/llm 导出。
 
-llm-response-reasoning 一直不在再导出列表里（cl-agent.core 导出了、
-cl-agent.chat 也导入了，唯独 cl-agent.llm 漏了），照文档写
-cl-agent.llm:llm-response-reasoning 会失败。"
+llm-response-reasoning 一直不在再导出列表里（cl-agent/core 导出了、
+cl-agent/chat 也导入了，唯独 cl-agent/llm 漏了），照文档写
+cl-agent/llm:llm-response-reasoning 会失败。"
   (dolist (name '("LLM-RESPONSE-CONTENT" "LLM-RESPONSE-TOOL-CALLS"
                   "LLM-RESPONSE-USAGE" "LLM-RESPONSE-MODEL"
                   "LLM-RESPONSE-FINISH-REASON" "LLM-RESPONSE-MESSAGE-ID"
                   "LLM-RESPONSE-REASONING" "LLM-RESPONSE-REASONING-BLOCKS"
                   "LLM-RESPONSE-RAW"
                   "RESPONSE-REASONING-CONTENT" "RESPONSE-COMPLETE-P"))
-    (multiple-value-bind (sym status) (find-symbol name :cl-agent.llm)
-      (is (eq :external status) "~A 未从 cl-agent.llm 导出" name)
+    (multiple-value-bind (sym status) (find-symbol name :cl-agent/llm)
+      (is (eq :external status) "~A 未从 cl-agent/llm 导出" name)
       (is (and sym (fboundp sym)) "~A 无定义" name))))
 
 (test llm-readme-finish-reason-table
@@ -251,49 +251,49 @@ README 此前写的是 (:stop, :tool-call, :length)——:length 是提供商侧
                  ("length" :max-tokens) ("max_tokens" :max-tokens)
                  ("content_filter" :content-filter)))
     (destructuring-bind (raw expected) row
-      (is (eq expected (cl-agent.core:normalize-finish-reason raw))
+      (is (eq expected (cl-agent/core:normalize-finish-reason raw))
           "~S 应归一为 ~S" raw expected))))
 
 ;;; ============================================================
-;;; 门面层重导出（cl-agent.llm ↔ cl-agent.llm.providers）
+;;; 门面层重导出（cl-agent/llm ↔ cl-agent/llm/providers）
 ;;; ============================================================
 
 (test facade-reexports-same-symbols
-  "cl-agent.llm 的 make-*-provider / response-complete-p 与
-cl-agent.llm.providers 必须是*同一符号*，不能各立一套。
+  "cl-agent/llm 的 make-*-provider / response-complete-p 与
+cl-agent/llm/providers 必须是*同一符号*，不能各立一套。
 
-此前是各立一套，后果：用户包 (:use :cl-agent.llm :cl-agent.llm.providers)
+此前是各立一套，后果：用户包 (:use :cl-agent/llm :cl-agent/llm/providers)
 会撞 name conflict，而这两个包本是「门面 + 实现」，理应能一起 use。"
   (dolist (name '("MAKE-ANTHROPIC-PROVIDER" "MAKE-OPENAI-PROVIDER"
                   "MAKE-OLLAMA-PROVIDER" "MAKE-ZHIPU-PROVIDER"
                   "MAKE-DASHSCOPE-PROVIDER" "RESPONSE-COMPLETE-P"))
-    (is (eq (find-symbol name :cl-agent.llm)
-            (find-symbol name :cl-agent.llm.providers))
+    (is (eq (find-symbol name :cl-agent/llm)
+            (find-symbol name :cl-agent/llm/providers))
         "~A 在两个包里不是同一符号" name)))
 
 (test facade-exports-are-all-fbound
-  "cl-agent.llm 导出的每个 make-*-provider 都必须真的有定义。
+  "cl-agent/llm 导出的每个 make-*-provider 都必须真的有定义。
 
 此前 make-dashscope-provider 只有导出、没有委托定义——门面层靠手工
 同步，加 provider 时漏了它，调用直接 UNDEFINED-FUNCTION。"
   (dolist (name '("MAKE-ANTHROPIC-PROVIDER" "MAKE-OPENAI-PROVIDER"
                   "MAKE-OLLAMA-PROVIDER" "MAKE-ZHIPU-PROVIDER"
                   "MAKE-DASHSCOPE-PROVIDER"))
-    (let ((sym (find-symbol name :cl-agent.llm)))
+    (let ((sym (find-symbol name :cl-agent/llm)))
       (is (and sym (fboundp sym)) "~A 导出了但没有定义" name))))
 
 (test response-complete-p-accepts-legacy-plist
   "统一后的 response-complete-p 是超集实现：llm-response + 旧式 plist +
-未知类型返回 NIL。此前 cl-agent.llm 那份只认 llm-response，传 plist 报错。"
-  (is (cl-agent.llm:response-complete-p
-       (cl-agent.core:make-llm-response :finish-reason :stop)))
-  (is (not (cl-agent.llm:response-complete-p
-            (cl-agent.core:make-llm-response :finish-reason :max-tokens))))
+未知类型返回 NIL。此前 cl-agent/llm 那份只认 llm-response，传 plist 报错。"
+  (is (cl-agent/llm:response-complete-p
+       (cl-agent/core:make-llm-response :finish-reason :stop)))
+  (is (not (cl-agent/llm:response-complete-p
+            (cl-agent/core:make-llm-response :finish-reason :max-tokens))))
   ;; 旧式 plist——旧实现在这里会报错
-  (is (cl-agent.llm:response-complete-p (list :finish-reason "stop")))
-  (is (not (cl-agent.llm:response-complete-p (list :finish-reason "length"))))
+  (is (cl-agent/llm:response-complete-p (list :finish-reason "stop")))
+  (is (not (cl-agent/llm:response-complete-p (list :finish-reason "length"))))
   ;; 未知类型不报错，返回 NIL
-  (is (not (cl-agent.llm:response-complete-p 42))))
+  (is (not (cl-agent/llm:response-complete-p 42))))
 
 (test make-client-does-not-default-temperature
   "make-client 不再把 temperature 默认成 0.7。
@@ -301,13 +301,13 @@ cl-agent.llm.providers 必须是*同一符号*，不能各立一套。
 client 层的取值链是 (or 调用点温度 (client-temperature client))——
 构造器默认 0.7 会让链上永远非 NIL，等于每次请求都注入 temperature=0.7，
 与 SPI 层那个默认值是同一个危害（Opus 4.7+ 直接 400）。"
-  (let ((client (cl-agent.llm:make-client
+  (let ((client (cl-agent/llm:make-client
                  :provider :anthropic :api-key "test-key")))
-    (is (null (cl-agent.llm:client-temperature client))))
+    (is (null (cl-agent/llm:client-temperature client))))
   ;; 显式指定仍然生效
-  (let ((client (cl-agent.llm:make-client
+  (let ((client (cl-agent/llm:make-client
                  :provider :anthropic :api-key "test-key" :temperature 0.3)))
-    (is (= 0.3 (cl-agent.llm:client-temperature client)))))
+    (is (= 0.3 (cl-agent/llm:client-temperature client)))))
 
 ;;; ============================================================
 ;;; thinking 一等参数（对标 ThinkingConfigParam）
@@ -315,10 +315,10 @@ client 层的取值链是 (or 调用点温度 (client-temperature client))——
 
 (defun thinking-body (spec &key (max-tokens 4096))
   "取 thinking 规格在请求体里的 wire 形态"
-  (let ((provider (cl-agent.llm.providers:make-anthropic-provider
+  (let ((provider (cl-agent/llm/providers:make-anthropic-provider
                    :api-key "test-key" :model "claude-sonnet-4-20250514")))
     (gethash "thinking"
-             (cl-agent.llm.providers::build-anthropic-request-body
+             (cl-agent/llm/providers::build-anthropic-request-body
               provider (list (list :role :user :content "hi"))
               :max-tokens max-tokens :thinking spec))))
 
@@ -348,9 +348,9 @@ client 层的取值链是 (or 调用点温度 (client-temperature client))——
 
 (test thinking-not-sent-when-unset
   "未设置 thinking 时请求体里不得出现该字段（存在才发送）"
-  (let* ((provider (cl-agent.llm.providers:make-anthropic-provider
+  (let* ((provider (cl-agent/llm/providers:make-anthropic-provider
                     :api-key "test-key" :model "claude-sonnet-4-20250514"))
-         (body (cl-agent.llm.providers::build-anthropic-request-body
+         (body (cl-agent/llm/providers::build-anthropic-request-body
                 provider (list (list :role :user :content "hi"))
                 :max-tokens 1024)))
     (is (not (nth-value 1 (gethash "thinking" body))))))
@@ -359,19 +359,19 @@ client 层的取值链是 (or 调用点温度 (client-temperature client))——
   "budget-tokens 的官方约束在构建请求时就报错，而不是发出去换一个裸 400：
 必须 ≥1024，且必须小于 max-tokens（思考计入 max-tokens）"
   ;; < 1024
-  (signals cl-agent.llm.providers:invalid-thinking-config-error
+  (signals cl-agent/llm/providers:invalid-thinking-config-error
     (thinking-body '(:enabled :budget-tokens 512)))
   ;; >= max-tokens
-  (signals cl-agent.llm.providers:invalid-thinking-config-error
+  (signals cl-agent/llm/providers:invalid-thinking-config-error
     (thinking-body '(:enabled :budget-tokens 4096) :max-tokens 4096))
   ;; 边界：1024 且 < max-tokens 合法
   (is (= 1024 (gethash "budget_tokens"
                        (thinking-body '(:enabled :budget-tokens 1024)))))
   ;; :enabled 缺预算
-  (signals cl-agent.llm.providers:invalid-thinking-config-error
+  (signals cl-agent/llm/providers:invalid-thinking-config-error
     (thinking-body :enabled))
   ;; 非法 display
-  (signals cl-agent.llm.providers:invalid-thinking-config-error
+  (signals cl-agent/llm/providers:invalid-thinking-config-error
     (thinking-body '(:adaptive :display :bogus))))
 
 (test thinking-hash-table-escape-hatch
@@ -383,24 +383,24 @@ client 层的取值链是 (or 调用点温度 (client-temperature client))——
 
 (test thinking-flows-from-chat-options
   "thinking 是 chat-options 的一等槽位，经 options->spi-args 下发到 provider"
-  (let ((options (cl-agent.core:make-chat-options
+  (let ((options (cl-agent/core:make-chat-options
                   :thinking '(:enabled :budget-tokens 2048))))
     (is (equal '(:enabled :budget-tokens 2048)
-               (cl-agent.core:chat-options-thinking options)))
+               (cl-agent/core:chat-options-thinking options)))
     ;; 未设置时读出 NIL（保持「未设置」语义）
-    (is (null (cl-agent.core:chat-options-thinking
-               (cl-agent.core:make-chat-options :temperature 0.3))))))
+    (is (null (cl-agent/core:chat-options-thinking
+               (cl-agent/core:make-chat-options :temperature 0.3))))))
 
 (test thinking-merge-semantics
   "thinking 参与 merge-chat-options 的运行时 > 默认覆盖链"
-  (let* ((defaults (cl-agent.core:make-chat-options :thinking :disabled))
-         (runtime (cl-agent.core:make-chat-options
+  (let* ((defaults (cl-agent/core:make-chat-options :thinking :disabled))
+         (runtime (cl-agent/core:make-chat-options
                    :thinking '(:enabled :budget-tokens 2048)))
-         (merged (cl-agent.core:merge-chat-options runtime defaults)))
+         (merged (cl-agent/core:merge-chat-options runtime defaults)))
     (is (equal '(:enabled :budget-tokens 2048)
-               (cl-agent.core:chat-options-thinking merged))))
+               (cl-agent/core:chat-options-thinking merged))))
   ;; 运行时未设置 → 沿用默认
-  (let ((merged (cl-agent.core:merge-chat-options
-                 (cl-agent.core:make-chat-options :temperature 0.3)
-                 (cl-agent.core:make-chat-options :thinking :disabled))))
-    (is (eq :disabled (cl-agent.core:chat-options-thinking merged)))))
+  (let ((merged (cl-agent/core:merge-chat-options
+                 (cl-agent/core:make-chat-options :temperature 0.3)
+                 (cl-agent/core:make-chat-options :thinking :disabled))))
+    (is (eq :disabled (cl-agent/core:chat-options-thinking merged)))))
