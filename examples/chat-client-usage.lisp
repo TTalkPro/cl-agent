@@ -189,7 +189,8 @@
 
 (defun example-8 ()
   "流式回调。注意：当前为同步降级——整段文本作为单个 chunk 回调一次。
-真正的增量流式需要 chat-client 的 invoke-chat-stream（尚未实现）。"
+真正的增量流式用 cl-agent/core:invoke-chat-stream——:chat filter 链照常
+生效，:token-xform 管道组装在流式 terminal 内侧。"
   (let ((k (build-chat-client :model *model*)))
     (chat k
       (:user "写一首关于 Lisp 的短诗")

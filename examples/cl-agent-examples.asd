@@ -1,7 +1,7 @@
 ;;;; cl-agent-examples.asd
 ;;;; CL-Agent Examples - 使用示例和演示
 ;;;;
-;;;; Version: 1.0.0
+;;;; Version: 11.0.0
 ;;;; Author: David
 ;;;;
 ;;;; Overview:
@@ -16,7 +16,7 @@
   :description "CL-Agent Examples - Usage Examples and Demos"
   :author "David"
   :license "MIT"
-  :version "1.0.0"
+  :version "11.0.0"
 
   :depends-on (#:cl-agent-core)
 
