@@ -11,8 +11,6 @@
 - **Kernel + Filter**（`cl-agent/core`）：`chat` 宏 / `kernel-chat` →
   `cl-agent/core:invoke-turn` 三链。前者是后者的薄封装。
 
-Advisor 与 ChatClient 两层移植物均已整体退役，见文末[迁移指引](#迁移)。
-
 ## 包与 :use
 
 现在只有这几个包：
@@ -300,7 +298,7 @@ invoke-turn → [:turn filters] → run-tool-loop
                         internal-time-units-per-second))))))
 ```
 
-### defilter 宏（对标 `defadvisor`，但无泛型分发）
+### defilter 宏
 
 ```lisp
 (defilter 名称 (槽定义...)
@@ -333,8 +331,7 @@ invoke-turn → [:turn filters] → run-tool-loop
 `reverse` + `reduce` 把钩子层层嵌套。每层闭包**只持有更内层的引用**——不可能
 重跑上游，递归重入是免费性质。
 
-> **filters 列表顺序即洋葱层级：靠前 = 靠外 = 先执行。** filter 没有 order 字段
-> （对比 Advisor 时代的 `+*-advisor-order+` 常量：那套东西连同 Advisor 一起没了）。
+> **filters 列表顺序即洋葱层级：靠前 = 靠外 = 先执行。** filter 没有 order 字段。
 
 ### 三链载体
 
@@ -565,8 +562,6 @@ resume 时重新提供；本类只装「续跑所需的数据」。
 - `(:conversation id)` ≡ `(:context :conversation-id id)`，`memory-filter` 读它。
 - `(:options ...)` 单个非关键字实参视为现成的 `chat-options` 实例，否则透传给
   `make-chat-options`。
-- `(:advisors ...)` 已移除：写了会在**宏展开期直接报错**并给出迁移指引
-  （不是静默忽略——若被悄悄丢掉，记忆/护栏会无声失效）。
 
 ```lisp
 (chat *kernel*
@@ -1045,31 +1040,6 @@ fluent RequestSpec 移植。Builder 与链式 spec 是 Java 的表达习惯：�
 | `default-options` (Builder) | `build-kernel :options`（请求级 `(:options ...)` 合并覆盖） |
 | `default-system` (Builder) | `build-kernel :system`（请求级 `(:system ...)` 覆盖） |
 | `client-request` / `client-response` / `context-get` / `context-set` | `turn-request` / `turn-result` + `turn-request-context`（plist） |
-
-### 从 Advisor 迁移
-
-Advisor 体系已整体删除。以下符号**不再存在**：`defadvisor`、`advise-call`、
-`advise-stream`、`advisor-chain`、`make-advisor-chain`、`chain-next`、
-`chain-next-stream`、`memory-advisor-p`、`simple-logger-advisor`、
-`message-chat-memory-advisor`、`safe-guard-advisor`、`tool-calling-advisor`、
-`tool-search-tool-calling-advisor`、`structured-output-validation-advisor`
-及其 `make-*` 构造函数、`+conversation-id-key+`、全部 `+*-advisor-order+` 常量、
-`default-advisors`、`prompt-advisors`、`client-default-advisors`。
-`(chat kernel (:advisors ...))` 直接报错并给出迁移指引。
-
-| 旧（Advisor） | 新（Filter） |
-|---|---|
-| `:advisors (list ...)` | `build-kernel :filters (list ...)` |
-| `(defadvisor ... (:call (a req chain) ...))` | `(defilter ... (:turn (self req chain) ...))` |
-| `(chain-next chain req)` | `(funcall chain req)` |
-| `advisor-order`（越小越靠外） | filters 列表位置（越靠前越靠外） |
-| `make-simple-logger-advisor` | `logging-chat-filter` / `logging-tool-filter` |
-| `make-safe-guard-advisor` | `safeguard-turn-filter` |
-| `make-message-chat-memory-advisor` | `memory-filter`（`:chat` 链，循环内每轮生效） |
-| `make-tool-calling-advisor` | `run-tool-loop`（`:turn` 链 terminal，无需注册） |
-| `make-structured-output-validation-advisor` | `validation-turn-filter` + `structured-output-validate-fn` |
-| `make-tool-search-tool-calling-advisor` | `tool-search-filter` |
-| `+tool-calling-advisor-order+` 内外之分 | `:chat` 链天然在循环内、`:turn` 链天然在循环外 |
 
 ### 从 kernel:tool-response 迁移（载体改名）
 

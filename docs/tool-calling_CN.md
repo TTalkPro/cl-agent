@@ -45,13 +45,10 @@ terminal 不等于写死：`build-kernel :loop-fn` 可整体替换它，换一�
 命名注意：Spring AI 2.0 的一个 breaking change 是把 1.1.x 的 `ToolCallAdvisor`
 **重命名为** `ToolCallingAdvisor`。查 1.1.x 的 javadoc 会看到旧名。
 
-> **cl-agent 的 Advisor 与 ChatClient 两层移植物均已退役。**
-> `defadvisor` / `advise-call` / `chain-next` / `tool-calling-advisor` /
-> `+*-advisor-order+` 等符号已整体删除；ChatClient 移植层（ChatClient /
-> Builder / fluent RequestSpec）亦已删除（`cl-agent/client` 这个**包名被复用**
-> 了：现在是 SimpleAgent）。我们用 kernel + filter 三链表达
-> Spring 的 Advisor 语义：`:advisors (list ...)` →
-> `build-kernel :filters (list ...)`；入口则是 `build-kernel` + `chat` 宏。
+> **cl-agent 的 ChatClient 移植层已退役**（ChatClient / Builder / fluent
+> RequestSpec 均已删除，`cl-agent/client` 这个**包名被复用**了：现在是
+> SimpleAgent）。我们用 kernel + filter 三链表达 Spring 的 Advisor 语义，
+> 经 `build-kernel :filters (list ...)` 注册。
 > 因此下文的「advisor」一律指 Spring 侧的组件，「kernel 路径」指
 > `build-kernel` → `chat` → `invoke-turn` 这条唯一执行路径。
 

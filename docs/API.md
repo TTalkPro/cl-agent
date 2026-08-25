@@ -13,9 +13,6 @@ Two entry points:
   `cl-agent/core:invoke-turn` tri-chain. The former is a thin wrapper over the
   latter.
 
-Both Spring AI porting layers — Advisor and ChatClient — are retired entirely;
-see [Migration](#migration).
-
 ## Packages and `:use`
 
 These are all the packages there are:
@@ -314,7 +311,7 @@ building the corresponding chain — one filter may serve several chains, or jus
                         internal-time-units-per-second))))))
 ```
 
-### defilter macro (mirrors `defadvisor`, minus the generic dispatch)
+### defilter macro
 
 ```lisp
 (defilter name (slot-defs...)
@@ -350,8 +347,7 @@ building the corresponding chain — one filter may serve several chains, or jus
 downstream** — upstream can never be re-run, and recursive re-entry is free.
 
 > **The filters list order IS the onion order: earlier = outer = runs first.**
-> Filters have no order field (contrast the Advisor era's `+*-advisor-order+`
-> constants — those are gone along with the advisors).
+> Filters have no order field.
 
 ### Chain carriers
 
@@ -598,9 +594,6 @@ Terminal operations:
 - `(:options ...)` with a single non-keyword argument is treated as a ready-made
   `chat-options` instance; otherwise the arguments pass through to
   `make-chat-options`.
-- `(:advisors ...)` is gone: using it is a **macroexpansion-time error** carrying
-  migration guidance (not a silent no-op — silently dropping it would make
-  memory/guardrails fail quietly).
 
 ```lisp
 (chat *kernel*
@@ -1124,32 +1117,6 @@ ChatClient usage), use
 | `default-options` (Builder) | `build-kernel :options` (request-level `(:options ...)` merges over it) |
 | `default-system` (Builder) | `build-kernel :system` (request-level `(:system ...)` overrides it) |
 | `client-request` / `client-response` / `context-get` / `context-set` | `turn-request` / `turn-result` + `turn-request-context` (a plist) |
-
-### Migrating from Advisors
-
-The Advisor system was removed wholesale. These symbols **no longer exist**:
-`defadvisor`, `advise-call`, `advise-stream`, `advisor-chain`,
-`make-advisor-chain`, `chain-next`, `chain-next-stream`, `memory-advisor-p`,
-`simple-logger-advisor`, `message-chat-memory-advisor`, `safe-guard-advisor`,
-`tool-calling-advisor`, `tool-search-tool-calling-advisor`,
-`structured-output-validation-advisor` and their `make-*` constructors,
-`+conversation-id-key+`, every `+*-advisor-order+` constant, `default-advisors`,
-`prompt-advisors`, `client-default-advisors`. `(chat kernel (:advisors ...))`
-signals an error carrying migration guidance.
-
-| Old (Advisor) | New (Filter) |
-|---|---|
-| `:advisors (list ...)` | `build-kernel :filters (list ...)` |
-| `(defadvisor ... (:call (a req chain) ...))` | `(defilter ... (:turn (self req chain) ...))` |
-| `(chain-next chain req)` | `(funcall chain req)` |
-| `advisor-order` (lower = outer) | position in the filters list (earlier = outer) |
-| `make-simple-logger-advisor` | `logging-chat-filter` / `logging-tool-filter` |
-| `make-safe-guard-advisor` | `safeguard-turn-filter` |
-| `make-message-chat-memory-advisor` | `memory-filter` (`:chat` chain, every loop iteration) |
-| `make-tool-calling-advisor` | `run-tool-loop` (`:turn` chain terminal; nothing to register) |
-| `make-structured-output-validation-advisor` | `validation-turn-filter` + `structured-output-validate-fn` |
-| `make-tool-search-tool-calling-advisor` | `tool-search-filter` |
-| inside/outside the loop via `+tool-calling-advisor-order+` | the `:chat` chain is inherently inside the loop, the `:turn` chain inherently outside |
 
 ### Migrating from `kernel:tool-response` (carrier rename)
 

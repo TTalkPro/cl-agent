@@ -51,14 +51,11 @@ A naming note: one of Spring AI 2.0's breaking changes renamed 1.1.x's
 `ToolCallAdvisor` to `ToolCallingAdvisor`. The 1.1.x javadoc still shows the
 old name.
 
-> **Both of cl-agent's Spring AI porting layers are retired.** `defadvisor` /
-> `advise-call` / `chain-next` / `tool-calling-advisor` / the
-> `+*-advisor-order+` constants are all gone, and so is the ChatClient porting
-> layer (ChatClient / Builder / fluent RequestSpec) — note the package name
-> `cl-agent/client` has been **reused** and is now SimpleAgent.
-> Spring's Advisor semantics are expressed here with the kernel + filter
-> tri-chain: `:advisors (list ...)` → `build-kernel :filters (list ...)`; the
-> entry point is `build-kernel` + the `chat` macro.
+> **cl-agent's ChatClient porting layer is retired** (ChatClient / Builder /
+> fluent RequestSpec) — note the package name `cl-agent/client` has been
+> **reused** and is now SimpleAgent. Spring's Advisor semantics are expressed
+> here with the kernel + filter tri-chain, registered via
+> `build-kernel :filters (list ...)`.
 > "Advisor" below therefore always refers to the Spring-side component, and
 > "the kernel path" means the one execution path:
 > `build-kernel` → `chat` → `invoke-turn`.

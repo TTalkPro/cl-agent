@@ -50,7 +50,6 @@ with this release; the table below is canonical.
 |---|---|
 | `cl-agent/http:*`, `cl-agent/chat:*`, `cl-agent/kernel:*` | `cl-agent/core:*` (single package) |
 | `cl-agent/kernel:build-kernel`, `deftool`, `http-request`, `tool-response` | `cl-agent/core:build-kernel`, `cl-agent/core:deftool`, `cl-agent/core:http-request`, `cl-agent/core:tool-result` |
-| `defadvisor` / `(:advisors ...)` | `make-filter` / `defilter` + `:filters` |
 | `make-chat-client` / `chat-client-builder` | `build-kernel` (preferred for power) **or** `cl-agent/client:make-agent` (recommended for apps) |
 | `cl-agent/kernel:run-tool-loop` | `cl-agent/core:run-tool-loop` (exposed if you built a custom executor) |
 | `cl-agent/llm:chat` | `cl-agent/llm:client-chat` (low-level SPI; most users did not import this) |
@@ -147,8 +146,8 @@ required.
 - **Documentation rewritten**: top-level `README` / `docs/QUICKSTART` /
   `docs/API` / `docs/tool-calling` now lead with `SimpleAgent` (the
   recommended entry point) and demote `kernel + filter` to "Full control".
-  Migration tables cover `Advisor → Filter`, `ChatClient → Kernel / Agent`,
-  and the package consolidation.
+  Migration tables cover `ChatClient → Kernel / Agent` and the package
+  consolidation.
 - **Test system renamed**: secondary system `cl-agent-test` →
   `cl-agent/test` (ASDF convention; ASDF no longer warns about
   non-existent parent system).

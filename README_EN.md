@@ -12,8 +12,8 @@ An AI Agent framework for Common Lisp. Two ways to use it — pick per need:
 
 Capabilities track Spring AI 2.0 and the architecture follows clj-agent
 (the Clojure kernel+filter implementation), but it does not copy Java's idioms —
-ChatClient, Builder, the fluent RequestSpec and the Advisor chain are all
-retired (see the migration note at the end).
+ChatClient, Builder and the fluent RequestSpec are not used here (see the
+migration note at the end).
 
 ## Features
 
@@ -327,20 +327,8 @@ MINIMAX_API_KEY=... sbcl --script scripts/live-test.lisp
 
 ## Migration Notes
 
-Both Spring AI porting layers are retired wholesale, and the package structure
+The ChatClient porting layer is retired wholesale, and the package structure
 has been through a round of merging.
-
-**Advisor → Filter**
-
-| Old | New |
-|---|---|
-| `defadvisor` / `advise-call` / `chain-next` | `make-filter` / `defilter` + `build-chain` tri-chain |
-| `:advisors (list ...)` | `build-kernel :filters (list ...)` |
-| `message-chat-memory-advisor` | `memory-filter` |
-| `safe-guard-advisor` | `safeguard-turn-filter` |
-| `structured-output-validation-advisor` | `validation-turn-filter` |
-| `tool-search-tool-calling-advisor` | `tool-search-filter` |
-| `tool-calling-advisor` | `run-tool-loop` (terminal of the `:turn` chain, not a filter) |
 
 **ChatClient → Kernel / SimpleAgent**
 

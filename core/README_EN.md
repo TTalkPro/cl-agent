@@ -96,11 +96,10 @@ core/
   executed**; `run-tool-loop` returns `turn-result(:paused)` carrying a
   `loop-state` snapshot, and `resume-turn` continues from that midpoint once
   approved.
-- **Both Spring AI porting layers are retired**: the `defadvisor` /
-  `advise-call` / `order` system, and the old ChatClient / Builder / fluent
-  RequestSpec. Kernel + filter is the sole execution path; the entry point is
-  `build-kernel`'s keyword args plus the `chat` macro. (The name
-  `cl-agent/client` has been **reused**: it is now SimpleAgent.)
+- **The ChatClient porting layer is retired**: the old ChatClient / Builder /
+  fluent RequestSpec are all gone. Kernel + filter is the sole execution path;
+  the entry point is `build-kernel`'s keyword args plus the `chat` macro. (The
+  name `cl-agent/client` has been **reused**: it is now SimpleAgent.)
 - **The merge eliminated all shadowing**: `cl-agent/chat` and `cl-agent/kernel`
   used to share three exported names: `tool-response` / `make-tool-response`
   (chat's is the protocol-level "tool response" value object with id/name/text;

@@ -9,8 +9,8 @@
 - **Kernel + Filter**（完全控制）：三链洋葱中间件 + 工具循环，想拧哪个旋钮拧哪个。
 
 能力对标 Spring AI 2.0，架构参照 clj-agent（Clojure 的 kernel+filter 实现），
-但不照搬 Java 的表达习惯——ChatClient、Builder、fluent RequestSpec、Advisor 链
-都已退役（见文末迁移说明）。
+但不照搬 Java 的表达习惯——ChatClient、Builder、fluent RequestSpec 一概不用
+（见文末迁移说明）。
 
 ## 特性
 
@@ -303,19 +303,7 @@ MINIMAX_API_KEY=... sbcl --script scripts/live-test.lisp
 
 ## 迁移说明
 
-Spring AI 的两大移植层已整体退役，包结构也做过一轮合并。
-
-**Advisor → Filter**
-
-| 旧 | 新 |
-|---|---|
-| `defadvisor` / `advise-call` / `chain-next` | `make-filter` / `defilter` + `build-chain` 三链 |
-| `:advisors (list ...)` | `build-kernel :filters (list ...)` |
-| `message-chat-memory-advisor` | `memory-filter` |
-| `safe-guard-advisor` | `safeguard-turn-filter` |
-| `structured-output-validation-advisor` | `validation-turn-filter` |
-| `tool-search-tool-calling-advisor` | `tool-search-filter` |
-| `tool-calling-advisor` | `run-tool-loop`（`:turn` 链终端，非 filter） |
+ChatClient 移植层已整体退役，包结构也做过一轮合并。
 
 **ChatClient → Kernel / SimpleAgent**
 

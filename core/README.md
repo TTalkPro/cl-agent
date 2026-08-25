@@ -93,9 +93,9 @@ core/
   暂停，**工具一个都不执行**，`run-tool-loop` 返回
   `turn-result(:paused)`，携带 `loop-state` 快照；审批后
   `resume-turn` 从中点续跑。
-- **Spring AI 的两层移植都已退役**：`defadvisor` / `advise-call` / `order`
-  排序体系，以及旧的 ChatClient / Builder / fluent RequestSpec。执行路径
-  唯一为 kernel + filter，入口是 `build-kernel` 的关键字参数 + `chat` 宏。
+- **ChatClient 移植层已退役**：旧的 ChatClient / Builder / fluent
+  RequestSpec 全部移除。执行路径唯一为 kernel + filter，入口是
+  `build-kernel` 的关键字参数 + `chat` 宏。
   （`cl-agent/client` 这个名字已被**复用**：现在是 SimpleAgent。）
 - **包合并消除了所有 shadowing**：曾经 `cl-agent/chat` 与
   `cl-agent/kernel` 有三个同名导出：`tool-response` / `make-tool-response`
