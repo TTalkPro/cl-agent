@@ -33,22 +33,22 @@
            (labels ((try (attempt req)
                       (let ((result (funcall chain req)))
                         ;; 暂停/取消/错误 → 透传
-                        (if (member (turn-result-status result) '(:paused :cancelled :error))
+                        (if (member (chat-client-response-status result) '(:paused :cancelled :error))
                             result
                             ;; 正常完成 → 校验
                             (multiple-value-bind (ok feedback)
-                                (funcall validate-fn (turn-result-response result))
+                                (funcall validate-fn (chat-client-response-chat-response result))
                               (if ok
                                   result
                                   (if (>= attempt max-retries)
                                       result  ; 耗尽重试，原样返回
                                       ;; 重入：把 feedback 追加到 messages
                                       (try (1+ attempt)
-                                           (make-turn-request
-                                            (append (turn-request-messages req)
-                                                    (list (cl-agent/core:user-message feedback)))
-                                            :context (turn-request-context req)
-                                            :resume-p (turn-request-resume-p req))))))))))
+                                           (chat-client-request-mutate
+                                            req
+                                            :messages
+                                            (append (chat-client-request-messages req)
+                                                    (list (cl-agent/core:user-message feedback))))))))))))
              (try 0 req)))))
 
 ;;; ============================================================

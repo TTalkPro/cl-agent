@@ -39,6 +39,7 @@
                    (setf timed-out t))))
              (if timed-out
                  (make-tool-result
-                  :error (list :class :transient
-                               :message (format nil "工具执行超时（~Ams）" milliseconds)))
+                  :error (make-tool-error-info
+                          :class :transient
+                          :message (format nil "工具执行超时（~Ams）" milliseconds)))
                  (car result-box))))))
