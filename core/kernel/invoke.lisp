@@ -3,12 +3,14 @@
 ;;;;
 ;;;; 概述（Phase P2）：
 ;;;;   三链 invoke 原语让 kernel 活起来——连接 ChatModel 和工具执行。
-;;;;   run-tool-loop 是 :turn 链的 terminal（不是 filter）。
+;;;;   run-tool-loop 是 :turn 链的 terminal（不是 filter），可经
+;;;;   build-kernel 的 :loop-fn 整体替换。
 ;;;;
 ;;;;   三链组装点：
 ;;;;   - invoke-chat  → build-chain(:chat) → terminal = chat-model-call
 ;;;;   - invoke-tool  → build-chain(:tool) → terminal = tool-callback-call
-;;;;   - invoke-turn  → build-chain(:turn) → terminal = run-tool-loop
+;;;;   - invoke-turn  → build-chain(:turn) → terminal = loop-fn
+;;;;                    （缺省 run-tool-loop）
 ;;;;
 ;;;;   循环数据流：
 ;;;;     invoke-turn → [turn filters] → run-tool-loop
@@ -264,7 +266,8 @@ some+filter 那种两阶段扫描。"
    (tool-results->responses tool-results tool-calls)))
 
 (defun run-tool-loop (kernel turn-request)
-  "工具调用循环。不是 filter——是 :turn 链的 terminal。
+  "工具调用循环。不是 filter——是 :turn 链的**缺省** terminal
+（经 build-kernel 的 :loop-fn 可整体替换）。
 
   每轮：
   1. 构建 prompt（messages + tools）
@@ -550,6 +553,23 @@ some+filter 那种两阶段扫描。"
                         (fold-context-into-tool-context options context)
                         context (1+ iteration)))))))
 
+;;; ============================================================
+;;; 循环实现的解析：loop-fn / resume-fn
+;;; ============================================================
+;;;
+;;; 缺省值不能写进 kernel 的 initform——kernel.lisp 先于本文件加载，
+;;; 那时 run-tool-loop / %resume-continuation 还不存在。故在调用点兜底。
+
+(defun kernel-loop-function (kernel)
+  "本 kernel 的工具循环实现：(kernel turn-request) → turn-result。
+缺省 run-tool-loop。"
+  (or (kernel-loop-fn kernel) #'run-tool-loop))
+
+(defun kernel-resume-function (kernel)
+  "本 kernel 的暂停延续实现：(kernel loop-state decision payload) → turn-result。
+缺省 %resume-continuation（配套 run-tool-loop）。"
+  (or (kernel-resume-fn kernel) #'%resume-continuation))
+
 (defun resume-turn (kernel loop-state decision &key payload)
   "从暂停点续跑工具循环。
 
@@ -575,9 +595,10 @@ some+filter 那种两阶段扫描。"
          (terminal (lambda (req)
                      (if (not consumed)
                          (progn (setf consumed t)
-                                (%resume-continuation kernel loop-state decision payload))
+                                (funcall (kernel-resume-function kernel)
+                                         kernel loop-state decision payload))
                          ;; turn filter 递归重入 → 走常规循环（新 delta）
-                         (run-tool-loop kernel req))))
+                         (funcall (kernel-loop-function kernel) kernel req))))
          (chain (build-chain (kernel-filters kernel) #'filter-turn-hook terminal)))
     (funcall chain (make-turn-request nil :context context :resume-p t))))
 
@@ -588,7 +609,8 @@ some+filter 那种两阶段扫描。"
 (defun invoke-turn (kernel turn-request)
   "经 :turn filter 链执行一轮对话。
 
-  :turn 链包住 run-tool-loop（terminal）。turn filter 可：
+  :turn 链包住 terminal（缺省 run-tool-loop，可由 kernel 的 :loop-fn
+  替换）。turn filter 可：
   - 改写入口 messages（RAG 注入、re-reading）
   - 短路（safeguard 拦截）
   - 递归重入（validation 校验失败 → 再调 chain）
@@ -596,5 +618,6 @@ some+filter 那种两阶段扫描。"
   :turn filter 钩子签名：(turn-request chain) → turn-result"
   (let ((chain (build-chain (kernel-filters kernel)
                             #'filter-turn-hook
-                            (lambda (req) (run-tool-loop kernel req)))))
+                            (lambda (req)
+                              (funcall (kernel-loop-function kernel) kernel req)))))
     (funcall chain turn-request)))

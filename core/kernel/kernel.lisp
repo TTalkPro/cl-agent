@@ -84,9 +84,33 @@ last-writer——后写覆盖，按 tool-call 原始序确定，与并行执行�
 
 在**批执行之前**对本批每个 tool-call 恰好评估一次；任一判 :pause 则整轮
 暂停（工具一个都不执行），run-tool-loop 返回 turn-result(:paused)，
-调用方审批后用 resume-turn 续跑。"))
+调用方审批后用 resume-turn 续跑。")
+   (loop-fn
+    :initarg :loop-fn
+    :initform nil
+    :reader kernel-loop-fn
+    :documentation "工具循环实现：(kernel turn-request) → turn-result。
+nil（缺省）= run-tool-loop。
+
+它是 :turn 链的 terminal——换掉它就是换掉整个循环骨架（ReAct、
+plan-execute 等），而 :turn 链的 filter 完全无感、照常环绕。
+契约与 run-tool-loop 同形。
+
+自定义循环若要支持 HITL 暂停，必须**同时**提供 resume-fn：
+它自己定义暂停快照长什么样，默认的 %resume-continuation 读不懂。
+不提供也没关系——不产生 turn-result(:paused) 就永远走不到 resume。")
+   (resume-fn
+    :initarg :resume-fn
+    :initform nil
+    :reader kernel-resume-fn
+    :documentation "暂停延续实现：(kernel loop-state decision payload) → turn-result。
+nil（缺省）= 内建的 %resume-continuation（配套 run-tool-loop）。
+
+与 loop-fn 成对：换了循环就连它的暂停延续一起换。resume-turn 把它装在
+:turn 链的 terminal 第一次调用处，之后的 filter 递归重入走 loop-fn。"))
   (:documentation "Kernel 聚合（model/tools/filters/settings/tool-manager +
-默认 system/options）——无 memory（记忆是 memory-filter 的事）。"))
+默认 system/options + loop-fn/resume-fn）——无 memory（记忆是 memory-filter
+的事）。"))
 
 (defmethod print-object ((kernel kernel) stream)
   (print-unreadable-object (kernel stream :type t)
@@ -99,7 +123,7 @@ last-writer——后写覆盖，按 tool-call 原始序确定，与并行执行�
 ;;; =========================================================;;;
 
 (defun build-kernel (&key model tools filters eligibility-fn settings tool-manager
-                          system options tool-gate state-slots)
+                          system options tool-gate state-slots loop-fn resume-fn)
   "构建 Kernel 实例。
 
 参数：
@@ -118,6 +142,12 @@ last-writer——后写覆盖，按 tool-call 原始序确定，与并行执行�
                    用 resume-turn 续跑
   - state-slots    状态槽声明 ((key :init v0 :reduce fn) ...)——工具批次
                    :writes 的合并语义（未声明的槽 last-writer，按 call 序）
+  - loop-fn        自定义工具循环 (kernel turn-request) → turn-result；
+                   nil（缺省）= run-tool-loop。它是 :turn 链的 terminal，
+                   换掉它即换掉循环骨架，:turn filter 照常环绕
+  - resume-fn      自定义暂停延续 (kernel loop-state decision payload)
+                   → turn-result；nil（缺省）= 内建实现。与 loop-fn 成对：
+                   自定义循环要支持 HITL 就必须两个一起给
 
 返回值：kernel 实例。
 
@@ -137,4 +167,6 @@ last-writer——后写覆盖，按 tool-call 原始序确定，与并行执行�
                  :system system
                  :options options
                  :tool-gate tool-gate
-                 :state-slots state-slots))
+                 :state-slots state-slots
+                 :loop-fn loop-fn
+                 :resume-fn resume-fn))

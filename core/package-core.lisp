@@ -598,6 +598,8 @@
     #:kernel-default-options
     #:kernel-tool-gate
     #:kernel-state-slots
+    #:kernel-loop-fn
+    #:kernel-resume-fn
 
     ;; ==================== ToolCallingManager ====================
     #:tool-calling-manager
