@@ -89,13 +89,13 @@
 ;;; 检查项
 ;;; ============================================================
 
-(deflive check-single-turn "[1/11] 单次问答"
+(deflive check-single-turn "[1/13] 单次问答"
   (let* ((k (build-chat-client :model *model*))
          (text (chat k (:user "只回答一个词，不要标点：法国的首都是？"))))
     (values (and (stringp text) (search "巴黎" text))
             (string-trim '(#\Space #\Newline) text))))
 
-(deflive check-tool-loop "[2/11] 真实工具循环（模型自主决定调用）"
+(deflive check-tool-loop "[2/13] 真实工具循环（模型自主决定调用）"
   (let ((*tool-hits* 0))
     (let* ((k (build-chat-client :model *model* :tools '(live-counted-weather)))
            (text (chat k
@@ -105,7 +105,7 @@
       (values (and (> *tool-hits* 0) (search "22" text))
               (format nil "工具被调用 ~A 次" *tool-hits*)))))
 
-(deflive check-memory-multi-turn "[3/11] memory-filter 多轮记忆"
+(deflive check-memory-multi-turn "[3/13] memory-filter 多轮记忆"
   (let* ((mem (make-message-window-chat-memory))
          (k (build-chat-client :model *model* :filters (list (memory-filter mem)))))
     (chat k (:user "记住：我的幸运数字是 42。") (:conversation "live-1"))
@@ -117,7 +117,7 @@
                       (length (memory-messages mem "live-1"))
                       (string-trim '(#\Space #\Newline) text))))))
 
-(deflive check-structured-output "[4/11] 结构化输出 + schema 校验"
+(deflive check-structured-output "[4/13] 结构化输出 + schema 校验"
   (let* ((schema "{\"type\":\"object\",
                    \"properties\":{\"name\":{\"type\":\"string\"},
                                   \"population\":{\"type\":\"integer\"}},
@@ -154,7 +154,7 @@
                       (when (string= n "live_rm_file")
                         (cons :interrupt (format nil "删除 ~A 需审批" (getf args :path))))))))
 
-(deflive check-hitl-pause "[5/11] HITL 暂停（工具不得执行）"
+(deflive check-hitl-pause "[5/13] HITL 暂停（工具不得执行）"
   (let ((*hitl-fired* nil))
     (let* ((a (make-hitl-agent))
            (r (cl-agent/client:agent-chat-result a "删除 /tmp/report.log")))
@@ -165,7 +165,7 @@
                       (cl-agent/client:agent-result-status r)
                       (if *hitl-fired* "是（BUG）" "否"))))))
 
-(deflive check-hitl-approve "[6/11] HITL :approved → 执行并续跑"
+(deflive check-hitl-approve "[6/13] HITL :approved → 执行并续跑"
   (let ((*hitl-fired* nil))
     (let ((a (make-hitl-agent)))
       (cl-agent/client:agent-chat-result a "删除 /tmp/report.log")
@@ -174,7 +174,7 @@
                      (equal *hitl-fired* "/tmp/report.log"))
                 (format nil "已删除=~S" *hitl-fired*))))))
 
-(deflive check-hitl-reject "[7/11] HITL :rejected → 不执行，理由回模型"
+(deflive check-hitl-reject "[7/13] HITL :rejected → 不执行，理由回模型"
   (let ((*hitl-fired* nil))
     (let ((a (make-hitl-agent)))
       (cl-agent/client:agent-chat-result a "删除 /tmp/prod.db")
@@ -198,7 +198,7 @@
 (defparameter +disclosure-tools+
   '(live-lookup-weather live-send-sms live-query-db live-make-image live-read-file))
 
-(deflive check-tool-search "[8/11] 渐进式工具披露（首轮只暴露 search_tools）"
+(deflive check-tool-search "[8/13] 渐进式工具披露（首轮只暴露 search_tools）"
   (let ((rounds nil))
     (let* ((counter (make-filter
                      :count
@@ -221,7 +221,7 @@
                 (format nil "每轮暴露 ~S（共 ~D 个工具）"
                         counts (length +disclosure-tools+)))))))
 
-(deflive check-stream-token-xform "[9/11] 流式 + :token-xform 脱敏"
+(deflive check-stream-token-xform "[9/13] 流式 + :token-xform 脱敏"
   (let ((chunks nil))
     (chat-client-stream
      (build-chat-client :model *model*
@@ -233,7 +233,7 @@
       (values (and chunks (not (search "北京" full)))
               (format nil "~D 片，输出=~S" (length chunks) full)))))
 
-(deflive check-streaming "[10/11] 真实 SSE 流式（chat-model-stream）"
+(deflive check-streaming "[10/13] 真实 SSE 流式（chat-model-stream）"
   ;; 提示要够长才能可靠地分片——「数到 5」这种模型一口就吐完了，
   ;; 断言 >1 分片会假失败（问的是回答长度，不是流式实现）。
   (let ((chunks nil))
@@ -254,22 +254,59 @@
   (values (format nil "已记录：~A" text)
           (list :notes (list text))))
 
-(deflive check-writes-fold "[11/11] :writes + :state-slots（真模型驱动折叠）"
+(deflive check-writes-fold "[11/13] :writes + :state-slots（真模型驱动折叠）"
   (let* ((k (build-chat-client
              :model *model*
              :tools '(live-note)
-             :state-slots (list (list :notes :init nil
-                                      :reduce (lambda (old new)
-                                                (append old new))))))
+             :state-slots (list (make-state-slot
+                                 :notes :init nil
+                                 :reduce-fn (lambda (old new)
+                                              (append old new))))))
          (result (chat-client-call k
                   :system "用户给你的每条信息都必须用 live_note 工具记录。"
                   :user "帮我记两条信息：第一条「买牛奶」，第二条「修自行车」。"))
-         (notes (getf (turn-result-tool-context result) :notes)))
+         (notes (getf (chat-client-response-context result) :notes)))
     ;; 模型可能一批发两个 tool_call，也可能分两轮——两条路径都经过屏障折叠
     (values (and (= 2 (length notes))
                  (search "牛奶" (first notes))
                  (search "自行车" (second notes)))
             (format nil "notes=~S" notes))))
+
+(deflive check-usage-tally-on-real-provider
+  "[12/13] provider 层观测：真实 wire 调用的 token 记账"
+  ;; 单元测试用的是 seq-provider 桩，证明不了 :around 挂在 (t) 上真的
+  ;; 覆盖得到 minimax-provider——它继承的是 cl-agent/llm:base-provider，
+  ;; 而不是 core 的 base-llm-provider。这里跑真链路把这一点钉死。
+  (let* ((tally (make-llm-usage-tally))
+         (*llm-call-observer* (usage-tally-observer tally)))
+    (chat-model-call *model* "用一个词回答：法国的首都是？")
+    (values (and (= 1 (usage-tally-calls tally))
+                 (plusp (usage-tally-input-tokens tally))
+                 (plusp (usage-tally-output-tokens tally)))
+            (format nil "~A 次调用，~A in / ~A out"
+                    (usage-tally-calls tally)
+                    (usage-tally-input-tokens tally)
+                    (usage-tally-output-tokens tally)))))
+
+(deflive check-retry-policy-does-not-disturb-happy-path
+  "[13/13] ChatModel 重试：配了策略不影响正常调用"
+  ;; 真实链路上制造 5xx 不现实（也不该为了测试去打爆上游），所以这里验证
+  ;; 的是「重试 :around 装上之后正常路径行为不变、且只发一次 wire 调用」。
+  ;; 重试真正触发时的行为由单元测试覆盖（seq-provider 可以精确制造 503）。
+  (let* ((model (apply #'cl-agent/llm:create-chat-model
+                       *provider*
+                       :retry-policy (make-retry-policy :max-attempts 3
+                                                        :initial-delay 0.5)
+                       (when *model-name* (list :model *model-name*))))
+         (tally (make-llm-usage-tally))
+         (*llm-call-observer* (usage-tally-observer tally))
+         (text (chat-response-text
+                (chat-model-call model "用一个词回答：日本的首都是？"))))
+    (values (and (plusp (length text))
+                 (= 1 (usage-tally-calls tally)))
+            (format nil "~A 次 wire 调用，答：~A"
+                    (usage-tally-calls tally)
+                    (string-trim '(#\Space #\Newline #\。) text)))))
 
 ;;; ============================================================
 ;;; 主流程
@@ -293,6 +330,8 @@
   (check-stream-token-xform)
   (check-streaming)
   (check-writes-fold)
+  (check-usage-tally-on-real-provider)
+  (check-retry-policy-does-not-disturb-happy-path)
   (format t "~%--- 通过 ~A，失败 ~A ---~%" *pass* *fail*)
   (uiop:quit (if (zerop *fail*) 0 1)))
 
