@@ -78,6 +78,53 @@ ChatModel 是对具体 LLM 提供商的统一抽象（对标 Spring AI `ChatMode
   (cl-agent/core:make-provider-chat-model (cl-agent/mock:make-mock-llm)))
 ```
 
+### 重试
+
+**缺省不重试。** 重试是 ChatModel 层的能力——provider 只负责「底层信息 +
+如何调用」，一次调用失败要不要再来一次是模型层的编排决策，所以同一个
+provider 可以配不同的重试预算：
+
+```lisp
+(cl-agent/llm:create-chat-model :anthropic
+  :model "claude-sonnet-4-20250514"
+  :retry-policy (cl-agent/core:make-retry-policy
+                  :max-attempts 4      ; 总尝试次数（**含**首次）
+                  :initial-delay 1.0   ; 首次重试前延迟（秒）
+                  :backoff 2.0))       ; 退避倍数，另带 ±10% 抖动
+```
+
+要不要重试由 `cl-agent/core:error-retryable-p` 单一裁定：瞬态 HTTP 状态
+（408/409/425/429/5xx）与网络层失败可重试，鉴权/参数错不重试。重试耗尽后
+原样抛出最后一次的条件，不做包装。
+
+> 流式路径上已经吐给回调的 token 不会被撤回，流跑到一半断掉再重试会让
+> 调用方看到前半段重复。流式通常应把 `retry-policy` 留空。
+
+### 观测
+
+两个层次，分工不同：
+
+```lisp
+;; ChatModel 层：包住一次**逻辑**调用（含重试，记一条）——算延迟用
+(cl-agent/llm:create-chat-model :anthropic
+  :observation-fn (lambda (model prompt thunk)
+                    (declare (ignore model prompt))
+                    (let ((start (get-internal-real-time)))
+                      (prog1 (funcall thunk)
+                        (format t "~Dms~%"
+                                (round (- (get-internal-real-time) start)
+                                       (/ internal-time-units-per-second 1000)))))))
+
+;; Provider 层：包住每一次**真实 wire 调用**（重试三次触发三次）——算钱用
+(let* ((tally (cl-agent/core:make-llm-usage-tally))
+       (cl-agent/core:*llm-call-observer*
+         (cl-agent/core:usage-tally-observer tally)))
+  (cl-agent/core:chat *chat-client* "你好")
+  (cl-agent/core:usage-tally-output-tokens tally))
+```
+
+`*llm-call-observer*` 是动态变量，一个 `let` 绑定即对**所有** provider 生效。
+
 ## 3. 第一次对话：SimpleAgent
 
 `make-agent` 建一个有状态 agent，`agent-chat` 对话——上下文自动累积，
@@ -108,7 +155,7 @@ ChatModel 是对具体 LLM 提供商的统一抽象（对标 Spring AI `ChatMode
   :tools '(get-weather)                   ; 工具符号列表（见第 4 节）
   :memory store                           ; 缺省 = 新建滑动窗口记忆；nil = 无记忆
   :conversation-id "c1"                   ; 缺省自动生成
-  :settings '((:max-tool-iterations . 10))
+  :max-tool-iterations 10
   :callbacks (list ...)                   ; 可观测性（见第 5 节）
   :chat-client prebuilt-chat-client)                ; 自建 chat-client（见第 7 节）
 ```
@@ -181,7 +228,7 @@ ChatModel 是对具体 LLM 提供商的统一抽象（对标 Spring AI `ChatMode
 (cl-agent/client:make-agent
   :model *model*
   :tools '(get-weather)
-  :settings '((:max-tool-iterations . 5)))
+  :max-tool-iterations 5)
 ```
 
 运行时也可以不用宏：
@@ -284,7 +331,14 @@ agent 层的横切入口是 `:callbacks`——一个 plist：
 ## 7. ChatClient：完全控制
 
 需要 filter（记忆策略、护栏、RAG、校验…）时下沉到 chat-client。
-`build-chat-client` 装配，`chat` 宏发起：
+`build-chat-client` 装配，`chat` 宏发起。
+
+ChatClient 是**四个槽**（对标 Spring AI 的 ChatClient）：`model`（往哪调）、
+`filters`（链上有谁）、`default-request`（请求默认长什么样：system / options /
+tools）、`tool-calling`（工具循环怎么跑）。刻意**没有** memory 槽——记忆是
+filter，不是它的固有属性。
+
+`build-chat-client` 接受扁平参数，内部聚合成后两个值对象：
 
 ```lisp
 (defvar *chat-client*
@@ -294,8 +348,26 @@ agent 层的横切入口是 `:callbacks`——一个 plist：
     :options (cl-agent/core:make-chat-options :temperature 0.3)  ; 默认选项
     :tools '(get-weather)                ; 默认工具（请求级 (:tools ...) 与之取并集）
     :filters (list ...)                  ; 横切能力（见第 8 节）
-    :settings '((:max-tool-iterations . 10))
+    :max-tool-iterations 10              ; 工具循环上限
     :tool-gate nil))                     ; chat-client 级 HITL 闸门（见本节末）
+
+;; 派生一个「除了这一处以外都一样」的 chat-client（对标 ChatClient#mutate）
+(cl-agent/core:chat-client-mutate *chat-client*
+  :filters (cons my-filter (cl-agent/core:chat-client-filters *chat-client*)))
+
+;; 只换工具循环里的某一项
+(cl-agent/core:chat-client-mutate *chat-client*
+  :tool-calling (cl-agent/core:tool-calling-config-mutate
+                 (cl-agent/core:chat-client-tool-calling *chat-client*)
+                 :tool-gate my-gate))
+```
+
+四个槽都是不可变值对象，共享安全。读取用便捷访问器穿过聚合：
+
+```lisp
+(cl-agent/core:chat-client-tools *chat-client*)
+(cl-agent/core:chat-client-max-tool-iterations *chat-client*)
+(cl-agent/core:chat-client-tool-gate *chat-client*)
 
 ;; chat 宏：最简形式
 (cl-agent/core:chat *chat-client* "你好！")
@@ -347,7 +419,7 @@ agent 层的横切入口是 `:callbacks`——一个 plist：
   :user (format nil "翻译：~A" "hello world"))
 ```
 
-`chat-client-call` 返回 `turn-result`，`chat-client-text` 取文本，
+`chat-client-call` 返回 `chat-client-response`，`chat-client-text` 取文本，
 `chat-client-entity` 取 JSON，`chat-client-stream` 走流式。
 
 ### chat-client 级 HITL：tool-gate
@@ -365,12 +437,12 @@ agent 层的横切入口是 `:callbacks`——一个 plist：
                      :proceed))))
 
 (let ((r (cl-agent/core:chat *chat-client* (:user "删除 /tmp/x.log") (:call :result))))
-  (cl-agent/core:turn-result-status r)        ; => :paused
-  (cl-agent/core:turn-result-pending-tool r)  ; => pending-tool
-  (cl-agent/core:turn-result-pause-reason r)  ; => "删除需审批"
+  (cl-agent/core:chat-client-response-status r)        ; => :paused
+  (cl-agent/core:chat-client-response-pending-tool r)  ; => pending-tool
+  (cl-agent/core:chat-client-response-pause-reason r)  ; => "删除需审批"
   ;; 审批后从快照续跑
   (cl-agent/core:resume-turn *chat-client*
-                             (cl-agent/core:turn-result-loop-state r)
+                             (cl-agent/core:chat-client-response-loop-state r)
                              :approved))
 ```
 
@@ -387,7 +459,7 @@ Filter 是环绕执行的洋葱层（对标 Spring AI 的 Advisor API）。每�
 |---|---|---|
 | `:chat` | 一次 LLM 调用（循环内每轮） | `prompt` → `chat-response` |
 | `:tool` | 一次工具执行 | `tool-request` → `tool-result` |
-| `:turn` | 一整轮对话（含整个工具循环） | `turn-request` → `turn-result` |
+| `:turn` | 一整轮对话（含整个工具循环） | `chat-client-request` → `chat-client-response` |
 | `:token-xform` | 流式 token 变换 | `(downstream) → (values emit finish)` |
 
 每个钩子统一是 `(lambda (req chain) ...)`：前置改写 `req` →
@@ -495,12 +567,12 @@ chat-client 本身**没有 memory 字段**——记忆是 filter，不是 chat-c
 > 「只输出 JSON」的系统消息，剥掉 markdown 围栏，然后 `json-parse`。
 > 没有 schema 参数——校验挂 `validation-turn-filter`（见下）。
 
-要看 `turn-result-status` 之类的整轮信息，用 `(:call :result)`：
+要看 `chat-client-response-status` 之类的整轮信息，用 `(:call :result)`：
 
 ```lisp
 (let ((result (cl-agent/core:chat *chat-client* (:user "你好") (:call :result))))
-  (values (cl-agent/core:turn-result-status result)          ; :completed / :cancelled ...
-          (cl-agent/core:turn-result-tool-calls-made result)))
+  (values (cl-agent/core:chat-client-response-status result)          ; :completed / :cancelled ...
+          (cl-agent/core:chat-client-response-tool-calls-made result)))
 ```
 
 要「不符合 schema 就带着校验错误让模型重新输出」（对标 Spring AI 2.0 的
