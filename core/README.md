@@ -78,9 +78,25 @@ core/
 - **选项合并语义**：`chat-options` 用槽位未绑定表示"未设置"，
   `merge-chat-options` 实现运行时 > chat-client 默认 > 模型默认的覆盖链，
   工具列表取并集。
-- **工具执行不在 ChatModel 内**：对齐 Spring AI 2.0——`chat-model-call`
-  只做单次调用（注入工具 schema，但不执行工具），工具循环上移到
-  `run-tool-loop`。1.x 的 `internal-tool-execution-enabled` 已随之移除。
+- **三层职责**：Provider 只管「底层信息 + 如何调用」（端点/鉴权/请求体
+  格式/响应解析）；**ChatModel 承担单次调用范围内的全部重活**——options
+  解析合并、重试（`retry-policy`）、观测（`observation-fn`）、响应规范化、
+  流式聚合；ChatClient 管链、记忆、工具循环、HITL。
+- **工具执行不在 ChatModel 内**：`chat-model-call` 只做单次调用（注入工具
+  schema，但不执行工具），工具循环上移到 `run-tool-loop`。新版 Spring AI
+  也已把循环从 `XxxChatModel` 移到 ChatClient 层的 `ToolCallingAdvisor`。
+- **重试挂在基类的 `:around` 上**：新写一个 ChatModel 子类不需要记得调重试
+  封装，也不可能漏。缺省不重试；是否重试由 `error-retryable-p` 单一裁定，
+  耗尽后原样抛出原条件不做包装。
+- **两层观测各司其职**：ChatModel 的 `observation-fn` 包住一次**逻辑**调用
+  （含重试记一条，算延迟用）；`*llm-call-observer*` 包住每一次**真实 wire
+  调用**（重试三次触发三次，算钱用）。后者是挂在 `(t)` 上的 `:around`，
+  一个 `let` 绑定覆盖所有 provider。
+- **ChatClient 四个槽**：`model` / `filters` / `default-request`（system /
+  options / tools）/ `tool-calling`（上限/闸门/执行策略/循环骨架）。
+  对标 Spring AI 的 `ChatClient` + `DefaultChatClientRequestSpec` +
+  `ToolCallingAdvisor`。四者都是不可变值对象，`chat-client-mutate` 共享它们
+  派生新实例。刻意无 memory 槽——记忆是 filter。
 - **Filter 三链**：`:chat` / `:tool` / `:turn`（外加 `:token-xform`）。
   `build-chain` 把 filter 列表折叠成嵌套闭包，闭包**只捕获下游**——
   于是「递归重入」就是再调一次同一个 `chain`，零额外机制
@@ -91,7 +107,7 @@ core/
   之前**对每个 tool-call 恰好评估一次（gate 常带副作用——审计日志、
   审批 UI、计数器，所以「恰好一次」是契约的一部分）。判 :pause 则整轮
   暂停，**工具一个都不执行**，`run-tool-loop` 返回
-  `turn-result(:paused)`，携带 `loop-state` 快照；审批后
+  `chat-client-response(:paused)`，携带 `loop-state` 快照；审批后
   `resume-turn` 从中点续跑。
 - **ChatClient 移植层已退役**：旧的 ChatClient / Builder / fluent
   RequestSpec 全部移除。执行路径唯一为 chat-client + filter，入口是
@@ -102,7 +118,7 @@ core/
   （chat 是协议消息层的「工具响应」值对象 id/name/text，chat-client 是执行链的
   响应载体）与 `execute-tool-calls`（两套不同签名的 manager 协议）。已从
   根上消除：chat-client 的载体改名为 `tool-request` / `tool-result`（与 turn 链
-  的 `turn-request` / `turn-result` 对称），chat 的旧 ToolCallingManager
+  的 `chat-client-request` / `chat-client-response` 对称），chat 的旧 ToolCallingManager
   整体删除。三包随后合并为 `cl-agent/core`，`:shadow` 全部消失。
 
 详见 [API 参考](../docs/API_CN.md)。

@@ -78,10 +78,31 @@ core/
   `provider-chat-model` adapter, providers only see `(:role ... :content ...)`.
 - **Option merging**: unbound slots mean "unset"; `merge-chat-options`
   implements runtime > chat-client defaults > model defaults, tool lists are unioned.
-- **Tool execution is not inside ChatModel**: matching Spring AI 2.0,
-  `chat-model-call` performs a single call only (it injects tool schemas but
-  does not execute tools). The tool loop lives in `run-tool-loop`. The 1.x
-  `internal-tool-execution-enabled` option is gone.
+- **Three layers, three jobs**: the provider handles only low-level details and
+  how to call (endpoint, auth, request shape, response parsing); the
+  **ChatModel carries everything a single call involves** — option resolution
+  and merging, retries (`retry-policy`), observation (`observation-fn`),
+  response normalization, stream aggregation; the ChatClient owns the chain,
+  memory, the tool loop, and HITL.
+- **Tool execution is not inside ChatModel**: `chat-model-call` performs a
+  single call only (it injects tool schemas but does not execute tools). The
+  tool loop lives in `run-tool-loop` — recent Spring AI moved it out of
+  `XxxChatModel` into the ChatClient layer's `ToolCallingAdvisor` too.
+- **Retries hang off an `:around` on the base class**: a new ChatModel subclass
+  does not have to remember to wrap itself, and cannot forget. Off by default;
+  `error-retryable-p` alone decides what is retryable, and the original
+  condition is rethrown untouched when retries run out.
+- **Two observation levels with distinct jobs**: the ChatModel's
+  `observation-fn` wraps one *logical* call (retries included, one entry — for
+  latency); `*llm-call-observer*` wraps every *real wire call* (three retries
+  fire it thrice — for cost). The latter is an `:around` on `(t)`, so one `let`
+  binding covers every provider.
+- **The ChatClient has four slots**: `model` / `filters` / `default-request`
+  (system / options / tools) / `tool-calling` (cap, gate, execution strategy,
+  loop skeleton) — mirroring Spring AI's `ChatClient` +
+  `DefaultChatClientRequestSpec` + `ToolCallingAdvisor`. All four are immutable
+  value objects that `chat-client-mutate` shares when deriving a new instance.
+  Deliberately no memory slot — memory is a filter.
 - **Filter tri-chain**: `:chat` / `:tool` / `:turn` (plus `:token-xform`).
   `build-chain` folds the filter list into nested closures that capture
   **only what is downstream** — so "recursive re-entry" is just calling the
@@ -93,7 +114,7 @@ core/
   **before** batch execution, exactly once per tool-call (gates often have side
   effects — audit logs, approval UI, counters — so "exactly once" is part of
   the contract). A `:pause` verdict pauses the whole turn with **not one tool
-  executed**; `run-tool-loop` returns `turn-result(:paused)` carrying a
+  executed**; `run-tool-loop` returns `chat-client-response(:paused)` carrying a
   `loop-state` snapshot, and `resume-turn` continues from that midpoint once
   approved.
 - **The ChatClient porting layer is retired**: the old ChatClient / Builder /
@@ -106,7 +127,7 @@ core/
   chat-client's was the tool-chain response carrier) and `execute-tool-calls` (two
   manager protocols with different signatures). Fixed at the root: the chat-client
   carrier was renamed to `tool-request` / `tool-result` (symmetric with the turn
-  chain's `turn-request` / `turn-result`), and chat's old ToolCallingManager was
+  chain's `chat-client-request` / `chat-client-response`), and chat's old ToolCallingManager was
   deleted outright. The three packages were then merged into `cl-agent/core`,
   and every `:shadow` disappeared.
 
