@@ -271,6 +271,30 @@ cl-agent/llm/providers 必须是*同一符号*，不能各立一套。
             (find-symbol name :cl-agent/llm/providers))
         "~A 在两个包里不是同一符号" name)))
 
+(test every-export-has-a-definition
+  "**每个**导出符号都必须真的有定义——不只是 make-*-provider 那几个。
+
+导出一个不存在的符号，照导出列表使用的人直接撞 UNDEFINED-FUNCTION，
+而这在本仓库反复发生过：make-dashscope-provider（门面层手工同步时漏了）、
+llm-stream（全库零实现）、di-container-p（di-container 是 defclass，
+从来没有过这个自动谓词）。删除一层实现时忘了清导出，也是同一个坑——
+client 类退役时就漏了 normalize-messages。
+
+判据：fbound（函数/宏/泛型）、类名、变量、条件类型、deftype，五者居其一。"
+  (dolist (pkg-name '(:cl-agent/core :cl-agent/llm :cl-agent/client))
+    (let ((pkg (find-package pkg-name))
+          (dangling nil))
+      (do-external-symbols (sym pkg)
+        (unless (or (fboundp sym)
+                    (find-class sym nil)
+                    (boundp sym)
+                    ;; deftype（如 finish-reason）
+                    (ignore-errors (progn (typep nil sym) t)))
+          (push sym dangling)))
+      (is (null dangling)
+          "~A 导出了没有定义的符号：~{~A~^ ~}" pkg-name
+          (mapcar #'symbol-name (reverse dangling))))))
+
 (test facade-exports-are-all-fbound
   "cl-agent/llm 导出的每个 make-*-provider 都必须真的有定义。
 
@@ -295,19 +319,32 @@ cl-agent/llm/providers 必须是*同一符号*，不能各立一套。
   ;; 未知类型不报错，返回 NIL
   (is (not (cl-agent/llm:response-complete-p 42))))
 
-(test make-client-does-not-default-temperature
-  "make-client 不再把 temperature 默认成 0.7。
+(test chat-model-does-not-default-temperature
+  "ChatModel 的默认选项不凭空造出 temperature。
 
-client 层的取值链是 (or 调用点温度 (client-temperature client))——
-构造器默认 0.7 会让链上永远非 NIL，等于每次请求都注入 temperature=0.7，
-与 SPI 层那个默认值是同一个危害（Opus 4.7+ 直接 400）。"
-  (let ((client (cl-agent/llm:make-client
-                 :provider :anthropic :api-key "test-key")))
-    (is (null (cl-agent/llm:client-temperature client))))
-  ;; 显式指定仍然生效
-  (let ((client (cl-agent/llm:make-client
-                 :provider :anthropic :api-key "test-key" :temperature 0.3)))
-    (is (= 0.3 (cl-agent/llm:client-temperature client)))))
+原防线立在 make-client 上（构造器默认 0.7 → 取值链 (or 调用点 client 值)
+永远非 NIL → 每次请求都注入 temperature=0.7，Opus 4.7+ 直接 400）。
+client 类已移除，防线随之搬到 ChatModel：不配 default-options 时
+chat-model-default-options 为 NIL，配了也只带调用方显式给的字段。
+下发侧的对应断言见 TEMPERATURE-NOT-SENT-UNLESS-SPECIFIED。"
+  (let ((provider (cl-agent/llm:make-anthropic-provider :api-key "test-key")))
+    ;; 不配默认选项：整个 default-options 就是 NIL，不可能注入 temperature
+    (is (null (cl-agent/core:chat-model-default-options
+               (cl-agent/core:make-provider-chat-model provider))))
+    ;; 配了别的字段：temperature 仍为 NIL
+    (let ((model (cl-agent/core:make-provider-chat-model
+                  provider
+                  :default-options (cl-agent/core:make-chat-options
+                                    :max-tokens 100))))
+      (is (null (cl-agent/core:chat-options-temperature
+                 (cl-agent/core:chat-model-default-options model)))))
+    ;; 显式指定仍然生效
+    (let ((model (cl-agent/core:make-provider-chat-model
+                  provider
+                  :default-options (cl-agent/core:make-chat-options
+                                    :temperature 0.3))))
+      (is (= 0.3 (cl-agent/core:chat-options-temperature
+                  (cl-agent/core:chat-model-default-options model)))))))
 
 ;;; ============================================================
 ;;; thinking 一等参数（对标 ThinkingConfigParam）

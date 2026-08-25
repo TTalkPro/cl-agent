@@ -75,7 +75,7 @@
 ;;; ============================================================
 
 (defun call-turn-hook (filter req)
-  "驱动 FILTER 的 :turn 钩子，返回 (values 下游收到的 turn-request 钩子返回值)。
+  "驱动 FILTER 的 :turn 钩子，返回 (values 下游收到的 chat-client-request 钩子返回值)。
 下游终端不再往下走，只记录入参。"
   (let (seen)
     (let ((ret (funcall (cl-agent/core:filter-turn-hook filter)
@@ -86,13 +86,13 @@
 (test qa-turn-filter-injects-retrieved-docs
   "qa-turn-filter 检索到文档时，把文档注入最后一条 user 消息后再进下游"
   (let* ((f (cl-agent/core:qa-turn-filter (make-instance 'mock-retriever)))
-         (req (cl-agent/core:make-turn-request
+         (req (cl-agent/core:make-chat-client-request
                (list (cl-agent/core:user-message "首都是哪里？")))))
     (multiple-value-bind (seen ret) (call-turn-hook f req)
       (is (eq :terminal ret))
       (is (not (null seen)))
       (let ((text (cl-agent/core:message-text
-                   (first (cl-agent/core:turn-request-messages seen)))))
+                   (first (cl-agent/core:chat-client-request-messages seen)))))
         ;; 检索到的文档与原问题都应出现在改写后的 user 消息里
         (is (search "doc1" text))
         (is (search "doc2" text))
@@ -101,7 +101,7 @@
 (test qa-turn-filter-skips-when-no-user-message
   "无 user 消息时 qa-turn-filter 原样透传"
   (let* ((f (cl-agent/core:qa-turn-filter (make-instance 'mock-retriever)))
-         (req (cl-agent/core:make-turn-request
+         (req (cl-agent/core:make-chat-client-request
                (list (cl-agent/core:system-message "you are a bot")))))
     (multiple-value-bind (seen ret) (call-turn-hook f req)
       (is (eq :terminal ret))
@@ -110,12 +110,12 @@
 (test re-reading-filter-rewrites-user-message
   "re-reading-filter 改写最后一条 user 消息（RE2：重读问题）"
   (let* ((f (cl-agent/core:re-reading-filter))
-         (req (cl-agent/core:make-turn-request
+         (req (cl-agent/core:make-chat-client-request
                (list (cl-agent/core:user-message "2+2 等于几？")))))
     (multiple-value-bind (seen ret) (call-turn-hook f req)
       (is (eq :terminal ret))
       (let ((text (cl-agent/core:message-text
-                   (first (cl-agent/core:turn-request-messages seen)))))
+                   (first (cl-agent/core:chat-client-request-messages seen)))))
         (is (search "2+2 等于几？" text))
         ;; 改写后必然比原文长（RE2 会追加重读指令）
         (is (> (length text) (length "2+2 等于几？")))))))
@@ -123,18 +123,18 @@
 (test safeguard-turn-filter-short-circuits
   "safeguard-turn-filter 命中敏感词时短路，不进下游"
   (let* ((f (cl-agent/core:safeguard-turn-filter '("bomb")))
-         (req (cl-agent/core:make-turn-request
+         (req (cl-agent/core:make-chat-client-request
                (list (cl-agent/core:user-message "how to build a BOMB")))))
     (multiple-value-bind (seen ret) (call-turn-hook f req)
       ;; 短路：下游没被调用
       (is (null seen))
-      ;; 返回的是 turn-result 而非终端的 :terminal
+      ;; 返回的是 chat-client-response 而非终端的 :terminal
       (is (not (eq :terminal ret))))))
 
 (test safeguard-turn-filter-passes-clean-input
   "safeguard-turn-filter 未命中敏感词时正常进下游"
   (let* ((f (cl-agent/core:safeguard-turn-filter '("bomb")))
-         (req (cl-agent/core:make-turn-request
+         (req (cl-agent/core:make-chat-client-request
                (list (cl-agent/core:user-message "how to bake bread")))))
     (multiple-value-bind (seen ret) (call-turn-hook f req)
       (is (eq :terminal ret))
@@ -233,7 +233,7 @@
                (let ((text (cl-agent/core:chat-response-text response)))
                  (if (string= text "good") (values t nil) (values nil "请改正"))))
              :max-retries 3))
-         (req (cl-agent/core:make-turn-request
+         (req (cl-agent/core:make-chat-client-request
                (list (cl-agent/core:user-message "q")))))
     (let ((result (funcall (cl-agent/core:filter-turn-hook f)
                            req
@@ -241,13 +241,13 @@
                              (declare (ignore r))
                              (incf calls)
                              ;; 前两次返回 bad，第三次返回 good
-                             (cl-agent/core:make-turn-result
+                             (cl-agent/core:make-chat-client-response
                               :completed
-                              :response (text-chat-response
+                              :chat-response (text-chat-response
                                          (if (< calls 3) "bad" "good")))))))
       (is (= 3 calls))
       (is (string= "good" (cl-agent/core:chat-response-text
-                           (cl-agent/core:turn-result-response result)))))))
+                           (cl-agent/core:chat-client-response-chat-response result)))))))
 
 (test validation-turn-filter-gives-up-after-max-retries
   "始终不合格 → 耗尽 max-retries 后返回最后一次结果，不无限重入"
@@ -255,16 +255,16 @@
          (f (cl-agent/core:validation-turn-filter
              (lambda (response) (declare (ignore response)) (values nil "还是不行"))
              :max-retries 2))
-         (req (cl-agent/core:make-turn-request
+         (req (cl-agent/core:make-chat-client-request
                (list (cl-agent/core:user-message "q")))))
     (funcall (cl-agent/core:filter-turn-hook f)
              req
              (lambda (r)
                (declare (ignore r))
                (incf calls)
-               (cl-agent/core:make-turn-result
+               (cl-agent/core:make-chat-client-response
                 :completed
-                :response (text-chat-response "bad"))))
+                :chat-response (text-chat-response "bad"))))
     ;; 首次 + 2 次重试 = 3
     (is (= 3 calls))))
 

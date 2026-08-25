@@ -36,30 +36,40 @@
 ;; 客户端测试
 ;; ============================================================
 
-(test make-client-default
-  "测试创建默认客户端"
-  ;; 注意：这个测试需要 ANTHROPIC_API_KEY 环境变量
-  ;; 如果没有设置，会跳过测试
+(test make-provider-chat-model-wraps-provider
+  "provider → ChatModel 的适配（取代已移除的 make-client）。
+
+client 类曾同时持有 provider/model/api-key/temperature，与 ChatModel 职责
+重复且主干不经过它。现在唯一入口是 make-provider-chat-model——provider
+只管底层调用，模型级默认选项归 ChatModel。"
   (handler-case
-      (let ((client (cl-agent/llm:make-client)))
-        (is (typep client 'cl-agent/llm:client))
-        (is (cl-agent/llm:client-provider-name client))
-        (is (cl-agent/llm:client-model-name client))
-        (is (cl-agent/llm:client-api-key client)))
+      (let* ((provider (cl-agent/llm:make-openai-provider :api-key "test-key"))
+             (model (cl-agent/core:make-provider-chat-model
+                     provider
+                     :default-options (cl-agent/core:make-chat-options
+                                       :model "gpt-4o-mini"))))
+        (is (typep model 'cl-agent/core:chat-model))
+        (is (eq provider (cl-agent/core:chat-model-provider model)))
+        (is (string= "gpt-4o-mini"
+                     (cl-agent/core:chat-options-model
+                      (cl-agent/core:chat-model-default-options model)))))
     (cl-agent/core:missing-api-key-error ()
-      ;; 跳过测试
       (pass "Skipping test: API key not set"))))
 
-(test make-client-custom-model
-  "测试创建自定义模型客户端"
-  (handler-case
-      (let ((client (cl-agent/llm:make-client
-                     :provider :openai
-                     :model "gpt-4o-mini")))
-        (is (string= (cl-agent/llm:client-model-name client) "gpt-4o-mini"))
-        (is (eq (cl-agent/llm:client-provider-name client) :openai)))
-    (cl-agent/core:missing-api-key-error ()
-      (pass "Skipping test: API key not set"))))
+(test provider-chat-model-retry-policy-is-opt-in
+  "ChatModel 缺省不重试；重试是显式配置的 ChatModel 层能力。
+
+重试此前困在 llm/client.lisp 的 chat-with-retry 里（client 类路径），
+chat-client 主干从不经过，于是主干无重试。现在它是 ChatModel 的槽，
+由 chat-model-call 的 :around 统一施加。"
+  (let ((provider (cl-agent/llm:make-openai-provider :api-key "test-key")))
+    (is (null (cl-agent/core:chat-model-retry-policy
+               (cl-agent/core:make-provider-chat-model provider))))
+    (let ((model (cl-agent/core:make-provider-chat-model
+                  provider
+                  :retry-policy (cl-agent/core:make-retry-policy :max-attempts 5))))
+      (is (= 5 (cl-agent/core:retry-policy-max-attempts
+                (cl-agent/core:chat-model-retry-policy model)))))))
 
 ;; ============================================================
 ;; Token 计数测试
@@ -186,11 +196,13 @@
   ;; 注意：这个测试需要真实的 API 密钥和网络连接
   ;; 默认跳过，仅在设置环境变量时运行
   (when (cl-agent/core:get-env "RUN_INTEGRATION_TESTS")
-    (let ((client (cl-agent/llm:make-client)))
-      (let ((response (cl-agent/llm:chat-simple client "Say 'Hello!'")))
-        (is (stringp response))
-        (is (> (length response) 0))
-        (format t "~%API Response: ~A~%" response)))))
+    (let* ((model (cl-agent/core:make-provider-chat-model
+                   (cl-agent/llm:make-anthropic-provider)))
+           (response (cl-agent/core:chat-model-call model "Say 'Hello!'"))
+           (text (cl-agent/core:chat-response-text response)))
+      (is (stringp text))
+      (is (> (length text) 0))
+      (format t "~%API Response: ~A~%" text))))
 
 ;; ============================================================
 ;; 运行 LLM 测试
