@@ -399,7 +399,7 @@ downstream** — upstream can never be re-run, and recursive re-entry is free.
 
 ```lisp
 (build-kernel &key model tools filters eligibility-fn settings tool-manager
-                   system options tool-gate state-slots)
+                   system options tool-gate state-slots loop-fn resume-fn)
 ;; model          chat-model instance
 ;; tools          list of tool symbols or tool-callbacks (default nil)
 ;; filters        list of filter instances (order = onion order; default nil)
@@ -413,12 +413,40 @@ downstream** — upstream can never be re-run, and recursive re-entry is free.
 ;;                | (:pause . reason); nil (default) = no approval, all execute
 ;; state-slots    state-slot declarations ((key :init v0 :reduce fn) ...) —
 ;;                merge semantics for tool-batch :writes (see below)
+;; loop-fn        custom tool loop: (kernel turn-request) → turn-result;
+;;                nil (default) = run-tool-loop. It IS the :turn chain's
+;;                terminal — replacing it replaces the whole loop skeleton
+;; resume-fn      custom pause continuation:
+;;                (kernel loop-state decision payload) → turn-result;
+;;                nil (default) = the built-in one. Pairs with loop-fn
 
 (kernel-model k) (kernel-tools k) (kernel-filters k)
 (kernel-eligibility-fn k) (kernel-settings k) (kernel-tool-manager k)
 (kernel-default-system k) (kernel-default-options k) (kernel-tool-gate k)
-(kernel-state-slots k)
+(kernel-state-slots k) (kernel-loop-fn k) (kernel-resume-fn k)
 ```
+
+### :loop-fn / :resume-fn — swapping the loop skeleton
+
+`run-tool-loop` is the **default** terminal of the `:turn` chain, not a fixed
+one. `:loop-fn` replaces it wholesale, which is how you get a different loop
+shape (ReAct, plan-execute, reflexion) without touching the chains: `:turn`
+filters still wrap it, `:chat` / `:tool` filters still apply to whatever it
+invokes.
+
+```lisp
+(build-kernel :model m
+              :loop-fn (lambda (kernel turn-request) ... ))   ; → turn-result
+```
+
+**HITL is opt-in for a custom loop.** The built-in pause continuation reads the
+`loop-state` snapshot that `run-tool-loop` produces; it cannot understand a
+different loop's pause point. So a custom loop that wants pause/resume must
+supply `:resume-fn` as well — the two are a pair. A custom loop that never
+returns `turn-result(:paused)` simply never reaches the resume path, so
+omitting `:resume-fn` costs a capability rather than breaking behaviour.
+
+Leaving both unset is the default path, byte-for-byte unchanged.
 
 ### :writes state folding (the tool-batch MapReduce contract)
 

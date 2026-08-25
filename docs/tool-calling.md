@@ -25,6 +25,14 @@ The loop lives in `cl-agent/core:run-tool-loop` (`core/kernel/invoke.lisp`).
 It is **the terminal of the `:turn` chain, not a filter**, and it is **not
 inside ChatModel** (`chat-model-call` is strictly single-call semantics).
 
+Terminal does not mean fixed: `build-kernel :loop-fn` replaces it wholesale, so
+a different loop skeleton (ReAct, plan-execute) is a kernel argument rather than
+a fork. Because the swap happens *at* the terminal — the chain's single exit —
+the `:turn` filters wrapping it are untouched, and so is the HITL resume path,
+which works by substituting that same terminal. A custom loop that wants
+pause/resume supplies `:resume-fn` alongside; see
+[API Reference](API.md#loop-fn--resume-fn--swapping-the-loop-skeleton).
+
 The execution layer returns after one batch. It does not know
 `:max-tool-iterations`, does not know which iteration it is on, and does not
 decide whether to continue. All of that belongs to `run-tool-loop`.

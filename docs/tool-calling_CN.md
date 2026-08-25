@@ -22,6 +22,13 @@ run-tool-loop:  invoke-chat → 有 tool-calls 且 eligible? → 执行一批工
 **`:turn` 链的 terminal，不是 filter**，也**不在 ChatModel 里**
 （`chat-model-call` 是严格的单次调用语义）。
 
+terminal 不等于写死：`build-kernel :loop-fn` 可整体替换它，换一套循环骨架
+（ReAct、plan-execute）是传一个 kernel 参数的事，不用改框架。因为替换发生在
+**terminal 这个唯一出口**上，环绕它的 `:turn` filter 一律不受影响，HITL 的
+续跑路径也不受影响——`resume-turn` 本来就是靠替换同一个 terminal 工作的。
+自定义循环要支持暂停/续跑就配套给 `:resume-fn`，见
+[API 参考](API_CN.md#loop-fn--resume-fn--替换循环骨架)。
+
 执行层做完一批就返回：它不知道 `:max-tool-iterations`、不知道自己是第几轮、
 也不决定要不要继续。这些都是 `run-tool-loop` 的事。
 

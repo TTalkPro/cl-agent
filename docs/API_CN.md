@@ -394,12 +394,37 @@ invoke-turn → [:turn filters] → run-tool-loop
 ;;                | (:pause . 原因)；nil（缺省）= 不审批，全部直接执行
 ;; state-slots    状态槽声明 ((key :init v0 :reduce fn) ...)——工具批次
 ;;                :writes 的合并语义（见「:writes 状态折叠」）
+;; loop-fn        自定义工具循环 (kernel turn-request) → turn-result；
+;;                nil（缺省）= run-tool-loop。它就是 :turn 链的 terminal，
+;;                换掉它即换掉整个循环骨架
+;; resume-fn      自定义暂停延续 (kernel loop-state decision payload)
+;;                → turn-result；nil（缺省）= 内建实现。与 loop-fn 成对
 
 (kernel-model k) (kernel-tools k) (kernel-filters k)
 (kernel-eligibility-fn k) (kernel-settings k) (kernel-tool-manager k)
 (kernel-default-system k) (kernel-default-options k) (kernel-tool-gate k)
-(kernel-state-slots k)
+(kernel-state-slots k) (kernel-loop-fn k) (kernel-resume-fn k)
 ```
+
+### :loop-fn / :resume-fn —— 替换循环骨架
+
+`run-tool-loop` 是 `:turn` 链的**缺省** terminal，不是固定的。`:loop-fn`
+整体替换它——这就是换循环形状（ReAct、plan-execute、reflexion）的口子，
+且不动三链结构：`:turn` filter 照常环绕它，`:chat` / `:tool` filter 照常
+作用于它发起的调用。
+
+```lisp
+(build-kernel :model m
+              :loop-fn (lambda (kernel turn-request) ... ))   ; → turn-result
+```
+
+**自定义循环的 HITL 是 opt-in 的。** 内建的暂停延续读的是 `run-tool-loop`
+产出的 `loop-state` 快照，看不懂别的循环的暂停点。所以自定义循环若要支持
+暂停/续跑，必须**同时**给 `:resume-fn`——两者成对。反过来，一个从不返回
+`turn-result(:paused)` 的循环永远走不到 resume 路径，不给 `:resume-fn`
+只是少一项能力，不会让行为出错。
+
+两个都不给就是默认路径，行为一字不变。
 
 ### :writes 状态折叠（工具批次的 MapReduce 契约）
 
