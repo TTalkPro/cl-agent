@@ -26,6 +26,11 @@
 ;;; Repository 协议
 ;;; ============================================================
 
+;;; chat-memory-repository / chat-memory 是协议基类，不带槽，无约束可言。
+;;; 具体实现里 message-window-chat-memory 有（repository + 窗口大小）；
+;;; in-memory-chat-memory-repository 的两个槽（hash-table + lock）都是
+;;; 自建内部状态，不由外部提供。
+
 (defclass chat-memory-repository ()
   ()
   (:documentation "会话消息存储协议基类（对标 ChatMemoryRepository）"))
@@ -114,6 +119,12 @@
     :documentation "窗口大小（非 system 消息条数，默认 20）"))
   (:documentation "滑动窗口记忆（对标 MessageWindowChatMemory）：
 追加时按窗口裁剪后落库，system 消息不计入且始终保留。"))
+
+(definvariants message-window-chat-memory (self)
+  (require-slot self 'repository "记忆的落库后端")
+  (require-type self 'repository 'chat-memory-repository)
+  (require-that self (>= (memory-max-messages self) 1)
+                "窗口至少容纳 1 条——0 等于没有记忆，应该通过不挂 memory-filter 表达"))
 
 (defun make-message-window-chat-memory (&key repository (max-messages 20))
   "创建滑动窗口记忆。REPOSITORY 缺省为新建的内存 Repository。"

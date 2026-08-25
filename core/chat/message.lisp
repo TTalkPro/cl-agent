@@ -38,6 +38,12 @@
     :documentation "附加元数据（plist）"))
   (:documentation "所有聊天消息的抽象基类"))
 
+;;; 各消息子类的结构不变式。
+;;; 基类 message 只有一个可选的 metadata 槽，没有可约束的东西；
+;;; 子类的列表槽则直接被下游按元素类型消费——assistant-message 的
+;;; tool-calls 是工具循环的输入，tool-response-message 的 responses 是
+;;; 回传模型的消息体，混进别的类型要到那里才炸。
+
 (defgeneric message-role (message)
   (:documentation "消息角色关键字：:system / :user / :assistant / :tool"))
 
@@ -85,6 +91,16 @@
                          (symbol (string-downcase (symbol-name name))))
                  :arguments arguments))
 
+(definvariants tool-call (self)
+  ;; id：模型靠它把工具结果对回自己发出的那个调用；顺序错了或缺了，
+  ;; 模型收到的就是一份对不上号的结果。name：工具分派靠它。
+  ;;
+  ;; 两个值最终来自厂商响应（llm-tool-call → 这里），所以违反时最可能的
+  ;; 原因是厂商响应缺字段或解析器没提取到——不过 llm-tool-call 那一层
+  ;; 已经先拦一道，走到这里通常说明是调用方手工构造时漏了。
+  (require-slot self 'id "模型靠它把结果对回请求（源头是厂商响应的 tool_call.id）")
+  (require-slot self 'name "工具分派靠它（源头是厂商响应的 function.name）"))
+
 (defmethod print-object ((tc tool-call) stream)
   (print-unreadable-object (tc stream :type t)
     (format stream "~A id=~A" (tool-call-name tc) (tool-call-id tc))))
@@ -115,6 +131,10 @@
                          (symbol (string-downcase (symbol-name name))))
                  :text text))
 
+(definvariants tool-response (self)
+  (require-slot self 'id "必须与对应 tool-call 的 id 一致，否则模型对不上号")
+  (require-slot self 'name "回传消息里标明这是哪个工具的结果"))
+
 (defmethod print-object ((tr tool-response) stream)
   (print-unreadable-object (tr stream :type t)
     (format stream "~A id=~A" (tool-response-name tr) (tool-response-id tr))))
@@ -130,6 +150,9 @@
     :reader message-text
     :documentation "系统指令文本"))
   (:documentation "系统指令消息（对标 SystemMessage）"))
+
+(definvariants system-message (self)
+  (require-type self 'text 'string "系统提示是文本"))
 
 (defmethod message-role ((msg system-message)) :system)
 
@@ -150,6 +173,11 @@
 wire 形态由各 provider 翻译（OpenAI 的 content 分片数组 /
 Anthropic 的 content 块数组）。"))
 
+(definvariants user-message (self)
+  (require-type self 'text 'string "用户输入是文本")
+  (require-that self (every (lambda (m) (typep m 'media)) (message-media self))
+                "media 必须是 media 实例列表"))
+
 (defmethod message-role ((msg user-message)) :user)
 
 (defclass assistant-message (message)
@@ -165,6 +193,13 @@ Anthropic 的 content 块数组）。"))
     :documentation "tool-call 实例列表（可为空）"))
   (:documentation "模型回复消息（对标 AssistantMessage）"))
 
+(definvariants assistant-message (self)
+  (require-type self 'text 'string "回复正文是文本")
+  ;; 工具循环直接遍历它并按 tool-call-id / -name 分派
+  (require-that self (every (lambda (tc) (typep tc 'tool-call))
+                            (assistant-tool-calls self))
+                "tool-calls 必须是 tool-call 实例列表"))
+
 (defmethod message-role ((msg assistant-message)) :assistant)
 
 (defclass tool-response-message (message)
@@ -174,6 +209,11 @@ Anthropic 的 content 块数组）。"))
     :reader tool-responses
     :documentation "tool-response 实例列表"))
   (:documentation "工具执行结果消息（对标 ToolResponseMessage）"))
+
+(definvariants tool-response-message (self)
+  (require-that self (every (lambda (r) (typep r 'tool-response))
+                            (tool-responses self))
+                "responses 必须是 tool-response 实例列表"))
 
 (defmethod message-role ((msg tool-response-message)) :tool)
 

@@ -121,6 +121,9 @@
                  :description description
                  :parameters parameters))
 
+(definvariants tool-definition (self)
+  (require-slot self 'name "模型看到的工具名，也是分派键"))
+
 (defmethod print-object ((def tool-definition) stream)
   (print-unreadable-object (def stream :type t)
     (format stream "~A" (tool-definition-name def))))
@@ -157,6 +160,17 @@
 （chat-client barrier routing 用）"))
   (:documentation "可执行工具（对标 ToolCallback / FunctionToolCallback）"))
 
+(definvariants tool-callback (self)
+  ;; 校验此前只在 make-tool-callback 里（(unless name (error ...))），
+  ;; 于是 (make-instance 'tool-callback :function f) 能造出一个无名工具：
+  ;; 不报错，等模型发工具调用时才表现为「找不到工具」，离出错点很远。
+  ;; 名字实际存在 definition 上，所以这里连带把 definition 一起要求。
+  (require-slot self 'definition "工具的 name/description/参数规格都在它上面")
+  (require-slot self 'function "工具体——没有它这个 callback 无法执行")
+  (require-callable self 'function "执行函数或函数名")
+  (require-that self (tool-definition-name (tool-callback-definition self))
+                "definition 必须带 name——模型看到的工具名，也是分派键"))
+
 (defun make-tool-callback (function &key name (description "") parameters
                            return-direct serial retry)
   "从函数创建 tool-callback（对标 FunctionToolCallback.builder）。
@@ -176,8 +190,6 @@
     :name \"get_weather\"
     :description \"查询天气\"
     :parameters '((city :string \"城市名称\" :required-p t)))"
-  (unless name
-    (error "tool-callback 需要 :name"))
   (make-instance 'tool-callback
                  :definition (make-tool-definition :name name
                                                    :description description

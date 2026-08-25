@@ -130,6 +130,14 @@ audio/mpeg 是 mp3 的正式 MIME，但 OpenAI 只认 \"mp3\"，这里做映射�
   "是否为 media 实例"
   (typep obj 'media))
 
+(definvariants media (self)
+  (require-member self 'kind '(:image :audio :video :document)
+                  "各 provider 的 wire 转换按它分派")
+  ;; data 与 url 二选一：两个都空的 media 会被转成一个没有内容的分片发出去，
+  ;; 厂商侧报一个与真实原因无关的 400。
+  (require-that self (or (media-data self) (media-url self))
+                "data 与 url 必须给一个——两者都空的媒体分片没有内容可发送"))
+
 (defmethod print-object ((m media) stream)
   (print-unreadable-object (m stream :type t)
     (format stream "~A ~@[~A ~]~A"
