@@ -206,6 +206,21 @@ filters and callers can read it, and the text goes back to the model. See known
 divergence 3 below for the one branch that is still missing (`:environment` →
 pause for a human).
 
+**The classification is a named slot on a `tool-error-info`, not a key in a
+plist.**
+
+```lisp
+(cl-agent/core:tool-error-class   (cl-agent/core:tool-result-error result))  ; :transient
+(cl-agent/core:tool-error-message (cl-agent/core:tool-result-error result))
+(cl-agent/core:tool-error-cause   (cl-agent/core:tool-result-error result))  ; original condition
+```
+
+Construction validates that the class is one of the three. This is not
+fastidiousness: `:class` used to be a key in a bare plist, so a typo silently
+became `NIL`, and `NIL` is not `:transient` — the only symptom was "a tool
+declaring `:retry` did not retry", with no error and no warning. A test in this
+repo even invented a `:timeout` class and stayed green for a dozen versions.
+
 > The classification has to see through a wrapper: `tool-callback-call` wraps
 > **everything** a tool body signals into a `tool-execution-error`, stashing the
 > original in `:cause`. `classify-tool-error` unwraps it recursively — without
@@ -239,10 +254,10 @@ was not exposed is still never executed; the model just gets told so in words.
 
 Moving to the chat-client did not loosen this boundary — it tightened it by a layer.
 The chat-client's `resolve-chat-client-tools` only honours `chat-client-tools` (plus whatever
-this request's `(:tools ...)` merged in via caller-options), and `run-tool-loop`
+this request's `(:tools ...)` merged into the request prompt's options), and `run-tool-loop`
 re-resolves on every iteration. Guardrails and approval gates are then an
 **independent second line**: `safeguard-turn-filter` short-circuits on the
-`:turn` chain (returning a `:cancelled` `turn-result` — the model is never
+`:turn` chain (returning a `:cancelled` `chat-client-response` — the model is never
 called at all), and `approval-filter` gates tool-by-tool on the `:tool` chain.
 Neither depends on tool resolution being correct.
 

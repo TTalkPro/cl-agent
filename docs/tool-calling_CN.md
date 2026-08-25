@@ -177,6 +177,19 @@ cl-agent 吸取的是同一个教训，但落点更靠外：循环被提到 **ch
 其余一律贴标签放进 `tool-result` 的 `:error` 槽（供 `:tool` filter 与调用方读取），
 并把文本回传模型。仍缺的那一个分支（`:environment` → 暂停等人）见下面第 3 条。
 
+**分类是 `tool-error-info` 类的具名槽，不是 plist 里的一个键。**
+
+```lisp
+(cl-agent/core:tool-error-class   (cl-agent/core:tool-result-error result))  ; :transient
+(cl-agent/core:tool-error-message (cl-agent/core:tool-result-error result))
+(cl-agent/core:tool-error-cause   (cl-agent/core:tool-result-error result))  ; 原 condition
+```
+
+构造时校验分类必须是三者之一。这不是洁癖：`:class` 曾经是裸 plist 里的一个键，
+拼错就静默变 `NIL`，而 `NIL` 不等于 `:transient`——表现出来只是「声明了 `:retry`
+的工具没有重试」，不报错、不告警。测试里甚至真的编造过一个 `:timeout` 分类并
+绿了十几个版本。
+
 > 分类必须**看穿一层包装**：`tool-callback-call` 会把工具体 signal 的**一切**
 > 包成 `tool-execution-error`，原件塞进 `:cause`。`classify-tool-error` 递归解包——
 > 不解的话，工具明明 signal 了 `transient-tool-failure`，出来也只剩 `:semantic`，
@@ -202,9 +215,9 @@ cl-agent 吸取的是同一个教训，但落点更靠外：循环被提到 **ch
 没暴露的工具依然绝不执行，只是改用语言告诉模型。
 
 chat-client 化之后这条边界没有松动，反而更紧了一层：chat-client 的 `resolve-chat-client-tools`
-只认 `chat-client-tools`（加上本次请求 `(:tools ...)` 合并进来的 caller-options），
+只认 `chat-client-tools`（加上本次请求 `(:tools ...)` 合并进请求 prompt 的 options），
 `run-tool-loop` 每轮重新解析。护栏与审批门则是**独立的第二道**：
-`safeguard-turn-filter` 在 `:turn` 链短路（返回 `:cancelled` 的 `turn-result`，
+`safeguard-turn-filter` 在 `:turn` 链短路（返回 `:cancelled` 的 `chat-client-response`，
 模型根本没被调用），`approval-filter` 在 `:tool` 链逐工具卡门——两者都不依赖
 工具解析是否正确。
 
