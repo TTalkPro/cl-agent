@@ -51,6 +51,16 @@ memory-filter 按这个 ID 管，agent 只持 ID。")
 单一对话线程；要并发就按会话各建一个 agent（共享同一个持久 store、
 各自 :conversation-id 即可隔离）。"))
 
+(cl-agent/core:definvariants agent (self)
+  (cl-agent/core:require-slot self 'id "实例标识（调试/日志）")
+  (cl-agent/core:require-slot self 'chat-client "底层执行内核")
+  (cl-agent/core:require-type self 'chat-client 'cl-agent/core:chat-client)
+  ;; memory 允许为 NIL（无记忆，每轮独立），但 conversation-id 不能——
+  ;; 它是 memory-filter 按会话取历史的键，缺了会让多轮记忆静默失效。
+  (cl-agent/core:require-slot self 'conversation-id
+                              "memory-filter 按它取会话历史")
+  (cl-agent/core:require-type self 'memory 'cl-agent/core:chat-memory))
+
 (defmethod print-object ((a agent) stream)
   (print-unreadable-object (a stream :type t)
     (format stream "~A turns=~A~@[ conv=~A~]"
@@ -123,7 +133,8 @@ memory-filter 按这个 ID 管，agent 只持 ID。")
 
 (defun make-agent (&key model system options tools
                         (memory :default) conversation-id
-                        callbacks chat-client settings
+                        callbacks chat-client (max-tool-iterations 10)
+                        (settings nil settings-p)
                         (filters nil filters-p))
   "创建有状态 agent。
 
@@ -142,7 +153,8 @@ memory-filter 按这个 ID 管，agent 只持 ID。")
                     :on-tool-call   (name args) → 返回 (:interrupt . 原因) 触发
                                     暂停待审批（**配了它就等于启用 HITL**）
                     :on-tool-result (name text)
-  - settings        chat-client settings alist（如 '((:max-tool-iterations . 10))）
+  - max-tool-iterations 工具循环上限（缺省 10）
+  - settings        **已移除**。传了直接报错——见 build-chat-client。
   - chat-client          预构建 chat-client（要挂 filter 时用这个）
 
   **本层不接受 :filters**——agent 只暴露 :callbacks。要 filter 请自己
@@ -156,10 +168,13 @@ memory-filter 按这个 ID 管，agent 只持 ID。")
     (make-agent :model m :system \"你是助手\" :tools '(get-weather))
     (make-agent :model m :memory nil)                      ; 无记忆
     (make-agent :chat-client my-chat-client :memory my-store)        ; 自带 filter"
-  (declare (ignore filters))
+  (declare (ignore filters settings))
   ;; 显式报错而非静默忽略：clj-agent 那边是 warn + ignore，但静默丢弃
   ;; 横切能力正是本仓库刚清理掉的那类坑（ChatClient 的横切槽位最后
   ;; 全成了 no-op，记忆/护栏无声失效）。宁可直接拦下并给出出路。
+  (when settings-p
+    (error "make-agent 不再接受 :settings——用 :max-tool-iterations。~@
+            见 build-chat-client 的同名报错。"))
   (when filters-p
     (error "make-agent 不接受 :filters——agent 层只暴露 :callbacks。~@
             要挂 filter 请自建 chat-client 后经 :chat-client 传入：~@
@@ -176,7 +191,7 @@ memory-filter 按这个 ID 管，agent 只持 ID。")
                  :system system
                  :options options
                  :tools tools
-                 :settings settings
+                 :max-tool-iterations max-tool-iterations
                  :filters (remove nil
                                   (list (when store
                                           (cl-agent/core:memory-filter store))))))))
@@ -192,20 +207,20 @@ memory-filter 按这个 ID 管，agent 只持 ID。")
       ;;   :on-tool-result → :tool filter（结果只能在执行后拿到）
       ;;   :on-tool-call   → tool-gate（要能在执行前否决，这是 HITL 的入口）
       (when (or (getf callbacks :on-tool-call) (getf callbacks :on-tool-result))
+        ;; mutate 而非重建：此前这里是把 chat-client 逐槽拆开再 build 一遍，
+        ;; 每加一个 chat-client 槽都要记得在这儿补一行，漏了就静默丢配置。
         (setf (slot-value a 'chat-client)
-              (cl-agent/core:build-chat-client
-               :model (cl-agent/core:chat-client-model k)
-               :system (cl-agent/core:chat-client-default-system k)
-               :options (cl-agent/core:chat-client-default-options k)
-               :tools (cl-agent/core:chat-client-tools k)
-               :settings (cl-agent/core:chat-client-settings k)
-               :tool-manager (cl-agent/core:chat-client-tool-manager k)
-               :eligibility-fn (cl-agent/core:chat-client-eligibility-fn k)
-               :tool-gate (when (getf callbacks :on-tool-call) (agent-gate a))
+              (cl-agent/core:chat-client-mutate
+               k
                ;; 结果 filter 放最外层：它要看到全部工具调用
                :filters (if (getf callbacks :on-tool-result)
                             (cons (result-filter a) (cl-agent/core:chat-client-filters k))
-                            (cl-agent/core:chat-client-filters k)))))
+                            (cl-agent/core:chat-client-filters k))
+               :tool-calling (if (getf callbacks :on-tool-call)
+                                 (cl-agent/core:tool-calling-config-mutate
+                                  (cl-agent/core:chat-client-tool-calling k)
+                                  :tool-gate (agent-gate a))
+                                 (cl-agent/core:chat-client-tool-calling k)))))
       a)))
 
 ;;; ============================================================
@@ -231,17 +246,17 @@ memory-filter 按这个 ID 管，agent 只持 ID。")
 ;;; ============================================================
 
 (defun %turn->agent-result (agent turn)
-  "把 chat-client 的 turn-result 归一化成 agent-result，并同步 agent 的暂停态。"
-  (let ((status (cl-agent/core:turn-result-status turn))
-        (resp (cl-agent/core:turn-result-response turn)))
+  "把 chat-client 的 chat-client-response 归一化成 agent-result，并同步 agent 的暂停态。"
+  (let ((status (cl-agent/core:chat-client-response-status turn))
+        (resp (cl-agent/core:chat-client-response-chat-response turn)))
     (if (eq status :paused)
         ;; 暂停：把 loop-state 记在 agent 上，等 agent-resume
-        (let ((pending (cl-agent/core:turn-result-pending-tool turn)))
-          (setf (agent-paused-state agent) (cl-agent/core:turn-result-loop-state turn))
+        (let ((pending (cl-agent/core:chat-client-response-pending-tool turn)))
+          (setf (agent-paused-state agent) (cl-agent/core:chat-client-response-loop-state turn))
           (let ((r (%make-agent-result
                     :status :paused
                     :pending-tool pending
-                    :pause-reason (cl-agent/core:turn-result-pause-reason turn))))
+                    :pause-reason (cl-agent/core:chat-client-response-pause-reason turn))))
             (invoke-callback agent :on-interrupt agent r)
             r))
         (progn

@@ -465,3 +465,21 @@
     (cl-agent/client:agent-resume a :approved)
     (is (equal '(:user :assistant :tool :assistant)
                (roles-of (cl-agent/client:agent-history a))))))
+
+(test make-agent-accepts-max-tool-iterations
+  "make-agent 直传循环上限，与 build-chat-client 一致。
+
+此前只能经 :settings '((:max-tool-iterations . N))——alist 里的一个键，
+拼错就静默回落到 10。"
+  (let ((a (cl-agent/client:make-agent
+            :model (list :fake) :max-tool-iterations 4)))
+    (is (= 4 (cl-agent/core:chat-client-max-tool-iterations
+              (cl-agent/client:agent-chat-client a)))))
+  ;; 旧 settings 形式：报错而非静默接受（见 build-chat-client 的同名断言）
+  (signals error
+    (cl-agent/client:make-agent :model (list :fake)
+                                :settings '((:max-tool-iterations . 2))))
+  ;; 缺省 10
+  (let ((a (cl-agent/client:make-agent :model (list :fake))))
+    (is (= 10 (cl-agent/core:chat-client-max-tool-iterations
+               (cl-agent/client:agent-chat-client a))))))

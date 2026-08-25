@@ -1,7 +1,7 @@
 ;;;; cl-agent-client.asd
 ;;;; CL-Agent Client - SimpleAgent（面向应用的易用层）
 ;;;;
-;;;; Version: 10.0.0
+;;;; Version: 11.0.0
 ;;;;
 ;;;; 三模块分层（对标 clj-agent 的 core / provider / client）：
 ;;;;   cl-agent-core    框架本体：基础设施 + HTTP + Chat API + ChatClient/Filter
@@ -14,7 +14,7 @@
   :description "CL-Agent Client - SimpleAgent（有状态对话 + callbacks + 错误归一化）"
   :author "David"
   :license "MIT"
-  :version "10.0.0"
+  :version "11.0.0"
 
   :depends-on (#:cl-agent-core)
 
