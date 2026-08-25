@@ -102,6 +102,13 @@ Returns:
                  :cache-read-tokens cache-read-tokens
                  :cache-creation-tokens cache-creation-tokens))
 
+(definvariants llm-usage (self)
+  ;; 负 token 数会一路流进计费与配额计算，且不会有任何报错
+  (require-that self (and (>= (llm-usage-input-tokens self) 0)
+                          (>= (llm-usage-output-tokens self) 0)
+                          (>= (llm-usage-total-tokens self) 0))
+                "token 计数不能为负"))
+
 (defmethod print-object ((usage llm-usage) stream)
   "Print llm-usage object"
   (print-unreadable-object (usage stream :type t)
@@ -163,6 +170,17 @@ Returns:
                            (intern (string-upcase (string name)) :keyword))
                  :arguments arguments
                  :raw raw))
+
+(definvariants llm-tool-call (self)
+  ;; SPI 层的工具调用，语义同 chat 层的 tool-call：id 对回请求，name 分派。
+  ;; 这两个槽的值直接来自厂商响应（plist-to-llm-response 的 (getf tc :id)），
+  ;; 所以违反时最可能的原因不是调用方写错，而是**厂商响应缺字段或该
+  ;; provider 的解析器没提取到**——错误消息里说明这一点，免得读到的人
+  ;; 从自己的代码里找原因。
+  (require-slot self 'id
+                "来自厂商响应；为空通常意味着该 provider 的解析器没提取到 id")
+  (require-slot self 'name
+                "来自厂商响应；为空通常意味着该 provider 的解析器没提取到 name"))
 
 (defmethod print-object ((tc llm-tool-call) stream)
   "Print llm-tool-call object"
@@ -356,6 +374,31 @@ Returns:
         :cache-read-tokens (getf usage :cache-read-tokens)
         :cache-creation-tokens (getf usage :cache-creation-tokens)))
       (t nil))))
+
+(definvariants llm-response (self)
+  ;; finish-reason 只校验**类型**，不校验白名单——这是刻意的。
+  ;;
+  ;; normalize-finish-reason 的兜底分支把任何未映射的厂商值原样转成
+  ;; keyword（(intern (string-upcase ...) :keyword)），那是**容错设计**：
+  ;; 厂商随时可能加新的 finish_reason（"safety"、"refusal"…），上层用
+  ;; (eq reason :tool-call) 这类判断，未知值走 else 分支是正确行为。
+  ;;
+  ;; 一度在这里挂了白名单校验，结果把这个容错变成硬失败：厂商返回任何
+  ;; 新值 → 归一化产出 :SAFETY → make-llm-response 当场抛
+  ;; invariant-violation → 整轮对话崩。测试全是已知值所以照样绿，
+  ;; 只有真实响应会炸。**白名单是「我们认识的值」，不是「合法值的全集」。**
+  ;; 类型仍然校验——**槽的 :type 声明在 CL 里不是可移植的运行时保证**：
+  ;; CCL 在槽赋值时就查（抛自己的 BAD-SLOT-TYPE-FROM-INITARG，早于
+  ;; initialize-instance :after），SBCL 在默认 safety 下**根本不查**。
+  ;; 只靠 :type 的话，同一份坏数据在 SBCL 上会一路流下去。
+  ;; 代价是两种实现抛的条件类型不同（CCL 先撞它自己那道），调用方按
+  ;; error 兜即可。
+  (require-type self 'finish-reason 'keyword
+                "厂商值经 normalize-finish-reason 归一；未认识的原样保留")
+  (require-that self (every (lambda (tc) (typep tc 'llm-tool-call))
+                            (llm-response-tool-calls self))
+                "tool-calls 必须是 llm-tool-call 实例列表")
+  (require-type self 'usage 'llm-usage))
 
 (defmethod print-object ((response llm-response) stream)
   "Print llm-response object"

@@ -21,7 +21,7 @@
 ;;; 统一嵌入响应
 ;;; ============================================================
 
-(defclass embedding-response ()
+(defclass embedding-response (model-response)
   ((embeddings
     :initarg :embeddings
     :initform nil
@@ -42,7 +42,27 @@
     :initform nil
     :accessor embedding-response-raw
     :documentation "provider 原始响应"))
-  (:documentation "统一嵌入响应（对标 llm-response 在对话侧的地位）"))
+  (:documentation "统一嵌入响应（对标 llm-response 在对话侧的地位）。
+
+  继承 model-response：横切代码（计费、配额、观测）可以对 chat-response
+  与 embedding-response 用同一套问法，不必按模态分支。"))
+
+(definvariants embedding-response (self)
+  (require-that self (listp (embedding-response-embeddings self))
+                "embeddings 是向量列表，顺序同输入文本")
+  (require-type self 'usage 'llm-usage))
+
+;;; 接入 model-response 协议。
+;;; 嵌入响应没有独立的 metadata 对象——用量/模型名直接是自己的槽，
+;;; 所以这里 response-metadata 返回自身，metadata-usage 从同一个槽取。
+(defmethod response-results ((response embedding-response))
+  (embedding-response-embeddings response))
+
+(defmethod response-metadata ((response embedding-response))
+  response)
+
+(defmethod metadata-usage ((metadata embedding-response))
+  (embedding-response-usage metadata))
 
 (defun make-embedding-response (&key embeddings model usage raw-response)
   "创建 embedding-response"
