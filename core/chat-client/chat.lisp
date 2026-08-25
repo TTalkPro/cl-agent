@@ -4,7 +4,7 @@
 ;;;; 概述：
 ;;;;   chat-client 的面向调用方入口。build-chat-client 装配好 model/filters/tools 之后，
 ;;;;   chat 宏负责把一次请求的 system/user/messages/options/tools/context
-;;;;   物化成 turn-request，交给 invoke-turn，再按终结操作取出结果。
+;;;;   物化成 chat-client-request，交给 invoke-turn，再按终结操作取出结果。
 ;;;;
 ;;;;   (chat *chat-client*
 ;;;;     (:system "你是一个天气助手")
@@ -45,7 +45,7 @@
         options)))
 
 (defun chat-client-call (chat-client &key system user messages options tools context)
-  "执行一次完整对话轮次，返回 turn-result。
+  "执行一次完整对话轮次，返回 chat-client-response。
 
   参数（均为请求级，覆盖/合并 chat-client 上的同名默认值）：
   - system    系统提示文本；不给则用 chat-client 的 :system
@@ -69,16 +69,16 @@
                         :tool-callbacks (cl-agent/core:resolve-tool-callbacks tools))
                        options)
                       options))
-         (ctx context))
-    ;; caller-options 经 context 传给 run-tool-loop，由它合并到每轮调用
-    (when options
-      (setf (getf ctx :caller-options) options))
-    (invoke-turn chat-client (make-turn-request msgs :context ctx))))
+         ;; 请求级 options 装进 prompt——它和 messages 一样是请求的一等成分。
+         ;; 此前是塞进 context 的 :caller-options 键偷传给 run-tool-loop，
+         ;; 循环里再捞出来合并，折进 tool-context 时还得特意剔除「不外泄」。
+         (prompt (cl-agent/core:make-prompt msgs :options options)))
+    (invoke-turn chat-client
+                 (make-chat-client-request prompt :context context))))
 
 (defun chat-client-text (chat-client &rest args)
   "chat-client-call 的取文本快捷式：返回最终回复文本。"
-  (let ((result (apply #'chat-client-call chat-client args)))
-    (cl-agent/core:chat-response-text (turn-result-response result))))
+  (chat-client-response-text (apply #'chat-client-call chat-client args)))
 
 (defun chat-client-entity (chat-client &rest args)
   "chat-client-call 的结构化输出快捷式：把回复解析为 JSON 值。
@@ -180,7 +180,7 @@
 终结操作（缺省 (:call :content)）：
   :content   回复文本（字符串）
   :response  chat-response 实例
-  :result    turn-result 实例（要看 status / tool-calls-made 时用）
+  :result    chat-client-response 实例（要看 status / tool-calls-made 时用）
   :entity    把回复解析为 JSON 值（只解析不校验，校验挂
              validation-turn-filter）
 
@@ -232,7 +232,7 @@
       (ecase (first terminal)
         (:call (ecase (second terminal)
                  (:content `(chat-client-text ,chat-client ,@args))
-                 (:response `(turn-result-response (chat-client-call ,chat-client ,@args)))
+                 (:response `(chat-client-response-chat-response (chat-client-call ,chat-client ,@args)))
                  (:result `(chat-client-call ,chat-client ,@args))
                  (:entity `(chat-client-entity ,chat-client ,@args))))
         (:stream `(chat-client-stream ,chat-client ,(second terminal) ,@args))))))

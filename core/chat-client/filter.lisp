@@ -47,7 +47,7 @@
     :initarg :turn
     :initform nil
     :reader filter-turn-hook
-    :documentation ":turn 钩子：(turn-request chain) → turn-result 或 nil")
+    :documentation ":turn 钩子：(chat-client-request chain) → chat-client-response 或 nil")
    (token-xform
     :initarg :token-xform
     :initform nil
@@ -63,6 +63,13 @@
 (defun filter-name-default (filter)
   "缺省名称：类名 downcase。"
   (string-downcase (symbol-name (type-of filter))))
+
+(definvariants filter (self)
+  ;; 缺省名依赖类型（类名 downcase），:initform 表达不了，所以是不变式
+  ;; 而非缺省值。此前它只写在 filter-name-default 里、靠每个调用点记得问，
+  ;; 于是 (filter-name f) 对没给名字的实例返回 NIL——日志里一个空名字。
+  (unless (filter-name self)
+    (setf (slot-value self 'name) (filter-name-default self))))
 
 (defun make-filter (name &key chat tool turn token-xform)
   "Filter 通用工厂。

@@ -151,12 +151,12 @@
                'cl-agent/core:chat-response))))
 
 (test chat-client-chat-call-result
-  "(:call :result) 返回 turn-result（能看到 status）"
+  "(:call :result) 返回 chat-client-response（能看到 status）"
   (let ((k (make-chat-test-chat-client (text-response "ok"))))
     (let ((r (cl-agent/core:chat k (:user "hi") (:call :result))))
-      (is (eq :completed (cl-agent/core:turn-result-status r)))
+      (is (eq :completed (cl-agent/core:chat-client-response-status r)))
       (is (string= "ok" (cl-agent/core:chat-response-text
-                         (cl-agent/core:turn-result-response r)))))))
+                         (cl-agent/core:chat-client-response-chat-response r)))))))
 
 (test chat-client-entity
   "(:call :entity) 解析 JSON（容忍代码围栏）"
