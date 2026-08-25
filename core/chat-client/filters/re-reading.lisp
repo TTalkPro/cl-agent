@@ -26,9 +26,9 @@
     (make-filter
      :re-reading
      :turn (lambda (req chain)
-             (if (turn-request-resume-p req)
+             (if (chat-client-request-resume-p req)
                  (funcall chain req)
-                 (let* ((messages (turn-request-messages req))
+                 (let* ((messages (chat-client-request-messages req))
                         ;; 找最后一条 user 消息
                         (last-user (find-if (lambda (m)
                                               (typep m 'cl-agent/core:user-message))
@@ -42,8 +42,7 @@
                                                   (cl-agent/core:user-message enhanced)
                                                   m))))
                          (funcall chain
-                                  (make-turn-request new-messages
-                                                     :context (turn-request-context req)
-                                                     :resume-p (turn-request-resume-p req))))
+                                  (chat-client-request-mutate
+                                   req :messages new-messages)))
                        ;; 无 user 消息 → 不改写
                        (funcall chain req))))))))

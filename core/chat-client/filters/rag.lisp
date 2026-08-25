@@ -49,12 +49,12 @@
       (make-filter
        :rag
        :turn (lambda (req chain)
-               (let* ((messages (turn-request-messages req))
+               (let* ((messages (chat-client-request-messages req))
                       ;; 找最后一条 user 消息
                       (last-user (find-if (lambda (m)
                                             (typep m 'cl-agent/core:user-message))
                                           messages :from-end t)))
-                 (if (and last-user (not (turn-request-resume-p req)))
+                 (if (and last-user (not (chat-client-request-resume-p req)))
                      (let* ((query (cl-agent/core:message-text last-user))
                             (docs (retrieve retriever query :top-k top-k)))
                        (if (or docs inject-when-empty)
@@ -66,8 +66,8 @@
                                                       (cl-agent/core:user-message enhanced)
                                                       m))))
                              (funcall chain
-                                      (make-turn-request new-messages
-                                                          :context (turn-request-context req))))
+                                      (chat-client-request-mutate
+                                       req :messages new-messages)))
                            ;; 检索为空 → 不注入
                            (funcall chain req)))
                      ;; 无 user 消息 → 不注入

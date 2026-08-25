@@ -51,6 +51,7 @@
                  (if (tool-result-error resp)
                      (funcall fn (format nil "← ~A ERROR: ~A"
                                          name
-                                         (getf (tool-result-error resp) :message)))
+                                         (tool-error-message
+                                          (tool-result-error resp))))
                      (funcall fn (format nil "← ~A ok" name)))
                  resp))))))

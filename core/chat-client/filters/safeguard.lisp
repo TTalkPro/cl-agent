@@ -18,7 +18,7 @@
   行为：
   - 检查入口 messages 中所有文本内容
   - 大小写不敏感匹配
-  - 命中 → 返回 turn-result(:cancelled)，不调 chain
+  - 命中 → 返回 chat-client-response(:cancelled)，不调 chain
   - 未命中 → 正常调 chain
 
   边界：只查入口消息，不查工具结果或模型输出（输出侧用 token-xform）。"
@@ -31,15 +31,15 @@
              (let ((texts (mapcar (lambda (m)
                                     (string-downcase
                                      (or (cl-agent/core:message-text m) "")))
-                                  (turn-request-messages req))))
+                                  (chat-client-request-messages req))))
                ;; 检查任一消息是否包含任一敏感词
                (if (some (lambda (kw)
                            (some (lambda (text) (search kw text)) texts))
                          lower-keywords)
                    ;; 命中：短路
-                   (make-turn-result
+                   (make-chat-client-response
                     :cancelled
-                    :response (cl-agent/core:make-chat-response
+                    :chat-response (cl-agent/core:make-chat-response
                                (cl-agent/core:make-generation
                                 (cl-agent/core:assistant-message failure-response)
                                 :finish-reason :stop)))
