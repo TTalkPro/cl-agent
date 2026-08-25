@@ -68,6 +68,11 @@
 ;;; DI 容器类
 ;;; ============================================================
 
+;;; 刻意没有 definvariants：DI 容器是**独立公开设施**，库内部不使用
+;;; （见 asd 里的说明），它的槽全是内部状态（bindings / singletons 两张
+;;; hash-table + parent），由 make-di-container 一次建好后不再由外部提供。
+;;; 判据见 core/invariants.lisp 头注的三分类。
+
 (defclass di-container ()
   ((bindings :initform (make-hash-table :test #'equal)
             :reader di-bindings
