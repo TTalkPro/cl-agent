@@ -6,10 +6,10 @@
 ;;;;   协议：每个 filter 持有四个钩子（:chat/:tool/:turn/:token-xform），
 ;;;;   钩子是普通函数而非泛型方法，存放在 CLOS 槽里。
 ;;;;
-;;;;   与现有 advisor 的差异：
-;;;;   - advisor 走 advise-call 泛型方法分发，filter 走槽位访问 + 函数调用
-;;;;   - advisor 单一链（ChatClient.advise-call），filter 三链（chat/tool/turn）
-;;;;   - advisor 用 order 字段排序，filter 用列表位置决定层级（注册顺序 = 洋葱外→内）
+;;;;   三个设计取舍：
+;;;;   - 钩子存槽位、直接函数调用，不走泛型方法分发
+;;;;   - 三条独立的链（chat/tool/turn），而非单一环绕链
+;;;;   - 没有 order 字段：列表位置即层级（注册顺序 = 洋葱外→内）
 ;;;;
 ;;;;   build-chain（核心）：
 ;;;;     把 filters（注册顺序：靠前 = 最外层）折成洋葱，最内层为 terminal。
@@ -18,8 +18,8 @@
 ;;;;
 ;;;;   defilter 宏：
 ;;;;     一个表达式定义 filter 子类 + 构造函数。钩子体直接引用实例
-;;;;     槽（make-NAME 通过 let 绑定 self，闭包捕获）。比 defadvisor
-;;;;     更简单——不需要泛型方法分发。
+;;;;     槽（make-NAME 通过 let 绑定 self，闭包捕获）。钩子是闭包，
+;;;;     不需要泛型方法分发。
 
 (in-package #:cl-agent/core)
 
@@ -61,7 +61,7 @@
 每条链只调用该链对应槽里非 nil 的钩子。"))
 
 (defun filter-name-default (filter)
-  "缺省名称：类名 downcase（advisor 同款约定）。"
+  "缺省名称：类名 downcase。"
   (string-downcase (symbol-name (type-of filter))))
 
 (defun make-filter (name &key chat tool turn token-xform)

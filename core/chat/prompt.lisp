@@ -3,7 +3,7 @@
 ;;;;
 ;;;; 概述（对标 Spring AI org.springframework.ai.chat.prompt.Prompt）：
 ;;;;   Prompt = 有序消息列表 + 本次调用的 chat-options。
-;;;;   Advisor 通过 prompt-copy 产生增强副本（不可变风格），
+;;;;   Filter 通过 prompt-copy 产生增强副本（不可变风格），
 ;;;;   原 prompt 不被修改。
 
 (in-package #:cl-agent/core)
@@ -46,7 +46,7 @@
     (make-instance 'prompt :messages msgs :options options)))
 
 (defun prompt-copy (prompt &key (messages nil messages-p) (options nil options-p))
-  "拷贝 prompt，可替换消息列表或选项（Advisor 增强用）"
+  "拷贝 prompt，可替换消息列表或选项（filter 增强用）"
   (make-instance 'prompt
                  :messages (if messages-p messages (prompt-messages prompt))
                  :options (if options-p options (prompt-options prompt))))
@@ -65,7 +65,7 @@
   (remove-if #'system-message-p (prompt-messages prompt)))
 
 (defun prompt-last-user-text (prompt)
-  "最后一条 user-message 的文本（无则 NIL），SafeGuard 等 Advisor 用"
+  "最后一条 user-message 的文本（无则 NIL），safeguard 等 filter 用"
   (let ((msg (find-if #'user-message-p (prompt-messages prompt)
                       :from-end t)))
     (when msg (message-text msg))))
@@ -74,7 +74,7 @@
   "最后一条 user-message 或 tool-response-message（无则 NIL）
 （对标 Prompt#getLastUserOrToolResponseMessage）。
 
-记忆类 Advisor 用它确定「本轮新增的输入」——工具循环中
+记忆类 filter 用它确定「本轮新增的输入」——工具循环中
 最后一条输入可能是工具结果而非用户消息。"
   (find-if (lambda (msg)
              (or (user-message-p msg) (tool-response-message-p msg)))

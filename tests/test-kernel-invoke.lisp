@@ -214,9 +214,9 @@
 ;;; ============================================================
 ;;; 循环等价性测试已移除
 ;;;
-;;; 它原本比较「旧 ChatClient+advisor」与「kernel+invoke-turn」两条路径
-;;; 产出是否一致。advisor 退役后 ChatClient 本就走 kernel，该测试变成
-;;; 自己和自己比；cl-agent/client 整体删除后连对照组都不存在了。
+;;; 它原本比较「旧 ChatClient」与「kernel+invoke-turn」两条路径产出是否
+;;; 一致。ChatClient 后来本就走 kernel，该测试变成自己和自己比；
+;;; 旧 cl-agent/client 整体删除后连对照组都不存在了。
 ;;; 工具循环本身的覆盖见本文件上方各测试与 test-kernel-chat.lisp。
 ;;; ============================================================
 

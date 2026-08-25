@@ -158,7 +158,7 @@ memory-filter 按这个 ID 管，agent 只持 ID。")
     (make-agent :kernel my-kernel :memory my-store)        ; 自带 filter"
   (declare (ignore filters))
   ;; 显式报错而非静默忽略：clj-agent 那边是 warn + ignore，但静默丢弃
-  ;; 横切能力正是本仓库刚清理掉的那类坑（ChatClient 的 advisor 槽最后
+  ;; 横切能力正是本仓库刚清理掉的那类坑（ChatClient 的横切槽位最后
   ;; 全成了 no-op，记忆/护栏无声失效）。宁可直接拦下并给出出路。
   (when filters-p
     (error "make-agent 不接受 :filters——agent 层只暴露 :callbacks。~@

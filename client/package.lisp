@@ -16,7 +16,7 @@
 ;;;;   **agent 层不暴露 kernel filter**。想挂 filter 就自己 build-kernel
 ;;;;   再用 :kernel 传进来。理由：简单层一旦开始转发 filter，就会慢慢长成
 ;;;;   第二个 kernel——本仓库刚删掉的 ChatClient 正是这么烂掉的
-;;;;   （最后只剩一堆静默 no-op 的 advisor 槽）。
+;;;;   （最后只剩一堆静默 no-op 的横切槽位）。
 ;;;;   agent 层只暴露 :callbacks（可观测性），职责边界一刀切干净。
 ;;;;
 ;;;; agent 不自己存历史：历史仍由 core 的 memory-filter 按 conversation-id

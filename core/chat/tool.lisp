@@ -481,7 +481,7 @@ register-tool-callback 把它放进全局注册表——那是 opt-in 的逃生�
 ;;;
 ;;; 曾长在 ToolCallingManager 区块里。那套 manager（对标 Spring 的
 ;;; ToolCallingManager，(execute-tool-calls manager prompt response)）
-;;; 已随 Advisor / ChatClient 一并退役——工具执行循环现在唯一住在
+;;; 已随 ChatClient 一并退役——工具执行循环现在唯一住在
 ;;; cl-agent/core:run-tool-loop，批执行在 kernel/batch.lisp，
 ;;; 执行策略在 kernel/tool-calling-manager.lisp。
 ;;; 本函数与 manager 无关（它只是「按名找工具」），且 kernel 的

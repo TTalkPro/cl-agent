@@ -24,11 +24,12 @@
 ;;;; Changelog:
 ;;;;   v9.0.0 - 移除 cl-agent/client（Spring AI 的 ChatClient + Builder +
 ;;;;            fluent RequestSpec 移植）；chat 宏搬入 cl-agent/kernel。
-;;;;            至此 Spring AI 的两大移植层（Advisor、ChatClient）全部退役，
-;;;;            kernel+filter 成为唯一编程模型。
+;;;;            至此 Spring AI 的移植层全部退役，kernel+filter 成为
+;;;;            唯一编程模型。
 ;;;;   v8.0.0 - Spring AI 2.0 对标重构：删除 Process/Checkpoint/Kernel/
 ;;;;            SimpleAgent 体系（cl-agent-extra 移除），新增 ChatClient +
-;;;;            Advisor + ChatModel + ChatMemory + deftool/defadvisor 宏
+;;;;            横切链 + ChatModel + ChatMemory + deftool 宏（前两者已在
+;;;;            v9 退役）
 ;;;;   v7.0.0 - 减法：删除 RAG / MCP / tools 子系统
 ;;;;   v6.0.0 - Core = infra + kernel + simpleagent; extras split out
 ;;;;   v5.0.0 - clj-agent architecture alignment

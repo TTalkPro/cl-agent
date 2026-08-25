@@ -95,7 +95,7 @@
       (is (string= "test_adder" (getf (first tools) :name))))))
 
 (test model-returns-tool-calls-as-is
-  "携带 tool-calls 的响应原样返回（工具循环属于 tool-calling-advisor）"
+  "携带 tool-calls 的响应原样返回（工具循环属于 run-tool-loop）"
   (let* ((provider (make-seq-provider
                     (tool-call-response "test_adder" '(("a" . 1) ("b" . 1)))))
          (model (cl-agent/core:make-provider-chat-model provider))

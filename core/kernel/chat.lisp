@@ -216,10 +216,10 @@
             (:conversation (setf context (append context
                                                  (list :conversation-id
                                                        (second clause)))))
-            ;; Advisor 体系已退役。显式报错而非静默忽略——旧代码里的
-            ;; (:advisors ...) 若被悄悄丢掉，记忆/护栏会无声失效。
+            ;; 旧版 :advisors 子句的兼容拦截：给出改写指引，
+            ;; 而不是让 ecase 抛一个看不懂的错。
             (:advisors
-             (error "(chat ...) 的 :advisors 子句已移除（Advisor 体系退役）。~@
+             (error "(chat ...) 的 :advisors 子句已移除。~@
                      请改用 kernel filter：~@
                      (build-kernel :model m :filters (list (memory-filter mem) ...))"))
             ((:call :stream) (setf terminal clause)))))
