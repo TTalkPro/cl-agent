@@ -7,9 +7,189 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [11.0.0] — 2026-08-25
+
+> Two breaking changes ship together in this release: the
+> `kernel` → `chat-client` rename (previously sitting unreleased) and the
+> three-layer alignment below.
 
 ### Breaking changes
+
+- **Three-layer alignment with Spring AI: Provider / ChatModel / ChatClient.**
+  The boundaries were redrawn so each layer owns one thing. No compatibility
+  shims — this is a pre-1.0 refactor and a shim layer would just freeze the debt.
+
+  **1. The ChatModel now carries the weight of a single call; the `client` class
+  is gone.** `cl-agent/llm`'s `client` class and everything built on it
+  (`client-chat`, `chat-simple`, `chat-with-tools`, `chat-multi-turn`,
+  `batch-chat`, `count-tokens-for-client`, the whole `chat-stream` /
+  `stream-iterator` family, `llm/client.lisp` and `llm/streaming.lisp`) were
+  removed. It duplicated `provider-chat-model`'s job on a path the chat-client
+  trunk never took — and **the retry logic was stranded there**
+  (`chat-with-retry`), so the trunk had no retries at all.
+
+  Retrying and observation are now ChatModel-layer capabilities, applied by a
+  `chat-model-call :around` on the base class so every subclass inherits them
+  and none can forget to wrap itself:
+
+  ```lisp
+  (create-chat-model :anthropic
+    :retry-policy (make-retry-policy :max-attempts 4)
+    :observation-fn (lambda (model prompt thunk) ...))
+  ```
+
+  Retries are **off by default**. What counts as retryable stays single-sourced
+  in `error-retryable-p`; `retryable-error-p`'s bare-HTTP classification moved
+  there as a new `http-error` method. The original condition is rethrown
+  untouched when retries run out.
+
+  | Removed | Use instead |
+  |---|---|
+  | `make-client` / the `client` class / its accessors | `create-chat-model` / `make-provider-chat-model` |
+  | `client-chat` / `chat-simple` / `chat-multi-turn` / `batch-chat` | `chat-model-call`, or the `chat` macro for the filter chain |
+  | `chat-stream` / `chat-stream-simple` / `chat-stream-to-string` / `chat-stream-to-file` / `chat-stream-iterator` / `stream-next` | `chat-model-stream`, or `invoke-chat-stream` for the filter chain |
+  | `chat-with-retry` / `retryable-error-p` | `retry-policy` on the ChatModel; `error-retryable-p` |
+  | `count-tokens-for-client` | `(count-tokens text provider-name)` |
+  | `(embed client ...)` / `(estimate-cost client ...)` | `(embed provider ...)` / `(estimate-cost provider ...)` — `estimate-cost` and `*provider-pricing*` moved to `llm/providers.lisp` |
+
+  **2. Model protocol abstractions** (`core/model/protocol.lisp`, mirroring
+  `org.springframework.ai.model`): `model-request`, `model-response`,
+  `model-result`, `model-options` plus `request-instructions` /
+  `request-options` / `response-result` / `response-results` /
+  `response-metadata` / `response-usage` / `result-output`. `prompt`,
+  `chat-response`, `generation`, `chat-options` and `embedding-response` all
+  plug in, so cross-cutting code stops branching on modality — `(response-usage
+  resp)` answers for a chat response and an embedding response alike.
+
+  **3. The ChatClient carriers were renamed, and one of them fixed.**
+
+  | Before | After |
+  |---|---|
+  | `turn-request` (held bare messages) | `chat-client-request` (holds a `prompt`) |
+  | `turn-result` | `chat-client-response` |
+  | `turn-result-response` | `chat-client-response-chat-response` |
+  | `turn-result-tool-context` | `chat-client-response-context` |
+  | `turn-result-status` / `-loop-state` / `-pending-tool` / `-pause-reason` / `-tool-calls-made` | `chat-client-response-…` (same suffixes) |
+
+  The request holding a `prompt` rather than bare messages removed a
+  back-channel: request-level options used to travel as a `:caller-options` key
+  smuggled through `context`, which `run-tool-loop` fished back out to merge and
+  then had to strip again when folding into `tool-context`. New:
+  `chat-client-request-mutate` (mirroring `ChatClientRequest#mutate`) — filters
+  rewrite requests through it instead of rebuilding by hand and dropping fields,
+  which the rag filter was doing with `resume-p`.
+
+  **4. The ChatClient narrowed from 12 flat slots to 4**: `model`, `filters`,
+  `default-request`, `tool-calling`.
+
+  | Before | After |
+  |---|---|
+  | `tools` / `system` / `options` | `default-request` — a `chat-client-default-request` |
+  | `eligibility-fn` / `tool-gate` / `state-slots` / `tool-manager` / `loop-fn` / `resume-fn`, plus `settings`' `:max-tool-iterations` | `tool-calling` — a `tool-calling-config` (mirrors `ToolCallingAdvisor`) |
+  | `chat-client-settings` / `chat-client-loop-fn` / `chat-client-resume-fn` | removed; use `chat-client-max-tool-iterations` etc., or reach through the aggregates |
+
+  `build-chat-client` keeps every flat argument and gains
+  `:max-tool-iterations`; **`:settings` was removed** and passing it now errors
+  with the migration spelling (same for `make-agent`, which also gained
+  `:max-tool-iterations`). Its one key was read via `(cdr (assoc ...))`, so a
+  typo silently fell back to 10 — keeping a "still accepted" shim would have
+  left that read exactly where it was, just behind a different door. New:
+  `chat-client-mutate` and `tool-calling-config-mutate` (mirroring
+  `ChatClient#mutate`) — deriving a ChatClient used to mean taking it apart slot
+  by slot and rebuilding, which `client/agent.lisp` did, needing a new line for
+  every new slot.
+
+  **5. What should have been classes now are.**
+
+  | Was | Now |
+  |---|---|
+  | `tool-execution-result` plist | `tool-execution-result` class |
+  | `tool-result-error`'s `(:class … :message …)` plist | `tool-error-info` class |
+  | `state-slots`' `((key :init v :reduce fn) …)` | list of `state-slot` instances |
+  | `resume-turn`'s `payload` plist | `resume-payload` class (entry still takes a plist) |
+  | `retry-config` `defstruct` | `retry-config` class |
+
+  Each of these was silently failable. `tool-execution-result` is the contract
+  between the three managers and the tool loop: a typo in `:return-direct`
+  returned NIL, the legal value for "do not short-circuit", so it failed as
+  "approved a return-direct tool and then called the model one more time".
+  `tool-error-info`'s `:class` **is the failure-routing predicate** — only
+  `:transient` on a tool declaring `:retry` gets retried — and as a plist key a
+  typo just meant "the tool did not retry", with no error. A test in this repo
+  had invented a `:timeout` class and stayed green for a dozen versions;
+  turning it into a class broke that test immediately. `state-slots`' `:reduce`
+  misspelled as `:reducer` degraded to last-writer, turning "accumulate" into
+  "overwrite".
+
+  **Class invariants across the board.** `make-instance` is a permanently
+  reachable back door in CL, so "this object must satisfy X as long as it
+  exists" now hangs off `initialize-instance :after` rather than living only in
+  `make-*`. New facility in `core/invariants.lisp`: a `definvariants` macro plus
+  five primitives (`require-slot` / `require-member` / `require-type` /
+  `require-callable` / `require-that`), signalling `invariant-violation` — which
+  inherits `validation-error`, so the shared classification correctly treats it
+  as **not** retryable.
+
+  **36 of 61 classes** carry invariants. The other 25 state why they do not at
+  the definition site — protocol base classes have no slots, providers allow an
+  API key to arrive later, the DI container's slots are self-built internal
+  state. The most important non-case is `chat-options`: none of its slots has an
+  `:initform` because an unbound slot **is** the "unset" signal that
+  `merge-chat-options` and `options->spi-args` are built on. Not every unbound
+  slot is a hole, and a test now guards that decision.
+
+  One caveat learned the hard way, now written into `core/invariants.lisp`:
+  **enum whitelists belong on values we control, not on values an external
+  system returns.** `llm-response`'s `finish-reason` briefly carried one, which
+  turned `normalize-finish-reason`'s fallback into a hard failure — that fallback
+  deliberately interns any unmapped vendor value as a keyword, because vendors
+  add new reasons (`"safety"`, `"refusal"`) and callers testing
+  `(eq reason :tool-call)` correctly fall through. The whitelist made such a
+  response crash at construction; every test used known values, so it stayed
+  green and only real traffic would have hit it. That slot now checks the type
+  only. Whitelists stay where the value space is ours: `retry-config`'s
+  `backoff` (a user setting — `:fibonacci` silently degrading to a flat delay is
+  worth an error), `chat-client-response`'s `status`, and classifications whose
+  fallback is itself inside the whitelist (`tool-error-info` falls back to
+  `:semantic`, `media` to `:document`).
+
+  Rolling this out immediately caught two latent bugs that had been green for
+  versions: a test constructing `tool-result` with `:writes '((:counter . 1))` —
+  an *alist* where `apply-writes` walks a plist by `cddr`, so the fold would have
+  read the key as `(:counter . 1)` and the value as NIL (the test only asserted
+  round-tripping and never actually folded it); and a leftover plist-shaped
+  `:error` that the earlier `tool-error-info` conversion had missed.
+
+  **6. Provider-layer observation.** `*llm-call-observer*` and
+  `*llm-stream-observer*` are `:around` methods on `(t)`, so one `let` binding
+  covers every provider — including mocks and test stubs, and regardless of
+  which base class it inherits from (the real providers inherit
+  `cl-agent/llm:base-provider`, not core's `base-llm-provider`, so hanging the
+  method on the latter would have missed them). Ships with an
+  `llm-usage-tally` + `usage-tally-observer` for token accounting.
+
+  Division of labour with the ChatModel's `observation-fn`: that one wraps a
+  single *logical* call (retries included, one entry — latency), this one wraps
+  every *real wire call* (three retries fire it thrice — cost).
+
+  **7. Versions unified.** All subsystems were on four different numbers
+  (`9.0.0` / `10.0.0` / `4.2.0` / `1.0.0`); they are now all `11.0.0`.
+
+  **Dangling exports removed.** Three symbols were exported without ever being
+  defined — `cl-agent/llm:llm-stream` (zero implementations; the real entry
+  point is `cl-agent/core:llm-chat-stream`), `cl-agent/core:di-container-p`
+  (`di-container` is a `defclass`, so no such predicate was ever generated), and
+  `cl-agent/llm:normalize-messages` (lived in the removed `client.lisp`). The
+  first two predate this change. A new test, `every-export-has-a-definition`,
+  now checks every external symbol of every package, so this class of bug —
+  which has recurred here — fails the suite instead of the caller.
+
+  Baseline: **1396 checks, 0 failures** on SBCL 2.6.7 and CCL (was 1165), plus
+  **13/13** on the live end-to-end script against MiniMax-M2.7
+  (`scripts/live-test.lisp`), which gained two checks for this release: the
+  provider-layer observer accounting real wire-call tokens, and a
+  `retry-policy` leaving the happy path untouched.
+
 
 - **Renamed: `kernel` → `chat-client`, and the LLM `service` layer → `chat-model`.**
   A pure rename — no semantics, no behaviour, no wire format changed. Every

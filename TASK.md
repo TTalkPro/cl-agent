@@ -7,10 +7,19 @@
 > （810 → 652：advisor 实现与测试一并删除；→ 693：旧 ToolCallingManager
 >  测试随该层退役，安全边界测试改写保留；→ 761：新增 SimpleAgent、
 >  HITL pause/resume、消息去重、线程池限流、故障分类与重试等测试）。
-> 真实 provider 验证：`scripts/live-test.lisp` MiniMax **8/8**
-> （单次问答 / 工具循环 / 多轮记忆 / schema 校验 / HITL 暂停·批准·拒绝 / SSE）。
+> 真实 provider 验证：`scripts/live-test.lisp` MiniMax-M2.7 **13/13**
+> （单次问答 / 工具循环 / 多轮记忆 / schema 校验 / HITL 暂停·批准·拒绝 /
+>  渐进式工具披露 / 流式 token 脱敏 / SSE / :writes 折叠 /
+>  provider 层用量记账 / ChatModel 重试策略）。
 >
 > 完整重构计划见 `.sisyphus/plans/chat-client-filter-refactor.md`。
+>
+> **后续重构**：三层职责对齐 Spring AI（Provider / ChatModel / ChatClient），
+> 计划与执行记录见 `.sisyphus/plans/spring-ai-layering.md`，
+> 变更清单见 `CHANGELOG.md` 的 Unreleased。测试基线已升至 **1396 checks**
+> （SBCL + CCL）。**下方「已完成」条目保留写作当时的符号名**（`turn-request` /
+> `turn-result` / `settings` 等），它们记录的是当时的状态；现名对照见
+> CHANGELOG。
 
 ---
 
@@ -19,12 +28,13 @@
 三模块分层（对标 clj-agent 的 core / provider / client）：
 
 ```
-cl-agent/core（框架本体，单包 477 导出）
+cl-agent/core（框架本体，单包）
+  ├── Model 抽象协议（model-request/response/result/options）
   ├── Filter CLOS 类（四钩子: :tool/:chat/:turn/:token-xform）
   ├── build-chain（洋葱折叠, 闭包仅下游, 递归重入免费）
-  ├── ChatClient（model/tools/filters/settings/tool-manager +
-  │   默认 system/options, 无 memory）
-  ├── 载体：tool-request/tool-result、turn-request/turn-result
+  ├── ChatModel（单次调用的重活：options 合并/重试/观测/响应规范化）
+  ├── ChatClient（四槽：model/filters/default-request/tool-calling, 无 memory）
+  ├── 载体：tool-request/tool-result、chat-client-request/chat-client-response
   │   （chat 链无专门载体：请求=prompt，响应=chat-response）
   ├── invoke-chat/tool/turn + run-tool-loop（:turn terminal）
   ├── invoke-tool-batch（并行/:serial/故障路由）
@@ -50,7 +60,7 @@ cl-agent/client（面向应用的易用层，v10 新增）
 - [x] build-chain 洋葱折叠（reduce + reverse → 嵌套闭包）
 - [x] defilter 宏（(self req chain) 三参数签名）
 - [x] chat-client CLOS 类（model/tools/filters/settings, 无 memory）
-- [x] 载体类（tool-request/response, turn-request/result）
+- [x] 载体类（tool-request/result, chat-client-request/response）
 - [x] 测试基线 715 → 756（+41）
 
 ### P2: 三链 invoke 原语 + 工具循环 ✅
