@@ -44,9 +44,60 @@
 > 的旧 ToolCallingManager 整体删除，随后三包合并。**旧文档里所有
 > 「必须 shadowing-import」的说法都已作废。** 迁移见文末[迁移指引](#迁移)。
 >
-> 全库已**零 shadow**：`cl-agent/llm` 曾因低层函数与 core 的 `chat` 宏
-> 撞名而 `(:shadow #:chat)`，该函数已改名 `client-chat`，shadow 随之消失。
-> 现在同时 `:use` 任意本库的包都不会撞名。
+> 全库已**零 shadow**：`cl-agent/llm` 曾因低层 `chat` 函数与 core 的 `chat` 宏
+> 撞名而 `(:shadow #:chat)`。该函数先改名 `client-chat`，随后连同 `client` 类
+> 一并移除（见文末[迁移指引](#迁移)）。现在同时 `:use` 任意本库的包都不会撞名。
+
+## 类不变式（`definvariants`）
+
+CL 里 `make-instance` 是**永远可达的后门**——`(defun make-foo ...)` 只是约定
+俗成的入口，没人拦得住调用方直接 `(make-instance 'foo ...)`。所以「这个对象
+只要存在就必须满足 X」挂在 `initialize-instance :after` 上，而不是只写在
+`make-*` 里。违反时**在构造点**报错，而不是几层调用之后表现为一个难懂的症状。
+
+```lisp
+(definvariants tool-call (self)
+  (require-slot self 'id "模型靠它把结果对回请求")
+  (require-slot self 'name "工具分派靠它"))
+```
+
+五个原语：
+
+| 原语 | 用途 |
+|---|---|
+| `(require-slot obj slot why)` | 必填：未绑定或 NIL 都算缺失。`why` 会进错误消息 |
+| `(require-member obj slot allowed &optional why)` | 枚举值——写错 keyword 不报错、只会静默走错分支，这类最值得校验 |
+| `(require-type obj slot type &optional why)` | 「可选，但给了就得是这个类型」（NIL 放行） |
+| `(require-callable obj slot &optional why)` | 函数或函数名（NIL 放行） |
+| `(require-that obj test fmt &rest args)` | 任意跨槽约束 |
+
+违反时发 `invariant-violation`，继承 `validation-error`——按统一分类它**不可
+重试**（重试一个构造错误不会有不同结果，否则 `retry-policy` 会白白重试三次
+再抛同一个错）。
+
+### 什么该写成不变式，什么不该
+
+三分类，判据写在 `core/invariants.lisp` 头注：
+
+- **A 类（写）**——「对象存在就必须满足」。典型：`tool-call` 必须有 id、
+  `chat-client-response(:paused)` 必须带 `loop-state`。
+- **B 类（不写，留在构造函数）**——输入归一。`make-prompt` 接受
+  string / message / list 并统一成消息列表，那是**入口的贴心**，不是类的性质
+  （prompt 的性质是「messages 槽里存 message 实例列表」）。搬进
+  `initialize-instance` 反而会让 `make-instance` 也吃字符串，模糊了「槽里到底
+  存什么」。
+- **C 类（不写）**——纯缺省值，那是 `:initform` 的活。例外是缺省值依赖别的槽
+  （`filter` 的「没给名字就用类名」，`:initform` 表达不了）。
+
+### 刻意的例外
+
+`chat-options` **没有**不变式，这是结论不是遗漏：它十几个槽全部没有
+`:initform`，槽 unbound **就是**「未设置」的语义——`merge-chat-options` 靠
+`slot-boundp` 实现覆盖链，`options->spi-args` 靠它实现「存在才下发」（凭空补
+一个 temperature 会让 Opus 4.7+ 直接 400）。**不是每个 unbound 槽都是漏洞。**
+
+其余不挂的也都在类定义处写明了理由：协议基类不带槽（无槽即无约束）、
+provider 允许延迟提供 API key、DI 容器的槽全是自建内部状态。
 
 ## cl-agent/core —— Chat Model API
 
@@ -100,7 +151,7 @@
 未显式传入的选项处于"未设置"状态，合并时回退默认值。
 
 > **工具循环选项不在 chat-options 里。** 循环上限由 chat-client 的 settings 承担：
-> `(build-chat-client :settings '((:max-tool-iterations . 10)))`；续跑判据由
+> `(build-chat-client :max-tool-iterations 10)`；续跑判据由
 > `:eligibility-fn` 承担。chat-options 只描述**一次**模型调用。
 
 ### 扩展思考（:thinking）
@@ -216,13 +267,68 @@
 (chat-model-call model prompt)             ; prompt 可为字符串/消息列表
 (chat-model-stream model prompt on-chunk)  ; on-chunk: (delta-text)，真 SSE
 (chat-model-default-options model)
+(chat-model-retry-policy model)
+(chat-model-observation-fn model)
 
-(make-provider-chat-model provider :default-options options)
+(make-provider-chat-model provider &key default-options retry-policy observation-fn)
 ```
 
-ChatModel 只做**单次**模型调用——解析工具引用并注入 schema，但不执行工具。
-携带 tool-calls 的响应原样返回，工具循环由 `cl-agent/core:run-tool-loop`
-（`:turn` 链的 terminal）承担。
+**职责边界。** ChatModel 承担**单次调用范围内的全部重活**——options 解析
+合并、重试、观测、响应规范化、流式聚合；provider 只负责「底层信息 + 如何
+调用」（端点、鉴权、请求体格式、响应解析）。
+
+ChatModel **不含**工具循环：携带 tool-calls 的响应原样返回，循环由
+`cl-agent/core:run-tool-loop`（`:turn` 链的 terminal）承担。这与新版
+Spring AI 一致——那边也已经把循环从 `XxxChatModel` 移到了 ChatClient 层的
+`ToolCallingAdvisor`。
+
+#### 重试（`retry-policy`）
+
+```lisp
+(make-retry-policy &key max-attempts    ; 总尝试次数（**含**首次），缺省 3
+                        initial-delay   ; 首次重试前延迟（秒），缺省 1.0
+                        backoff         ; 退避倍数，缺省 2.0
+                        max-delay       ; 单次延迟上限（秒），缺省 60.0
+                        jitter          ; 抖动比例，缺省 0.1（±10%）
+                        retryable-p     ; (condition) → boolean，缺省 error-retryable-p
+                        on-retry)       ; (condition attempt delay) → nil
+
+(create-chat-model :anthropic
+  :retry-policy (make-retry-policy :max-attempts 4))
+```
+
+重试属于 ChatModel、不属于 provider：同一个 provider 在不同 ChatModel 实例
+下可以配不同的重试预算。实现是挂在基类上的 `chat-model-call :around`——
+新写一个 ChatModel 子类不需要记得调重试封装，也不可能漏。
+
+**缺省不重试**（`retry-policy` 为 nil 时走零开销路径）。
+
+要不要重试由 `error-retryable-p` 单一裁定（`core/conditions.lisp`）：
+瞬态 HTTP 状态（408/409/425/429/5xx）与网络层失败可重试，鉴权/参数错不
+重试。重试耗尽后**原样抛出**最后一次的条件，不包装——包装成新类型会断掉
+上层按同一套分类做的决策。
+
+> **流式路径注意**：已经吐给回调的 token 不会被撤回。流跑到一半断掉再重试，
+> 调用方会看到前半段重复。流式通常应把 `retry-policy` 留空。
+
+> 与 HTTP 层的 `retry-config`（`core/http/retry.lisp`）区分：那个管一次 HTTP
+> 请求的重试，`max-retries` 是「额外重试几次」（不含首次）；`retry-policy`
+> 管一次模型调用，`max-attempts` 是「总共尝试几次」（含首次）。两层各自有
+> 重试是刻意的，调用方通常只配后者。
+
+#### 观测（`observation-fn`）
+
+```lisp
+;; (model prompt thunk) → response
+:observation-fn (lambda (model prompt thunk)
+                  (declare (ignore model prompt))
+                  (let ((start (get-internal-real-time)))
+                    (prog1 (funcall thunk)
+                      (log-latency (- (get-internal-real-time) start)))))
+```
+
+钩子包住的是**含重试的整次调用**，所以记到的是一次逻辑调用的总耗时与最终
+结果，而不是每次尝试各记一条。要按尝试观测，用 `retry-policy` 的 `:on-retry`。
 
 ### ChatMemory（`ChatMemory` / `ChatMemoryRepository`）
 
@@ -256,7 +362,7 @@ ChatModel 只做**单次**模型调用——解析工具引用并注入 schema�
 |---|---|---|---|
 | `:chat` | `filter-chat-hook` | `prompt` → `chat-response` | `chat-model-call` |
 | `:tool` | `filter-tool-hook` | `tool-request` → `tool-result` | 工具执行 |
-| `:turn` | `filter-turn-hook` | `turn-request` → `turn-result` | `run-tool-loop` |
+| `:turn` | `filter-turn-hook` | `chat-client-request` → `chat-client-response` | `run-tool-loop` |
 | `:token-xform` | `filter-token-xform` | `(downstream) → (values emit finish)` | 流式 token 流 |
 
 ```
@@ -264,7 +370,7 @@ invoke-turn → [:turn filters] → run-tool-loop
   ├── invoke-chat → [:chat filters] → chat-model-call
   ├── 有 tool-calls 且 eligible → invoke-tool-batch → [:tool filters] → 工具
   │     追加消息 → 回到上一步
-  └── 否则 → turn-result(:completed)
+  └── 否则 → chat-client-response(:completed)
 ```
 
 ### Filter（对标 `CallAdvisor` / `AdvisorChain`）
@@ -345,63 +451,174 @@ invoke-turn → [:turn filters] → run-tool-loop
 (make-tool-result &key value writes error)
 (tool-result-value r)       ; 工具返回值
 (tool-result-writes r)      ; 状态写意图 plist（见下方「:writes 状态折叠」）
-(tool-result-error r)       ; (:class :semantic|:transient|:environment :message "...") 或 nil
+(tool-result-error r)       ; tool-error-info 实例，或 nil（成功）
+
+;; 故障描述——分类是具名槽，构造时校验必须是三者之一
+(make-tool-error-info &key class message cause)
+(tool-error-class r)        ; :semantic | :transient | :environment
+(tool-error-message r)      ; 回传模型的那句
+(tool-error-cause r)        ; 原 condition（可为 nil）
 
 (tool-result->text r)       ; → 回传模型的文本；错误结果渲染为「错误：<message>」
 
-;; Turn 链
-(make-turn-request messages &key context resume-p)
-(turn-request-messages r) (turn-request-context r) (turn-request-resume-p r)
+;; Turn 链（ChatClient 层，对标 Spring AI ChatClientRequest / ChatClientResponse）
+(make-chat-client-request prompt &key context resume-p)
+;; PROMPT 可以是 prompt 实例、消息列表或字符串——后两者自动包装
+(chat-client-request-prompt r)      ; 本轮完整输入（messages + options）
+(chat-client-request-messages r)    ; 便捷读：prompt 的消息列表
+(chat-client-request-options r)     ; 便捷读：prompt 的 chat-options
+(chat-client-request-context r)     ; 开放字典 plist（filter 间共享）
+(chat-client-request-resume-p r)    ; 是否从暂停恢复
 
-(make-turn-result status &key response tool-context tool-calls-made
-                              loop-state pending-tool pause-reason)
-(turn-result-status r)          ; :completed | :paused | :cancelled | :error
-(turn-result-response r)        ; 最终 chat-response（出错时 nil）
-(turn-result-tool-context r)    ; 折叠完全部批次 :writes 后的最终 context
-(turn-result-tool-calls-made r) ; 本轮工具调用计数
+;; 改写请求用 mutate，不要手工重建——未指定的字段原样保留
+(chat-client-request-mutate r &key messages options context resume-p)
+
+(make-chat-client-response status &key chat-response context tool-calls-made
+                                       loop-state pending-tool pause-reason)
+(chat-client-response-status r)           ; :completed | :paused | :cancelled | :error
+(chat-client-response-chat-response r)    ; 最终 chat-response（出错/被拦时 nil）
+(chat-client-response-text r)             ; 便捷读：最终回复文本
+(chat-client-response-context r)          ; 折叠完全部批次 :writes 后的最终 context
+(chat-client-response-tool-calls-made r)  ; 本轮工具调用轮数
 ;; 仅 :paused 时有值（见「HITL：暂停与续跑」）
-(turn-result-loop-state r)      ; 续跑快照，喂给 resume-turn
-(turn-result-pending-tool r)    ; 待审批的工具（name/args/id）
-(turn-result-pause-reason r)    ; gate 给的原因文本
+(chat-client-response-loop-state r)       ; 续跑快照，喂给 resume-turn
+(chat-client-response-pending-tool r)     ; 待审批的工具（name/args/id）
+(chat-client-response-pause-reason r)     ; gate 给的原因文本
 ```
 
 > `:chat` 链**不用**包装载体：请求就是 `cl-agent/core:prompt`，响应就是
 > `chat-response`。
 >
-> 命名：`tool-request` → `tool-result` 与 turn 链的 `turn-request` →
-> `turn-result` 对称。`tool-result` 曾叫 `tool-response`（初始参数 `:result`，
+> **请求持有 prompt，不是裸 messages。** 请求级 options 是 prompt 的一部分，
+> 与 messages 平级。此前 options 是塞进 `context` 的 `:caller-options` 键偷传给
+> `run-tool-loop` 的，循环里再捞出来合并、折进 `tool-context` 时还得特意剔除
+> 「不外泄」——那条暗管道已随载体改造消失。
+>
+> **改写请求一律用 `chat-client-request-mutate`。** 手工
+> `make-chat-client-request` 重建很容易漏字段：旧代码里 rag filter 就只传了
+> `:context`、把 `resume-p` 丢成 nil（当时靠分支条件恰好绕开）。
+>
+> `:paused` 的响应**必须**带 `loop-state`，构造时即校验——否则调用方拿到一个
+> 「暂停了但无法续跑」的响应，而这只会在它真的去 resume 时才炸。
+>
+> 命名：`tool-request` → `tool-result` 与 turn 链的 `chat-client-request` →
+> `chat-client-response` 对称。`tool-result` 曾叫 `tool-response`（初始参数 `:result`，
 > 读取器 `tool-response-result`），与 `cl-agent/core:tool-response` 撞名——
 > 后者是协议消息层的值对象，两者分属不同层。改名后撞名消失。
 
 ### ChatClient
 
-```lisp
-(build-chat-client &key model tools filters eligibility-fn settings tool-manager
-                   system options tool-gate state-slots)
-;; model          chat-model 实例
-;; tools          工具符号列表或 tool-callback 列表（缺省 nil）
-;; filters        filter 实例列表（顺序 = 洋葱层级；缺省 nil）
-;; eligibility-fn (response context) → boolean，判断是否继续工具迭代
-;;                （缺省 (constantly t)）
-;; settings       配置 alist，如 '((:max-tool-iterations . 10))
-;; tool-manager   ToolCallingManager 实例；nil = 走 invoke-tool-batch 原路径
-;; system         默认系统提示文本；请求级 (:system ...) 覆盖它
-;; options        默认 chat-options；请求级 (:options ...) 合并覆盖
-;; tool-gate      工具审批闸门（HITL）：(tool-call) → :proceed | :pause
-;;                | (:pause . 原因)；nil（缺省）= 不审批，全部直接执行
-;; state-slots    状态槽声明 ((key :init v0 :reduce fn) ...)——工具批次
-;;                :writes 的合并语义（见「:writes 状态折叠」）
-;; loop-fn        自定义工具循环 (chat-client turn-request) → turn-result；
-;;                nil（缺省）= run-tool-loop。它就是 :turn 链的 terminal，
-;;                换掉它即换掉整个循环骨架
-;; resume-fn      自定义暂停延续 (chat-client loop-state decision payload)
-;;                → turn-result；nil（缺省）= 内建实现。与 loop-fn 成对
+ChatClient 是**四个槽**（对标 Spring AI 的 ChatClient）：
 
-(chat-client-model k) (chat-client-tools k) (chat-client-filters k)
-(chat-client-eligibility-fn k) (chat-client-settings k) (chat-client-tool-manager k)
-(chat-client-default-system k) (chat-client-default-options k) (chat-client-tool-gate k)
-(chat-client-state-slots k) (chat-client-loop-fn k) (chat-client-resume-fn k)
+| 槽 | 装什么 | 对标 |
+|---|---|---|
+| `model` | 往哪调 | `ChatModel` |
+| `filters` | 链上有谁 | `advisors` |
+| `default-request` | 请求默认长什么样（system / options / tools） | `DefaultChatClientRequestSpec` |
+| `tool-calling` | 工具循环怎么跑 | `ToolCallingAdvisor` |
+
+刻意**没有** memory 槽：记忆是 filter，不是 ChatClient 的固有属性。
+
+`build-chat-client` 接受扁平参数，内部聚合成上面两个值对象：
+
+```lisp
+(build-chat-client &key model filters
+                        ;; → default-request
+                        system options tools
+                        ;; → tool-calling
+                        max-tool-iterations eligibility-fn tool-gate
+                        state-slots tool-manager loop-fn resume-fn
+                        ;; 或直接给聚合对象（给了就整体覆盖上面对应的扁平参数）
+                        default-request tool-calling
+                        ;; 已废弃，仍接受
+                        settings)
+;; model               chat-model 实例
+;; filters             filter 实例列表（顺序 = 洋葱层级；缺省 nil）
+;;
+;; ---- 默认请求 ----
+;; system              默认系统提示文本；请求级 (:system ...) 覆盖它
+;; options             默认 chat-options；请求级 (:options ...) 合并覆盖
+;; tools               默认工具引用（符号/tool-callback 列表；缺省 nil）
+;;
+;; ---- 工具循环 ----
+;; max-tool-iterations 循环上限（缺省 10）
+;; eligibility-fn      (response context) → boolean，判断是否继续工具迭代
+;;                     （缺省 (constantly t)）
+;; tool-gate           工具审批闸门（HITL）：(tool-call) → :proceed | :pause
+;;                     | (:pause . 原因)；nil（缺省）= 不审批，全部直接执行
+;; state-slots         状态槽声明 ((key :init v0 :reduce fn) ...)——工具批次
+;;                     :writes 的合并语义（见「:writes 状态折叠」）
+;; tool-manager        ToolCallingManager 实例；nil = 走 invoke-tool-batch 原路径
+;; loop-fn             自定义工具循环 (chat-client request) → chat-client-response；
+;;                     nil（缺省）= run-tool-loop。它就是 :turn 链的 terminal，
+;;                     换掉它即换掉整个循环骨架
+;; resume-fn           自定义暂停延续 (chat-client loop-state decision payload)
+;;                     → chat-client-response；nil（缺省）= 内建实现。与 loop-fn 成对
+;;
+;; settings            配置 alist。**已废弃**：唯一的键 :max-tool-iterations
+;;                     现在是具名参数。仍然接受，但只在没有显式
+;;                     :max-tool-iterations 时读它。
+
+;; 槽访问器
+(chat-client-model k) (chat-client-filters k)
+(chat-client-default-request k) (chat-client-tool-calling k)
+
+;; 便捷访问器：穿过聚合直接读叶子
+(chat-client-tools k) (chat-client-default-system k) (chat-client-default-options k)
+(chat-client-max-tool-iterations k) (chat-client-eligibility-fn k)
+(chat-client-tool-gate k) (chat-client-state-slots k) (chat-client-tool-manager k)
+
+;; 聚合对象本身
+(make-chat-client-default-request &key system options tools)
+(default-request-system r) (default-request-options r) (default-request-tools r)
+
+(make-tool-calling-config &key max-iterations eligibility-fn tool-gate
+                               state-slots tool-manager loop-fn resume-fn)
+(tool-calling-max-iterations c) (tool-calling-eligibility-fn c)
+(tool-calling-tool-gate c) (tool-calling-state-slots c)
+(tool-calling-tool-manager c) (tool-calling-loop-fn c) (tool-calling-resume-fn c)
 ```
+
+**派生一个改了若干处的 ChatClient**（对标 `ChatClient#mutate`）：
+
+```lisp
+;; 加一个 filter，其余原样共享
+(chat-client-mutate k :filters (cons my-filter (chat-client-filters k)))
+
+;; 只换 tool-gate：先 mutate 配置，再 mutate chat-client
+(chat-client-mutate k
+  :tool-calling (tool-calling-config-mutate (chat-client-tool-calling k)
+                                            :tool-gate my-gate))
+```
+
+四个槽都是不可变值对象，共享安全。此前要派生一个 ChatClient 只能把它
+逐槽拆开再 `build-chat-client` 一遍——每加一个槽都要记得补一行，漏了就
+静默丢配置（`client/agent.lisp` 里就是这么写的）。
+
+### 状态槽与续跑载荷
+
+```lisp
+;; 状态槽：决定工具批次 :writes 在屏障处怎么合并
+(make-state-slot key &key init reduce-fn)
+(state-slot-key s) (state-slot-init s) (state-slot-reduce-fn s)
+(find-state-slot slots key)
+
+;; :notes 累加而非覆盖
+(build-chat-client :model m
+  :state-slots (list (make-state-slot :notes :init nil :reduce-fn #'append)))
+
+;; HITL 续跑载荷
+(make-resume-payload &key message args)
+(resume-payload-message p) (resume-payload-args p)
+(coerce-resume-payload plist-or-instance-or-nil)   ; resume-turn 入口处归一
+```
+
+`resume-turn` 的 `:payload` 仍接受 plist（最自然的调用写法），入口处归一成
+实例，内部不再各处 `getf`。
+
+> 状态槽曾是 `(key :init v0 :reduce fn)` 这样的 alist 套 plist，靠
+> `(rest (assoc key slots))` + `getf` 现场解读——`:reduce` 拼成 `:reducer`
+> 就退化成 last-writer，「累加」悄悄变成「覆盖」，不报错。
 
 ### :loop-fn / :resume-fn —— 替换循环骨架
 
@@ -412,13 +629,13 @@ invoke-turn → [:turn filters] → run-tool-loop
 
 ```lisp
 (build-chat-client :model m
-              :loop-fn (lambda (chat-client turn-request) ... ))   ; → turn-result
+              :loop-fn (lambda (chat-client chat-client-request) ... ))   ; → chat-client-response
 ```
 
 **自定义循环的 HITL 是 opt-in 的。** 内建的暂停延续读的是 `run-tool-loop`
 产出的 `loop-state` 快照，看不懂别的循环的暂停点。所以自定义循环若要支持
 暂停/续跑，必须**同时**给 `:resume-fn`——两者成对。反过来，一个从不返回
-`turn-result(:paused)` 的循环永远走不到 resume 路径，不给 `:resume-fn`
+`chat-client-response(:paused)` 的循环永远走不到 resume 路径，不给 `:resume-fn`
 只是少一项能力，不会让行为出错。
 
 两个都不给就是默认路径，行为一字不变。
@@ -445,7 +662,7 @@ invoke-turn → [:turn filters] → run-tool-loop
 
 ;; 一批两个 take-note("a") take-note("b") → 屏障折叠 → (:notes ("a" "b"))
 ;; 下一轮工具经 tool-context 看到折叠后的快照；
-;; 最终由 (turn-result-tool-context result) 交还调用方
+;; 最终由 (chat-client-response-context result) 交还调用方
 ```
 
 规则：
@@ -495,11 +712,11 @@ chat-client 极简：**没有 memory 字段**——记忆是 filter，不是 cha
 
 gate 在**批执行之前**对本批每个 tool-call **恰好评估一次**——gate 常带副作用
 （审计日志、审批 UI、计数器），「恰好一次」是契约的一部分。任一判 `:pause`
-则整轮暂停：**工具一个都不执行**，`run-tool-loop` 返回 `turn-result(:paused)`。
+则整轮暂停：**工具一个都不执行**，`run-tool-loop` 返回 `chat-client-response(:paused)`。
 
 ```lisp
 (resume-turn chat-client loop-state decision &key payload)
-;; loop-state  turn-result(:paused) 上的 (turn-result-loop-state r)
+;; loop-state  chat-client-response(:paused) 上的 (chat-client-response-loop-state r)
 ;; decision    :approved | :rejected | :reply
 ;; payload     :approved + (:args 新参数)  → 编辑后批准（用新参数执行）
 ;;             :rejected + (:message 理由) → 结果「已拒绝执行：<理由>」回模型
@@ -554,7 +771,7 @@ resume 时重新提供；本类只装「续跑所需的数据」。
 |---|---|
 | `(:call :content)`（缺省） | 回复文本（字符串） |
 | `(:call :response)` | `chat-response` 实例 |
-| `(:call :result)` | `turn-result` 实例（要看 `turn-result-status` 时用） |
+| `(:call :result)` | `chat-client-response` 实例（要看 `chat-client-response-status` 时用） |
 | `(:call :entity)` | 回复解析为 JSON 值（**只解析，不校验**） |
 | `(:stream fn)` | 每个文本增量回调 `(fn delta)`，返回最终 `chat-response` |
 
@@ -576,7 +793,7 @@ resume 时重新提供；本类只装「续跑所需的数据」。
 参数由程序拼时比宏顺手：
 
 ```lisp
-(chat-client-call chat-client &key system user messages options tools context)   ; → turn-result
+(chat-client-call chat-client &key system user messages options tools context)   ; → chat-client-response
 (chat-client-text chat-client &rest args)                                   ; → 文本
 (chat-client-entity chat-client &rest args)                                 ; → JSON 值（只解析）
 (chat-client-stream chat-client on-chunk &rest args)                        ; → chat-response
@@ -653,8 +870,8 @@ resume 时重新提供；本类只装「续跑所需的数据」。
                                      ; → (values tool-results return-direct-p)
                                      ; 默认并行（lparallel）；批内任一工具声明
                                      ; :serial → 整批顺序；异常按三类分类路由
-(invoke-turn chat-client turn-request)    ; :turn 链 → run-tool-loop → turn-result
-(run-tool-loop chat-client turn-request)  ; 工具循环本体（:turn 链的 terminal，不是 filter）
+(invoke-turn chat-client chat-client-request)    ; :turn 链 → run-tool-loop → chat-client-response
+(run-tool-loop chat-client chat-client-request)  ; 工具循环本体（:turn 链的 terminal，不是 filter）
 (resume-turn chat-client loop-state decision &key payload)
                                      ; 从暂停点续跑（见「HITL：暂停与续跑」）
 ```
@@ -662,7 +879,7 @@ resume 时重新提供；本类只装「续跑所需的数据」。
 `run-tool-loop` 每轮：构建 prompt（messages + chat-client tools，与调用方 options
 合并）→ `invoke-chat` → 若响应带 tool-calls 且通过 `eligibility-fn` → 执行工具
 → 把 assistant(tool-calls) 与 tool 结果消息追加进 messages → 下一轮；否则返回
-`turn-result(:completed)`。
+`chat-client-response(:completed)`。
 
 - 循环上限取自 settings `:max-tool-iterations`（缺省 10），超限发
   `cl-agent/core:max-tool-iterations-exceeded-error`
@@ -673,7 +890,7 @@ resume 时重新提供；本类只装「续跑所需的数据」。
   转成 `:semantic` 错误结果，`tool-result->text` 渲染为「错误：找不到工具 xxx」
   回传模型自纠
 - `chat-client-tool-gate` 非 nil 时，每批工具执行**前**过一遍 gate；判 `:pause`
-  则返回 `turn-result(:paused)`，工具一个都不执行（见
+  则返回 `chat-client-response(:paused)`，工具一个都不执行（见
   [HITL：暂停与续跑](#hitl暂停与续跑chat-client-原语)）
 
 ### ToolCallingManager（实现）
@@ -764,7 +981,7 @@ forbidden → `:environment`）；兜底 `:semantic`（保守，不重试）。
 ;; 4. safeguard-turn-filter (:turn) —— 对标 SafeGuardAdvisor
 (safeguard-turn-filter keywords &key (failure-response "抱歉，无法处理该请求。"))
 ;; 入口 messages 命中敏感词（大小写不敏感）→ 不调 chain，直接返回
-;; turn-result(:cancelled)。短路在 :turn 层，:chat 的 memory 不执行——
+;; chat-client-response(:cancelled)。短路在 :turn 层，:chat 的 memory 不执行——
 ;; 被拦的输入与拒答都不落库。只查入口消息，输出侧请用 :token-xform。
 
 ;; 5. validation-turn-filter (:turn) —— 对标 StructuredOutputValidationAdvisor
@@ -1034,7 +1251,7 @@ fluent RequestSpec 移植。Builder 与链式 spec 是 Java 的表达习惯：�
 | fluent spec（`client-prompt` → `prompt-user` → `call-content`） | `chat` 宏子句，或 `chat-client-text` 等函数形态 |
 | `(call-content spec)` | `(:call :content)` / `chat-client-text` |
 | `(call-response spec)` | `(:call :response)` |
-| `(call-client-response spec)` | `(:call :result)` → `turn-result`（`client-response` 载体已不存在） |
+| `(call-client-response spec)` | `(:call :result)` → `chat-client-response`（`client-response` 载体已不存在） |
 | `(call-entity spec :schema s)` | `(:call :entity)` / `chat-client-entity`——**无 schema 参数**，校验挂 `validation-turn-filter` |
 | `(stream-content spec fn)` | `(:stream fn)` / `chat-client-stream` |
 | `(prompt-context spec k v)` | `(:context k v)` |
@@ -1042,12 +1259,111 @@ fluent RequestSpec 移植。Builder 与链式 spec 是 Java 的表达习惯：�
 | `default-tools` (Builder) | `build-chat-client :tools`（请求级 `(:tools ...)` 与之取并集） |
 | `default-options` (Builder) | `build-chat-client :options`（请求级 `(:options ...)` 合并覆盖） |
 | `default-system` (Builder) | `build-chat-client :system`（请求级 `(:system ...)` 覆盖） |
-| `client-request` / `client-response` / `context-get` / `context-set` | `turn-request` / `turn-result` + `turn-request-context`（plist） |
+| `client-request` / `client-response` / `context-get` / `context-set` | `chat-client-request` / `chat-client-response` + `chat-client-request-context`（plist） |
+
+### 三层职责对齐 Spring AI（未发布）
+
+Provider / ChatModel / ChatClient 的职责边界重新划分，**不保向后兼容**。
+
+**1. ChatModel 承重，`client` 类退役。**
+
+`cl-agent/llm` 的 `client` 类连同 `client-chat` / `chat-simple` /
+`chat-with-tools` / `chat-multi-turn` / `batch-chat` / `chat-stream` 一族整体
+移除——它是一条与 `chat-model` 平行的死路径，重复 `provider-chat-model` 的
+职责，而 chat-client 主干从不经过它。**重试逻辑当时就困在这条路径里
+（`chat-with-retry`），于是整条主干无重试**。
+
+| 旧 | 新 |
+|---|---|
+| `(make-client :provider :anthropic :model "...")` | `(create-chat-model :anthropic :model "...")` |
+| `(client-chat client messages ...)` | `(chat-model-call model prompt)` |
+| `(chat-simple client "...")` | `(chat-response-text (chat-model-call model "..."))` |
+| `(chat-stream client msgs cb ...)` | `(chat-model-stream model prompt on-delta)`，或带 filter 链的 `invoke-chat-stream` |
+| `:retry` / `:retry-delay` / `chat-with-retry` | `:retry-policy (make-retry-policy ...)`（见 [ChatModel 协议](#chatmodel-协议chatmodel--streamingchatmodel)） |
+| `(embed client "...")` | `(embed provider "...")`——嵌入走 `llm-embed` SPI，接受 provider |
+| `(estimate-cost client in out)` | `(estimate-cost provider in out)` |
+| `count-tokens-for-client` | `(count-tokens text provider-name)` |
+
+`retryable-error-p` 的裸 HTTP 分类逻辑收归 `error-retryable-p`（新增
+`http-error` 方法），分类仍是单一来源。
+
+**2. Model 抽象协议。**
+
+新增 `model-request` / `model-response` / `model-result` / `model-options`
+四个抽象类与访问协议（对标 `org.springframework.ai.model`）。`prompt`、
+`chat-response`、`generation`、`chat-options`、`embedding-response` 接入其中，
+横切代码（计费、配额、观测）由此可以不分模态：
+
+```lisp
+(response-usage resp)   ; chat-response 与 embedding-response 都答得上来
+(response-results resp) ; generation 列表 / 向量列表
+(request-instructions p) ; prompt 的消息列表
+```
+
+**3. 载体改名 + 语义摆正。**
+
+| 旧 | 新 |
+|---|---|
+| `turn-request`（持有裸 messages） | `chat-client-request`（持有 `prompt`） |
+| `turn-result` | `chat-client-response` |
+| `turn-result-response` | `chat-client-response-chat-response` |
+| `turn-result-tool-context` | `chat-client-response-context` |
+| `context` 里的 `:caller-options` 暗管道 | 请求级 options 是 `prompt` 的一部分 |
+| 手工 `make-turn-request` 重建 | `chat-client-request-mutate` |
+
+**4. ChatClient 收窄到四个槽。**
+
+| 旧（12 个平级槽） | 新 |
+|---|---|
+| `tools` / `system` / `options` | `default-request`（`chat-client-default-request`） |
+| `eligibility-fn` / `tool-gate` / `state-slots` / `tool-manager` / `loop-fn` / `resume-fn` / `settings` 的 `:max-tool-iterations` | `tool-calling`（`tool-calling-config`） |
+| 逐槽拆开再 `build-chat-client` 一遍 | `chat-client-mutate` / `tool-calling-config-mutate` |
+
+`build-chat-client` 的扁平参数**全部保留**，另加 `:max-tool-iterations`。
+`:settings` **已移除**——传了直接报错并给出迁移写法（`make-agent` 同）。留一层
+「仍然接受」的兼容壳等于把 `(cdr (assoc :max-tool-iterations ...))` 那个读法
+留在原地，只是换了个入口。读取侧：`chat-client-settings` / `chat-client-loop-fn` /
+`chat-client-resume-fn` 不再存在，改用便捷访问器或穿过聚合读。
+
+**5. 该是类的成了类。**
+
+| 旧 | 新 |
+|---|---|
+| `tool-execution-result` plist（`getf`） | `tool-execution-result` 类（`tool-execution-messages` / `-context` / `-return-direct-p` / `-errors`） |
+| `tool-result-error` 的 `(:class ... :message ...)` plist | `tool-error-info` 类（`tool-error-class` / `-message` / `-cause`），构造时校验分类 |
+| `state-slots` 的 `((key :init v :reduce fn) ...)` | `state-slot` 类列表（`make-state-slot :notes :reduce-fn #'append`） |
+| `resume-turn` 的 `payload` plist | `resume-payload` 类（入口仍接受 plist，归一一次） |
+| `retry-config` struct | `retry-config` 类 |
+| `settings` alist | `tool-calling-config` 的具名槽 |
+
+`tool-error-info` 那条最要紧：`:class` **是故障路由的判据**（只有 `:transient`
+且工具声明了 `:retry` 才重试）。它当年是 plist 里的一个键，拼错就静默变 `NIL`，
+表现出来只是「声明了 `:retry` 的工具没重试」——不报错、不告警。仓库里的测试
+甚至编造过一个 `:timeout` 分类并绿了十几个版本；改成类之后那个测试当场就断了。
+
+`initialize-instance :after` 不变式：filter 的缺省名不再为 NIL；
+`chat-client-response(:paused)` 不带 `loop-state` 时构造即报错；
+`tool-error-info` 的分类必须是三者之一；`state-slot` 的键必须是 keyword、
+reducer 必须可调用。
+
+**6. Provider 层横切观测。**
+
+```lisp
+(let* ((tally (make-llm-usage-tally))
+       (*llm-call-observer* (usage-tally-observer tally)))
+  (chat *chat-client* "...")
+  (usage-tally-output-tokens tally))
+```
+
+`*llm-call-observer*` / `*llm-stream-observer*` 是挂在 `(t)` 上的 `:around`，
+覆盖每一个 provider（含 mock 与测试桩），无论它继承自哪个基类。与 ChatModel
+的 `observation-fn` 分工：那边包住一次**逻辑**调用（含重试记一条，算延迟），
+这边包住每一次**真实 wire 调用**（重试三次触发三次，算钱）。
 
 ### 从 chat-client:tool-response 迁移（载体改名）
 
-chat-client 工具链的响应载体改名为 `tool-result`，与 turn 链的 `turn-request` /
-`turn-result` 对称，并借此消除与协议消息层 `tool-response` 的撞名
+chat-client 工具链的响应载体改名为 `tool-result`，与 turn 链的 `chat-client-request` /
+`chat-client-response` 对称，并借此消除与协议消息层 `tool-response` 的撞名
 （撞名消失后三个包才得以合并）。
 
 | 旧（已不存在） | 新 |
@@ -1089,7 +1405,7 @@ chat-client 工具链的响应载体改名为 `tool-result`，与 turn 链的 `t
 | `(execute-tool-calls mgr prompt response)` | `(execute-tool-calls mgr chat-client response options)` |
 | 自己驱动循环：`chat-model-call` + `execute-tool-calls` | `(chat chat-client ...)` / `chat-client-call`——chat-client 是唯一路径 |
 | `(shutdown-tool-calling-manager mgr)` / `with-concurrent-tool-calling-manager` | 无需——chat-client manager 不持有需显式释放的线程池 |
-| `tool-execution-conversation-history` / `-last-message` / `-return-direct-p` | `turn-result-response` / `turn-result-tool-context`；manager 层用 `make-tool-execution-result` 的 `:messages` |
+| `tool-execution-conversation-history` / `-last-message` / `-return-direct-p` | `chat-client-response-chat-response` / `chat-client-response-context`；manager 层用 `make-tool-execution-result` 的 `:messages` |
 | 特化 `process-tool-execution-error` | `:tool` filter，或读 `tool-result-error` 的 `:class` |
 | `:inherit-specials` / `manager-inherit-specials` | `cl-agent/core:with-inherited-specials` + `*inherited-special-variables*` |
 

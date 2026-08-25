@@ -49,10 +49,72 @@ This is exactly the `defpackage` used by `examples/chat-client-usage.lisp` and
 > merged. **Every "you must shadowing-import" claim in older docs is obsolete.**
 > See [Migration](#migration).
 >
-> The library is now **shadow-free**: `cl-agent/llm` used to `(:shadow #:chat)`
-> because its low-level function collided with core's `chat` macro; that
-> function is now `client-chat` and the shadow is gone. You can `:use` any
+> The library is **shadow-free**: `cl-agent/llm` used to `(:shadow #:chat)`
+> because its low-level `chat` function collided with core's `chat` macro. That
+> function was first renamed `client-chat` and has since been removed entirely
+> along with the `client` class (see [Migration](#migration)). You can `:use` any
 > combination of this library's packages without name conflicts.
+
+## Class invariants (`definvariants`)
+
+In CL, `make-instance` is a **permanently reachable back door** — `(defun
+make-foo ...)` is only a convention, and nothing stops a caller from writing
+`(make-instance 'foo ...)`. So "this object must satisfy X as long as it exists"
+hangs off `initialize-instance :after` rather than living only in `make-*`. A
+violation errors **at the construction site** instead of surfacing several calls
+later as a symptom nobody can trace back.
+
+```lisp
+(definvariants tool-call (self)
+  (require-slot self 'id "the model uses it to match results back to requests")
+  (require-slot self 'name "tool dispatch keys off it"))
+```
+
+Five primitives:
+
+| Primitive | Purpose |
+|---|---|
+| `(require-slot obj slot why)` | Required: unbound or NIL both count as missing. `why` goes into the error message |
+| `(require-member obj slot allowed &optional why)` | Enum values — a misspelled keyword does not error, it silently takes the wrong branch, which makes this the most valuable check |
+| `(require-type obj slot type &optional why)` | "Optional, but must be this type when given" (NIL passes) |
+| `(require-callable obj slot &optional why)` | A function or a function name (NIL passes) |
+| `(require-that obj test fmt &rest args)` | Any cross-slot constraint |
+
+Violations signal `invariant-violation`, which inherits `validation-error` — so
+under the shared classification it is **not retryable** (retrying a construction
+error yields nothing new; otherwise a `retry-policy` would burn three attempts
+before rethrowing the same error).
+
+### What belongs in an invariant, and what does not
+
+Three categories; the rationale lives in `core/invariants.lisp`'s header:
+
+- **A (write it)** — "must hold as long as the object exists". Examples: a
+  `tool-call` must have an id; a `chat-client-response(:paused)` must carry a
+  `loop-state`.
+- **B (do not; leave it in the constructor)** — input normalization.
+  `make-prompt` accepts a string / message / list and unifies them into a message
+  list; that is **the entry point being helpful**, not a property of the class
+  (the class's property is "the messages slot holds message instances"). Moving
+  it into `initialize-instance` would make `make-instance` accept strings too,
+  blurring what the slot actually holds.
+- **C (do not)** — plain defaults; that is `:initform`'s job. The exception is a
+  default derived from another slot (`filter`'s "use the class name when no name
+  was given", which `:initform` cannot express).
+
+### The deliberate exception
+
+`chat-options` has **no** invariants, and that is a conclusion rather than an
+omission: none of its dozen-odd slots has an `:initform`, because an unbound slot
+**is** the "unset" signal — `merge-chat-options` implements the override chain
+via `slot-boundp`, and `options->spi-args` implements "send only what is present"
+(inventing a temperature makes Opus 4.7+ return a flat 400). **Not every unbound
+slot is a hole.**
+
+The other classes without invariants each state why at the definition site:
+protocol base classes carry no slots (nothing to constrain), providers allow an
+API key to arrive later, and the DI container's slots are all self-built internal
+state.
 
 ## cl-agent/core — Chat Model API
 
@@ -107,7 +169,7 @@ This is exactly the `defpackage` used by `examples/chat-client-usage.lisp` and
 Options not explicitly passed are "unset" and fall back on merge.
 
 > **Tool-loop options do not live in chat-options.** The iteration cap is a chat-client
-> setting: `(build-chat-client :settings '((:max-tool-iterations . 10)))`; the
+> setting: `(build-chat-client :max-tool-iterations 10)`; the
 > continue-or-stop verdict is `:eligibility-fn`. chat-options describes **one**
 > model call.
 
@@ -230,13 +292,76 @@ Conditions: `tool-execution-error`, `tool-not-found-error`,
 (chat-model-call model prompt)              ; prompt: string/messages/prompt
 (chat-model-stream model prompt on-chunk)   ; on-chunk: (delta-text); real SSE
 (chat-model-default-options model)
-(make-provider-chat-model provider :default-options options)
+(chat-model-retry-policy model)
+(chat-model-observation-fn model)
+
+(make-provider-chat-model provider &key default-options retry-policy observation-fn)
 ```
 
-The ChatModel makes a **single** model call — it resolves tool references and
-injects schemas but never executes tools. Responses carrying tool calls are
-returned as-is; the loop belongs to `cl-agent/core:run-tool-loop` (the terminal
-of the `:turn` chain).
+**Where the work lives.** The ChatModel carries **everything a single call
+involves** — option resolution and merging, retries, observation, response
+normalization, stream aggregation. The provider is responsible only for
+low-level details and how to call: endpoint, auth, request shape, response
+parsing.
+
+The ChatModel does **not** run the tool loop: responses carrying tool calls come
+back as-is, and the loop belongs to `cl-agent/core:run-tool-loop` (the terminal
+of the `:turn` chain). Recent Spring AI does the same — it moved the loop out of
+`XxxChatModel` into the ChatClient layer's `ToolCallingAdvisor`.
+
+#### Retries (`retry-policy`)
+
+```lisp
+(make-retry-policy &key max-attempts    ; total attempts, *including* the first (default 3)
+                        initial-delay   ; delay before the first retry, seconds (default 1.0)
+                        backoff         ; backoff multiplier (default 2.0)
+                        max-delay       ; per-delay ceiling, seconds (default 60.0)
+                        jitter          ; jitter ratio (default 0.1, i.e. ±10%)
+                        retryable-p     ; (condition) → boolean, default error-retryable-p
+                        on-retry)       ; (condition attempt delay) → nil
+
+(create-chat-model :anthropic
+  :retry-policy (make-retry-policy :max-attempts 4))
+```
+
+Retrying belongs to the ChatModel, not the provider: the same provider can sit
+behind ChatModels with different retry budgets. It is implemented as a
+`chat-model-call :around` on the base class — a new ChatModel subclass does not
+have to remember to wrap itself, and cannot forget.
+
+**No retries by default** (a nil `retry-policy` takes a zero-overhead path).
+
+Whether something is retryable is decided by `error-retryable-p`
+(`core/conditions.lisp`) alone: transient HTTP statuses (408/409/425/429/5xx)
+and network-layer failures are; auth and argument errors are not. When retries
+run out the original condition is **rethrown untouched** — wrapping it in a new
+type would break the classification callers upstream rely on.
+
+> **Note on streaming**: tokens already handed to the callback cannot be taken
+> back. If a stream dies halfway and is retried, the caller sees the first part
+> twice. Leave `retry-policy` unset on streaming paths.
+
+> Not to be confused with the HTTP-layer `retry-config`
+> (`core/http/retry.lisp`): that governs one HTTP request, and its `max-retries`
+> counts *additional* attempts (excluding the first), whereas `retry-policy`
+> governs one model call and its `max-attempts` counts *total* attempts
+> (including the first). Having retries at both layers is deliberate; callers
+> normally configure only the latter.
+
+#### Observation (`observation-fn`)
+
+```lisp
+;; (model prompt thunk) → response
+:observation-fn (lambda (model prompt thunk)
+                  (declare (ignore model prompt))
+                  (let ((start (get-internal-real-time)))
+                    (prog1 (funcall thunk)
+                      (log-latency (- (get-internal-real-time) start)))))
+```
+
+The hook wraps the **whole call, retries included**, so it records one logical
+call's total latency and final outcome rather than one entry per attempt. To
+observe per attempt, use the `retry-policy`'s `:on-retry`.
 
 ### ChatMemory
 
@@ -267,7 +392,7 @@ Three onion chains, each with its own carriers and terminal:
 |---|---|---|---|
 | `:chat` | `filter-chat-hook` | `prompt` → `chat-response` | `chat-model-call` |
 | `:tool` | `filter-tool-hook` | `tool-request` → `tool-result` | tool execution |
-| `:turn` | `filter-turn-hook` | `turn-request` → `turn-result` | `run-tool-loop` |
+| `:turn` | `filter-turn-hook` | `chat-client-request` → `chat-client-response` | `run-tool-loop` |
 | `:token-xform` | `filter-token-xform` | `(downstream) → (values emit finish)` | streaming token flow |
 
 ```
@@ -275,7 +400,7 @@ invoke-turn → [:turn filters] → run-tool-loop
   ├── invoke-chat → [:chat filters] → chat-model-call
   ├── tool calls present and eligible → invoke-tool-batch → [:tool filters] → tool
   │     append messages → repeat
-  └── otherwise → turn-result(:completed)
+  └── otherwise → chat-client-response(:completed)
 ```
 
 ### Filter (mirrors `CallAdvisor` / `AdvisorChain`)
@@ -361,66 +486,185 @@ downstream** — upstream can never be re-run, and recursive re-entry is free.
 (make-tool-result &key value writes error)
 (tool-result-value r)       ; the tool's return value
 (tool-result-writes r)      ; state-write intents plist (see ":writes state folding")
-(tool-result-error r)       ; (:class :semantic|:transient|:environment :message "...") or nil
+(tool-result-error r)       ; a tool-error-info instance, or nil on success
+
+;; The failure description — the class is a named slot, validated at construction
+(make-tool-error-info &key class message cause)
+(tool-error-class r)        ; :semantic | :transient | :environment
+(tool-error-message r)      ; the sentence sent back to the model
+(tool-error-cause r)        ; the original condition (may be nil)
 
 (tool-result->text r)       ; → text sent back to the model; error results
                             ; render as "错误：<message>"
 
-;; Turn chain
-(make-turn-request messages &key context resume-p)
-(turn-request-messages r) (turn-request-context r) (turn-request-resume-p r)
+;; Turn chain (ChatClient layer; mirrors Spring AI ChatClientRequest / ChatClientResponse)
+(make-chat-client-request prompt &key context resume-p)
+;; PROMPT may be a prompt instance, a message list, or a string — the latter two
+;; are wrapped automatically
+(chat-client-request-prompt r)      ; the full input for this turn (messages + options)
+(chat-client-request-messages r)    ; convenience: the prompt's message list
+(chat-client-request-options r)     ; convenience: the prompt's chat-options
+(chat-client-request-context r)     ; open dictionary plist (shared between filters)
+(chat-client-request-resume-p r)    ; resuming from a pause?
 
-(make-turn-result status &key response tool-context tool-calls-made
-                              loop-state pending-tool pause-reason)
-(turn-result-status r)          ; :completed | :paused | :cancelled | :error
-(turn-result-response r)        ; final chat-response (nil on error)
-(turn-result-tool-context r)    ; final context after folding every batch's :writes
-(turn-result-tool-calls-made r) ; tool-call count for this turn
+;; Rewrite a request with mutate, never by rebuilding — unspecified fields carry over
+(chat-client-request-mutate r &key messages options context resume-p)
+
+(make-chat-client-response status &key chat-response context tool-calls-made
+                                       loop-state pending-tool pause-reason)
+(chat-client-response-status r)           ; :completed | :paused | :cancelled | :error
+(chat-client-response-chat-response r)    ; final chat-response (nil on error/short-circuit)
+(chat-client-response-text r)             ; convenience: the final reply text
+(chat-client-response-context r)          ; final context after folding every batch's :writes
+(chat-client-response-tool-calls-made r)  ; tool-call rounds for this turn
 ;; Set only when :paused (see "HITL: pause and resume")
-(turn-result-loop-state r)      ; resume snapshot, fed to resume-turn
-(turn-result-pending-tool r)    ; the tool awaiting approval (name/args/id)
-(turn-result-pause-reason r)    ; the reason text the gate supplied
+(chat-client-response-loop-state r)       ; resume snapshot, fed to resume-turn
+(chat-client-response-pending-tool r)     ; the tool awaiting approval (name/args/id)
+(chat-client-response-pause-reason r)     ; the reason text the gate supplied
 ```
 
 > The `:chat` chain has **no** wrapper carrier: the request is a
 > `cl-agent/core:prompt` and the response is a `chat-response`.
 >
+> **The request holds a prompt, not bare messages.** Request-level options are
+> part of the prompt, on the same footing as the messages. They used to travel
+> as a `:caller-options` key smuggled through `context` into `run-tool-loop`,
+> which fished them back out to merge and then had to strip them again when
+> folding into `tool-context`. That back-channel is gone.
+>
+> **Always rewrite a request with `chat-client-request-mutate`.** Rebuilding by
+> hand drops fields: the old rag filter passed only `:context` and reset
+> `resume-p` to nil (a branch condition happened to make that harmless).
+>
+> A `:paused` response **must** carry a `loop-state`, checked at construction —
+> otherwise the caller holds a response that is paused but cannot be resumed,
+> and only finds out when it actually tries to resume.
+>
 > Naming: `tool-request` → `tool-result` is symmetric with the turn chain's
-> `turn-request` → `turn-result`. `tool-result` was once called `tool-response`
+> `chat-client-request` → `chat-client-response`. `tool-result` was once called `tool-response`
 > (initarg `:result`, reader `tool-response-result`), which collided with
 > `cl-agent/core:tool-response` — a protocol-level value object at a different
 > layer. The rename removed the collision.
 
 ### ChatClient
 
-```lisp
-(build-chat-client &key model tools filters eligibility-fn settings tool-manager
-                   system options tool-gate state-slots loop-fn resume-fn)
-;; model          chat-model instance
-;; tools          list of tool symbols or tool-callbacks (default nil)
-;; filters        list of filter instances (order = onion order; default nil)
-;; eligibility-fn (response context) → boolean — should tool iteration continue?
-;;                (default (constantly t))
-;; settings       config alist, e.g. '((:max-tool-iterations . 10))
-;; tool-manager   ToolCallingManager instance; nil = the invoke-tool-batch path
-;; system         default system prompt; a request-level (:system ...) overrides it
-;; options        default chat-options; a request-level (:options ...) merges over it
-;; tool-gate      the approval gate (HITL): (tool-call) → :proceed | :pause
-;;                | (:pause . reason); nil (default) = no approval, all execute
-;; state-slots    state-slot declarations ((key :init v0 :reduce fn) ...) —
-;;                merge semantics for tool-batch :writes (see below)
-;; loop-fn        custom tool loop: (chat-client turn-request) → turn-result;
-;;                nil (default) = run-tool-loop. It IS the :turn chain's
-;;                terminal — replacing it replaces the whole loop skeleton
-;; resume-fn      custom pause continuation:
-;;                (chat-client loop-state decision payload) → turn-result;
-;;                nil (default) = the built-in one. Pairs with loop-fn
+The ChatClient has **four slots** (mirroring Spring AI's ChatClient):
 
-(chat-client-model k) (chat-client-tools k) (chat-client-filters k)
-(chat-client-eligibility-fn k) (chat-client-settings k) (chat-client-tool-manager k)
-(chat-client-default-system k) (chat-client-default-options k) (chat-client-tool-gate k)
-(chat-client-state-slots k) (chat-client-loop-fn k) (chat-client-resume-fn k)
+| Slot | Holds | Mirrors |
+|---|---|---|
+| `model` | where to call | `ChatModel` |
+| `filters` | who is on the chain | `advisors` |
+| `default-request` | what a request looks like by default (system / options / tools) | `DefaultChatClientRequestSpec` |
+| `tool-calling` | how the tool loop runs | `ToolCallingAdvisor` |
+
+Deliberately **no** memory slot: memory is a filter, not an intrinsic property
+of the ChatClient.
+
+`build-chat-client` takes flat arguments and aggregates them into those two
+value objects:
+
+```lisp
+(build-chat-client &key model filters
+                        ;; → default-request
+                        system options tools
+                        ;; → tool-calling
+                        max-tool-iterations eligibility-fn tool-gate
+                        state-slots tool-manager loop-fn resume-fn
+                        ;; or pass the aggregates directly (overrides the flat args above)
+                        default-request tool-calling
+                        ;; deprecated, still accepted
+                        settings)
+;; model               chat-model instance
+;; filters             list of filter instances (order = onion order; default nil)
+;;
+;; ---- default request ----
+;; system              default system prompt; a request-level (:system ...) overrides it
+;; options             default chat-options; a request-level (:options ...) merges over it
+;; tools               default tool references (symbols / tool-callbacks; default nil)
+;;
+;; ---- tool loop ----
+;; max-tool-iterations loop cap (default 10)
+;; eligibility-fn      (response context) → boolean — should tool iteration continue?
+;;                     (default (constantly t))
+;; tool-gate           the approval gate (HITL): (tool-call) → :proceed | :pause
+;;                     | (:pause . reason); nil (default) = no approval, all execute
+;; state-slots         state-slot declarations ((key :init v0 :reduce fn) ...) —
+;;                     merge semantics for tool-batch :writes (see below)
+;; tool-manager        ToolCallingManager instance; nil = the invoke-tool-batch path
+;; loop-fn             custom tool loop: (chat-client request) → chat-client-response;
+;;                     nil (default) = run-tool-loop. It IS the :turn chain's
+;;                     terminal — replacing it replaces the whole loop skeleton
+;; resume-fn           custom pause continuation:
+;;                     (chat-client loop-state decision payload) → chat-client-response;
+;;                     nil (default) = the built-in one. Pairs with loop-fn
+;;
+;; settings            config alist. **Deprecated**: its only key,
+;;                     :max-tool-iterations, is now a named argument. Still read,
+;;                     but only when :max-tool-iterations was not given.
+
+;; Slot accessors
+(chat-client-model k) (chat-client-filters k)
+(chat-client-default-request k) (chat-client-tool-calling k)
+
+;; Convenience accessors that reach through the aggregates
+(chat-client-tools k) (chat-client-default-system k) (chat-client-default-options k)
+(chat-client-max-tool-iterations k) (chat-client-eligibility-fn k)
+(chat-client-tool-gate k) (chat-client-state-slots k) (chat-client-tool-manager k)
+
+;; The aggregates themselves
+(make-chat-client-default-request &key system options tools)
+(default-request-system r) (default-request-options r) (default-request-tools r)
+
+(make-tool-calling-config &key max-iterations eligibility-fn tool-gate
+                               state-slots tool-manager loop-fn resume-fn)
+(tool-calling-max-iterations c) (tool-calling-eligibility-fn c)
+(tool-calling-tool-gate c) (tool-calling-state-slots c)
+(tool-calling-tool-manager c) (tool-calling-loop-fn c) (tool-calling-resume-fn c)
 ```
+
+**Deriving a ChatClient that differs in one place** (mirrors `ChatClient#mutate`):
+
+```lisp
+;; Add a filter; everything else is shared as-is
+(chat-client-mutate k :filters (cons my-filter (chat-client-filters k)))
+
+;; Swap just the tool-gate: mutate the config, then the chat-client
+(chat-client-mutate k
+  :tool-calling (tool-calling-config-mutate (chat-client-tool-calling k)
+                                            :tool-gate my-gate))
+```
+
+All four slots are immutable value objects, so sharing is safe. Deriving a
+ChatClient used to mean taking it apart slot by slot and calling
+`build-chat-client` again — every new slot needed another line there, and a
+missed line silently dropped configuration (`client/agent.lisp` did exactly
+this).
+
+### State slots and the resume payload
+
+```lisp
+;; State slots decide how a tool batch's :writes merge at the barrier
+(make-state-slot key &key init reduce-fn)
+(state-slot-key s) (state-slot-init s) (state-slot-reduce-fn s)
+(find-state-slot slots key)
+
+;; :notes accumulates instead of being overwritten
+(build-chat-client :model m
+  :state-slots (list (make-state-slot :notes :init nil :reduce-fn #'append)))
+
+;; HITL resume payload
+(make-resume-payload &key message args)
+(resume-payload-message p) (resume-payload-args p)
+(coerce-resume-payload plist-or-instance-or-nil)   ; normalized at resume-turn's entry
+```
+
+`resume-turn`'s `:payload` still accepts a plist (the most natural call site),
+normalized once at the entry so the internals never `getf` again.
+
+> State slots used to be an alist of plists, `(key :init v0 :reduce fn)`, read
+> on the spot via `(rest (assoc key slots))` + `getf` — misspelling `:reduce` as
+> `:reducer` silently degraded to last-writer, turning "accumulate" into
+> "overwrite" with no error.
 
 ### :loop-fn / :resume-fn — swapping the loop skeleton
 
@@ -432,14 +676,14 @@ invokes.
 
 ```lisp
 (build-chat-client :model m
-              :loop-fn (lambda (chat-client turn-request) ... ))   ; → turn-result
+              :loop-fn (lambda (chat-client chat-client-request) ... ))   ; → chat-client-response
 ```
 
 **HITL is opt-in for a custom loop.** The built-in pause continuation reads the
 `loop-state` snapshot that `run-tool-loop` produces; it cannot understand a
 different loop's pause point. So a custom loop that wants pause/resume must
 supply `:resume-fn` as well — the two are a pair. A custom loop that never
-returns `turn-result(:paused)` simply never reaches the resume path, so
+returns `chat-client-response(:paused)` simply never reaches the resume path, so
 omitting `:resume-fn` costs a capability rather than breaking behaviour.
 
 Leaving both unset is the default path, byte-for-byte unchanged.
@@ -468,7 +712,7 @@ interleaving never affects the merged result:
 
 ;; one batch of take-note("a") take-note("b") → barrier fold → (:notes ("a" "b"))
 ;; next-round tools see the folded snapshot via tool-context;
-;; (turn-result-tool-context result) hands the final state back to the caller
+;; (chat-client-response-context result) hands the final state back to the caller
 ```
 
 Rules:
@@ -524,11 +768,11 @@ The gate runs **before** batch execution, **exactly once** per tool-call in the
 batch — gates often have side effects (audit logs, approval UI, counters), so
 "exactly once" is part of the contract. Any `:pause` verdict pauses the whole
 turn: **not one tool executes**, and `run-tool-loop` returns
-`turn-result(:paused)`.
+`chat-client-response(:paused)`.
 
 ```lisp
 (resume-turn chat-client loop-state decision &key payload)
-;; loop-state  (turn-result-loop-state r) from the paused turn-result
+;; loop-state  (chat-client-response-loop-state r) from the paused chat-client-response
 ;; decision    :approved | :rejected | :reply
 ;; payload     :approved + (:args new-args) → edit-then-approve (run with new args)
 ;;             :rejected + (:message reason) → "rejected: <reason>" goes back to the model
@@ -584,7 +828,7 @@ Terminal operations:
 |---|---|
 | `(:call :content)` (default) | the reply text (a string) |
 | `(:call :response)` | a `chat-response` instance |
-| `(:call :result)` | a `turn-result` instance (use it to inspect `turn-result-status`) |
+| `(:call :result)` | a `chat-client-response` instance (use it to inspect `chat-client-response-status`) |
 | `(:call :entity)` | the reply parsed as JSON (**parses only, does not validate**) |
 | `(:stream fn)` | calls `(fn delta)` per text delta; returns the final `chat-response` |
 
@@ -608,7 +852,7 @@ Terminal operations:
 Handier than the macro when arguments are assembled programmatically:
 
 ```lisp
-(chat-client-call chat-client &key system user messages options tools context)  ; → turn-result
+(chat-client-call chat-client &key system user messages options tools context)  ; → chat-client-response
 (chat-client-text chat-client &rest args)                                  ; → text
 (chat-client-entity chat-client &rest args)                                ; → JSON value (parse only)
 (chat-client-stream chat-client on-chunk &rest args)                       ; → chat-response
@@ -693,8 +937,8 @@ To get "re-prompt the model with the validation error until it complies", attach
                                      ; parallel by default (lparallel); if any tool
                                      ; in the batch declares :serial the whole batch
                                      ; goes sequential; errors are classified/routed
-(invoke-turn chat-client turn-request)    ; :turn chain → run-tool-loop → turn-result
-(run-tool-loop chat-client turn-request)  ; the loop itself (terminal of the :turn chain,
+(invoke-turn chat-client chat-client-request)    ; :turn chain → run-tool-loop → chat-client-response
+(run-tool-loop chat-client chat-client-request)  ; the loop itself (terminal of the :turn chain,
                                      ; NOT a filter)
 (resume-turn chat-client loop-state decision &key payload)
                                      ; resume from a pause (see "HITL: pause and resume")
@@ -704,7 +948,7 @@ Each `run-tool-loop` iteration: build a prompt (messages + chat-client tools, me
 with the caller's options) → `invoke-chat` → if the response has tool calls and
 `eligibility-fn` says continue → execute tools → append the assistant(tool-calls)
 message and the tool-result message → next iteration; otherwise return
-`turn-result(:completed)`.
+`chat-client-response(:completed)`.
 
 - The cap comes from settings `:max-tool-iterations` (default 10); exceeding it
   signals `cl-agent/core:max-tool-iterations-exceeded-error`
@@ -717,7 +961,7 @@ message and the tool-result message → next iteration; otherwise return
   `tool-result->text` renders as "错误：找不到工具 xxx" and feeds back to the
   model to self-correct
 - When `chat-client-tool-gate` is non-nil, every batch passes the gate **before**
-  execution; a `:pause` verdict returns `turn-result(:paused)` with not one tool
+  execution; a `:pause` verdict returns `chat-client-response(:paused)` with not one tool
   executed (see [HITL: pause and resume](#hitl-pause-and-resume-chat-client-primitive))
 
 ### ToolCallingManager implementations
@@ -816,7 +1060,7 @@ the tool author.
 ;; 4. safeguard-turn-filter (:turn) — mirrors SafeGuardAdvisor
 (safeguard-turn-filter keywords &key (failure-response "抱歉，无法处理该请求。"))
 ;; Inbound messages hitting a keyword (case-insensitive) → chain is never called;
-;; returns turn-result(:cancelled). Short-circuiting at the :turn layer means the
+;; returns chat-client-response(:cancelled). Short-circuiting at the :turn layer means the
 ;; :chat memory filter never runs — neither the blocked input nor the refusal is
 ;; persisted. Only inbound messages are scanned; use :token-xform for the output side.
 
@@ -1112,7 +1356,7 @@ ChatClient usage), use
 | fluent spec (`client-prompt` → `prompt-user` → `call-content`) | `chat` macro clauses, or the `chat-client-text` function forms |
 | `(call-content spec)` | `(:call :content)` / `chat-client-text` |
 | `(call-response spec)` | `(:call :response)` |
-| `(call-client-response spec)` | `(:call :result)` → a `turn-result` (the `client-response` carrier is gone) |
+| `(call-client-response spec)` | `(:call :result)` → a `chat-client-response` (the `client-response` carrier is gone) |
 | `(call-entity spec :schema s)` | `(:call :entity)` / `chat-client-entity` — **no schema parameter**; attach `validation-turn-filter` to validate |
 | `(stream-content spec fn)` | `(:stream fn)` / `chat-client-stream` |
 | `(prompt-context spec k v)` | `(:context k v)` |
@@ -1120,12 +1364,120 @@ ChatClient usage), use
 | `default-tools` (Builder) | `build-chat-client :tools` (request-level `(:tools ...)` unions with it) |
 | `default-options` (Builder) | `build-chat-client :options` (request-level `(:options ...)` merges over it) |
 | `default-system` (Builder) | `build-chat-client :system` (request-level `(:system ...)` overrides it) |
-| `client-request` / `client-response` / `context-get` / `context-set` | `turn-request` / `turn-result` + `turn-request-context` (a plist) |
+| `client-request` / `client-response` / `context-get` / `context-set` | `chat-client-request` / `chat-client-response` + `chat-client-request-context` (a plist) |
+
+### Three-layer alignment with Spring AI (unreleased)
+
+The Provider / ChatModel / ChatClient boundaries were redrawn. **No backward
+compatibility shims.**
+
+**1. The ChatModel carries the weight; the `client` class is gone.**
+
+`cl-agent/llm`'s `client` class — along with `client-chat`, `chat-simple`,
+`chat-with-tools`, `chat-multi-turn`, `batch-chat`, and the `chat-stream`
+family — was removed. It was a dead path running parallel to `chat-model`,
+duplicating `provider-chat-model`'s job, and the chat-client trunk never went
+through it. **The retry logic was stranded on that path (`chat-with-retry`),
+which is why the trunk had no retries at all.**
+
+| Old | New |
+|---|---|
+| `(make-client :provider :anthropic :model "...")` | `(create-chat-model :anthropic :model "...")` |
+| `(client-chat client messages ...)` | `(chat-model-call model prompt)` |
+| `(chat-simple client "...")` | `(chat-response-text (chat-model-call model "..."))` |
+| `(chat-stream client msgs cb ...)` | `(chat-model-stream model prompt on-delta)`, or `invoke-chat-stream` for the filter chain |
+| `:retry` / `:retry-delay` / `chat-with-retry` | `:retry-policy (make-retry-policy ...)` (see [ChatModel protocol](#chatmodel-protocol)) |
+| `(embed client "...")` | `(embed provider "...")` — embeddings go through the `llm-embed` SPI and take a provider |
+| `(estimate-cost client in out)` | `(estimate-cost provider in out)` |
+| `count-tokens-for-client` | `(count-tokens text provider-name)` |
+
+`retryable-error-p`'s bare-HTTP classification moved into `error-retryable-p`
+(a new `http-error` method), keeping classification single-sourced.
+
+**2. Model protocol abstractions.**
+
+New abstract classes and accessor protocols: `model-request`, `model-response`,
+`model-result`, `model-options` (mirroring `org.springframework.ai.model`).
+`prompt`, `chat-response`, `generation`, `chat-options`, and
+`embedding-response` all plug into them, so cross-cutting code (billing, quota,
+observation) can stop branching on modality:
+
+```lisp
+(response-usage resp)    ; both chat-response and embedding-response answer this
+(response-results resp)  ; generations / vectors
+(request-instructions p) ; the prompt's message list
+```
+
+**3. Carrier rename plus a semantic fix.**
+
+| Old | New |
+|---|---|
+| `turn-request` (held bare messages) | `chat-client-request` (holds a `prompt`) |
+| `turn-result` | `chat-client-response` |
+| `turn-result-response` | `chat-client-response-chat-response` |
+| `turn-result-tool-context` | `chat-client-response-context` |
+| the `:caller-options` back-channel in `context` | request-level options are part of the `prompt` |
+| hand-rolled `make-turn-request` rebuilds | `chat-client-request-mutate` |
+
+**4. The ChatClient narrowed to four slots.**
+
+| Old (12 flat slots) | New |
+|---|---|
+| `tools` / `system` / `options` | `default-request` (a `chat-client-default-request`) |
+| `eligibility-fn` / `tool-gate` / `state-slots` / `tool-manager` / `loop-fn` / `resume-fn` / `settings`' `:max-tool-iterations` | `tool-calling` (a `tool-calling-config`) |
+| taking it apart slot by slot and calling `build-chat-client` again | `chat-client-mutate` / `tool-calling-config-mutate` |
+
+`build-chat-client`'s flat arguments **all still work**, plus a new
+`:max-tool-iterations`. `:settings` was **removed** — passing it errors with the
+migration spelling (same for `make-agent`). Keeping a "still accepted" shim
+would have left `(cdr (assoc :max-tool-iterations ...))` exactly where it was,
+just behind a different door. On the read side, `chat-client-settings`,
+`chat-client-loop-fn`, and `chat-client-resume-fn` no longer exist — use the
+convenience accessors or reach through the aggregates.
+
+**5. What should have been classes now are.**
+
+| Old | New |
+|---|---|
+| `tool-execution-result` as a plist (`getf`) | a `tool-execution-result` class (`tool-execution-messages` / `-context` / `-return-direct-p` / `-errors`) |
+| `tool-result-error`'s `(:class ... :message ...)` plist | a `tool-error-info` class (`tool-error-class` / `-message` / `-cause`), class validated at construction |
+| `state-slots`' `((key :init v :reduce fn) ...)` | a list of `state-slot` instances (`make-state-slot :notes :reduce-fn #'append`) |
+| `resume-turn`'s `payload` plist | a `resume-payload` class (the entry still takes a plist, normalized once) |
+| `retry-config` struct | `retry-config` class |
+| `settings` alist | named slots on `tool-calling-config` |
+
+The `tool-error-info` one matters most: `:class` **is the failure-routing
+predicate** (only `:transient` on a tool declaring `:retry` gets retried). As a
+plist key, a typo silently became `NIL`, and the only symptom was "a tool
+declaring `:retry` did not retry" — no error, no warning. A test in this repo
+even invented a `:timeout` class and stayed green for a dozen versions; turning
+it into a class broke that test immediately.
+
+`initialize-instance :after` invariants: a filter's default name is never NIL
+any more; constructing a `chat-client-response(:paused)` without a `loop-state`
+errors at the construction site; a `tool-error-info`'s class must be one of the
+three; a `state-slot`'s key must be a keyword and its reducer callable.
+
+**6. Provider-layer observation.**
+
+```lisp
+(let* ((tally (make-llm-usage-tally))
+       (*llm-call-observer* (usage-tally-observer tally)))
+  (chat *chat-client* "...")
+  (usage-tally-output-tokens tally))
+```
+
+`*llm-call-observer*` / `*llm-stream-observer*` are `:around` methods on `(t)`,
+covering every provider (mocks and test stubs included) no matter which base
+class it inherits from. Division of labour with the ChatModel's
+`observation-fn`: that one wraps a single *logical* call (retries included, one
+entry — latency), this one wraps every *real wire call* (three retries fire it
+thrice — cost).
 
 ### Migrating from `chat-client:tool-response` (carrier rename)
 
 The chat-client tool chain's response carrier was renamed to `tool-result`, symmetric
-with the turn chain's `turn-request` / `turn-result`, which also removed the
+with the turn chain's `chat-client-request` / `chat-client-response`, which also removed the
 collision with the protocol-message-layer `tool-response` (once that collision
 was gone, the three packages could be merged).
 
@@ -1170,7 +1522,7 @@ These pre-merge `cl-agent/chat` symbols **no longer exist**: `tool-calling-manag
 | `(execute-tool-calls mgr prompt response)` | `(execute-tool-calls mgr chat-client response options)` |
 | driving the loop yourself: `chat-model-call` + `execute-tool-calls` | `(chat chat-client ...)` / `chat-client-call` — the chat-client is the only path |
 | `(shutdown-tool-calling-manager mgr)` / `with-concurrent-tool-calling-manager` | not needed — chat-client managers hold no pool requiring explicit release |
-| `tool-execution-conversation-history` / `-last-message` / `-return-direct-p` | `turn-result-response` / `turn-result-tool-context`; at the manager layer, `make-tool-execution-result`'s `:messages` |
+| `tool-execution-conversation-history` / `-last-message` / `-return-direct-p` | `chat-client-response-chat-response` / `chat-client-response-context`; at the manager layer, `make-tool-execution-result`'s `:messages` |
 | specializing `process-tool-execution-error` | a `:tool` filter, or read `tool-result-error`'s `:class` |
 | `:inherit-specials` / `manager-inherit-specials` | `cl-agent/core:with-inherited-specials` + `*inherited-special-variables*` |
 
