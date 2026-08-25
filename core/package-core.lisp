@@ -40,6 +40,20 @@
    #:error-retryable-p
    #:transient-status-p
 
+   ;; === 类不变式（definvariants + 校验原语）===
+   ;; make-instance 是永远可达的后门，所以「这个对象存在就必须满足 X」
+   ;; 挂在 initialize-instance :after 上，而不是只写在 make-* 里。
+   #:invariant-violation
+   #:invariant-object-type
+   #:invariant-slot-name
+   #:invariant-error
+   #:definvariants
+   #:require-slot
+   #:require-member
+   #:require-type
+   #:require-callable
+   #:require-that
+
    ;; 注：此处曾导出 core/types.lisp 的一整套旧类型——消息（make-message /
    ;; system-message / user-message / ...）、ToolCall、Response、Usage、
    ;; InvokeResult，外加 5 个从未实现的 plugin-* defgeneric，共 34 个符号。
@@ -103,7 +117,9 @@
 
    ;; === DI 容器（独立公开设施，库内部不使用） ===
    #:di-container
-   #:di-container-p
+   ;; 注：曾在此导出 di-container-p——di-container 是 defclass 不是
+   ;; defstruct，从来没有过这个自动生成的谓词，等于导出了一个不存在的
+   ;; 函数。判类型用 (typep x 'di-container)。已删除。
    #:make-di-container
    #:di-container-parent
    #:di-bind
@@ -225,6 +241,18 @@
    ;; Capability checking
    #:check-provider-tools-support
    #:check-provider-streaming-support
+   ;; Provider 层横切观测（挂在 (t) 上的 :around，覆盖每一个 provider）
+   ;; 与 ChatModel 的 observation-fn 分工：这里是每次真实 wire 调用，
+   ;; 那边是每次逻辑调用（含重试记一条）。
+   #:*llm-call-observer*
+   #:*llm-stream-observer*
+   #:llm-usage-tally
+   #:make-llm-usage-tally
+   #:usage-tally-calls
+   #:usage-tally-input-tokens
+   #:usage-tally-output-tokens
+   #:usage-tally-observer
+
    ;; Base class
    #:base-llm-provider
    #:provider-default-max-tokens
@@ -496,15 +524,48 @@
    #:tool-not-found-error
    #:tool-not-found-error-tool-name
 
+   ;; ==================== Model 抽象协议 ====================
+   ;; ModelRequest / ModelResponse / ModelResult / ModelOptions 的 CL 对应。
+   ;; 各模态的具体类（prompt / chat-response / generation /
+   ;; embedding-response）接入它，横切代码由此可以不分模态。
+   #:model-request
+   #:model-response
+   #:model-result
+   #:model-options
+   #:request-instructions
+   #:request-options
+   #:response-result
+   #:response-results
+   #:response-metadata
+   #:response-usage
+   #:result-output
+   #:result-metadata
+   #:metadata-usage
+
    ;; ==================== ChatModel ====================
    #:chat-model
    #:chat-model-call
    #:chat-model-stream
    #:chat-model-default-options
+   #:chat-model-retry-policy
+   #:chat-model-observation-fn
    #:provider-chat-model
    #:make-provider-chat-model
    #:chat-model-provider
    #:max-tool-iterations-exceeded-error
+
+   ;; ChatModel 重试策略（重试是 ChatModel 层能力，provider 不参与）
+   #:retry-policy
+   #:make-retry-policy
+   #:retry-policy-max-attempts
+   #:retry-policy-initial-delay
+   #:retry-policy-backoff
+   #:retry-policy-max-delay
+   #:retry-policy-jitter
+   #:retry-policy-retryable-p
+   #:retry-policy-on-retry
+   #:retry-policy-delay-for
+   #:call-with-retry
 
    ;; ==================== ChatMemory ====================
    ;; Repository 协议
@@ -551,23 +612,51 @@
    #:tool-result-value
    #:tool-result-writes
    #:tool-result-error
+   ;; 工具故障的结构化描述（曾是 (list :class ... :message ...) 裸 plist）
+   #:tool-error-info
+   #:make-tool-error-info
+   #:tool-error-class
+   #:tool-error-message
+   #:tool-error-cause
+
+   ;; 状态槽声明（曾是 ((key :init v :reduce fn) ...) alist 套 plist）
+   #:state-slot
+   #:make-state-slot
+   #:state-slot-key
+   #:state-slot-init
+   #:state-slot-reduce-fn
+   #:find-state-slot
+
+   ;; HITL 续跑载荷（曾是 (:message ... :args ...) 裸 plist；
+   ;; resume-turn 仍接受 plist，入口处归一）
+   #:resume-payload
+   #:make-resume-payload
+   #:resume-payload-message
+   #:resume-payload-args
+   #:coerce-resume-payload
    #:tool-result->text
 
    ;; ==================== Turn 链载体 ====================
-   #:turn-request
-   #:make-turn-request
-   #:turn-request-messages
-   #:turn-request-context
-   #:turn-request-resume-p
-   #:turn-result
-   #:make-turn-result
-   #:turn-result-status
-   #:turn-result-response
-   #:turn-result-tool-context
-   #:turn-result-tool-calls-made
-   #:turn-result-loop-state
-   #:turn-result-pending-tool
-   #:turn-result-pause-reason
+   ;; ChatClient 层载体（对标 ChatClientRequest / ChatClientResponse）。
+   ;; 曾名 turn-request / turn-result。
+   #:chat-client-request
+   #:make-chat-client-request
+   #:chat-client-request-prompt
+   #:chat-client-request-context
+   #:chat-client-request-resume-p
+   #:chat-client-request-messages
+   #:chat-client-request-options
+   #:chat-client-request-mutate
+   #:chat-client-response
+   #:make-chat-client-response
+   #:chat-client-response-status
+   #:chat-client-response-chat-response
+   #:chat-client-response-context
+   #:chat-client-response-tool-calls-made
+   #:chat-client-response-loop-state
+   #:chat-client-response-pending-tool
+   #:chat-client-response-pause-reason
+   #:chat-client-response-text
    ;; 暂停载体（HITL）
    #:loop-state
    #:make-loop-state
@@ -585,27 +674,62 @@
    #:pending-tool-id
 
     ;; ==================== ChatClient ====================
+    ;; 四个槽：model / filters / default-request / tool-calling。
+    ;; 收窄前是 12 个平级槽（含一个 settings alist）——工具循环那七项
+    ;; 全部搬进 tool-calling-config（对标 ToolCallingAdvisor），
+    ;; system/options/tools 三项搬进 chat-client-default-request
+    ;; （对标 DefaultChatClientRequestSpec）。
     #:chat-client
-    #:make-chat-client
     #:build-chat-client
+    #:chat-client-mutate
     #:chat-client-model
-    #:chat-client-tools
     #:chat-client-filters
-    #:chat-client-eligibility-fn
-    #:chat-client-settings
-    #:chat-client-tool-manager
+    #:chat-client-default-request
+    #:chat-client-tool-calling
+
+    ;; 默认请求（system / options / tools 的聚合）
+    ;; 注：chat-client-default-request 这一个符号既是类名、也是 chat-client
+    ;; 上的 reader——CL 里类与函数分属不同命名空间，同名不冲突，
+    ;; 已在上面导出，此处不重复。
+    #:make-chat-client-default-request
+    #:default-request-system
+    #:default-request-options
+    #:default-request-tools
+
+    ;; 工具循环配置
+    #:tool-calling-config
+    #:make-tool-calling-config
+    #:tool-calling-config-mutate
+    #:tool-calling-max-iterations
+    #:tool-calling-eligibility-fn
+    #:tool-calling-tool-gate
+    #:tool-calling-state-slots
+    #:tool-calling-tool-manager
+    #:tool-calling-loop-fn
+    #:tool-calling-resume-fn
+
+    ;; 便捷访问器：穿过聚合直接读叶子
+    #:chat-client-tools
     #:chat-client-default-system
     #:chat-client-default-options
+    #:chat-client-tool-calling-config
+    #:chat-client-max-tool-iterations
+    #:chat-client-eligibility-fn
     #:chat-client-tool-gate
     #:chat-client-state-slots
-    #:chat-client-loop-fn
-    #:chat-client-resume-fn
+    #:chat-client-tool-manager
 
     ;; ==================== ToolCallingManager ====================
     #:tool-calling-manager
     #:execute-tool-calls
     #:manager-run-batch
+    #:tool-execution-result
     #:make-tool-execution-result
+    #:tool-execution-messages
+    #:tool-execution-records
+    #:tool-execution-context
+    #:tool-execution-errors
+    #:tool-execution-return-direct-p
     #:sequential-tool-calling-manager
     #:make-sequential-tool-calling-manager
     #:virtual-thread-tool-calling-manager
