@@ -18,27 +18,88 @@
 (in-package #:cl-agent/core)
 
 ;;; ============================================================
-;;; ToolExecutionResult（plain plist，键名冻结）
+;;; ToolExecutionResult
 ;;; ============================================================
+;;; 这曾是个裸 plist（(list :messages ... :context ... :return-direct ...)），
+;;; 消费方一律 getf。它是三个 manager 与工具循环之间的契约，也是最容易被
+;;; 静默吞掉的地方：:return-direct 拼错一个字母，getf 返回 NIL，而 NIL 恰好
+;;; 是「不短路」这个合法值——错误不会报，只会表现为「approve 一个
+;;; return-direct 工具后又多调了一次模型」。同一层里的 tool-request /
+;;; tool-result / chat-client-response 全都是正经 CLOS 类，唯独它不是。
+;;; 改成类之后，拼错的访问器是 undefined function，当场就断。
+
+(defclass tool-execution-result ()
+  ((messages
+    :initarg :messages
+    :initform nil
+    :reader tool-execution-messages
+    :documentation "tool-response 列表（按原 tool-call 序）")
+   (records
+    :initarg :records
+    :initform nil
+    :reader tool-execution-records
+    :documentation "执行记录累积")
+   (context
+    :initarg :context
+    :initform nil
+    :reader tool-execution-context
+    :documentation "**应用 writes 后**的 context。
+
+这是协议承诺、不是可选项：调用方拿到它就直接当下一轮的 context 用。
+此前该承诺只写在 docstring 里，三个 manager 的手写实现全都原样透传
+入参——写意图在 manager 路径上静默丢失。共享骨架收敛后由
+fold-batch-writes 统一折叠。")
+   (errors
+    :initarg :errors
+    :initform nil
+    :reader tool-execution-errors
+    :documentation "失败调用的错误摘要 plist 列表（每项 :id :name :class :message）。
+
+这一层刻意仍是 plist：它是**面向调用方的只读摘要**，交给日志/上报消费，
+不参与任何分派决策。参与分派的那个是 tool-result-error，已是
+tool-error-info 类。")
+   (return-direct
+    :initarg :return-direct
+    :initform nil
+    :reader tool-execution-return-direct-p
+    :documentation "全批工具是否都声明了 :return-direct（短路信号）。
+
+只有整批都声明才为真——一批里混着普通工具时结果必须回模型。"))
+  (:documentation "一批工具执行的结果（对标 Spring AI ToolExecutionResult）。
+
+  manager 与工具循环之间的契约载体。"))
 
 (defun make-tool-execution-result (&key messages records context errors return-direct)
-  "创建 tool-execution-result。
+  "创建 tool-execution-result。"
+  (make-instance 'tool-execution-result
+                 :messages messages
+                 :records records
+                 :context context
+                 :errors errors
+                 :return-direct return-direct))
 
-  键名冻结（向后兼容持久化的 pause 快照）：
-  - :messages       tool-response 列表（按原 call 序）
-  - :records        执行记录累积
-  - :context        应用 writes 后的 context
-  - :errors         错误信息列表
-  - :return-direct  全批工具是否都声明了 :return-direct（短路信号）"
-  (list :messages messages
-        :records records
-        :context context
-        :errors errors
-        :return-direct return-direct))
+(definvariants tool-execution-result (self)
+  ;; :context 是协议承诺「应用 writes 之后」的那一份，调用方直接拿它当下一轮
+  ;; 的 context。messages 必须是列表（哪怕空）——它会直接进消息序列。
+  (require-that self (listp (tool-execution-messages self))
+                "messages 是 tool-response 列表")
+  (require-that self (listp (tool-execution-errors self))
+                "errors 是错误摘要 plist 列表"))
+
+(defmethod print-object ((result tool-execution-result) stream)
+  (print-unreadable-object (result stream :type t)
+    (format stream "~A msgs~[~:; ~:*~A errors~]~:[~; return-direct~]"
+            (length (tool-execution-messages result))
+            (length (tool-execution-errors result))
+            (tool-execution-return-direct-p result))))
 
 ;;; ============================================================
 ;;; ToolCallingManager 协议
 ;;; ============================================================
+
+;;; 协议基类与 sequential / virtual-thread 两个实现都**不带槽**，
+;;; 所以没有 definvariants——不变式是关于槽的值的，无槽即无约束。
+;;; 带 pool-size 的 thread-pool 实现有（见文件下方）。
 
 (defclass tool-calling-manager ()
   ()
@@ -56,8 +117,7 @@
   - response  chat-response（含 tool-calls）
   - options   plist：(:tool-context ctx :gate gate-fn ...)
 
-  返回 tool-execution-result plist：
-  (:messages [...] :records [...] :context ctx :errors [...])"))
+  返回 tool-execution-result 实例。"))
 
 ;;; ============================================================
 ;;; 共享骨架 + manager-run-batch（CLOS 差异点收敛）
@@ -171,6 +231,12 @@ nil = 尚未创建或已关闭。")
 生命周期：线程池懒创建（首次执行时），**用完须 shutdown**，否则 worker
 线程泄漏。要么显式调 shutdown-tool-calling-manager，要么用
 with-thread-pool-tool-calling-manager 宏（推荐，非局部退出也能回收）。"))
+
+(definvariants thread-pool-tool-calling-manager (self)
+  ;; pool-size 是批内并发的硬上限，0 或负数会让 lparallel kernel 建不起来，
+  ;; 而那要等到第一次真的执行工具批次时才发生。
+  (require-that self (>= (tcm-pool-size self) 1)
+                "pool-size 是 worker 线程数，至少为 1"))
 
 (defun make-thread-pool-tool-calling-manager (&optional (pool-size 4))
   "创建线程池 tool-calling-manager。

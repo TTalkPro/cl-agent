@@ -102,7 +102,8 @@
              :tool (lambda (req chain)
                      (declare (ignore chain))
                      (cl-agent/core:make-tool-result
-                      :error (list :class :timeout :message "超时")))))
+                      :error (cl-agent/core:make-tool-error-info
+                              :class :transient :message "超时")))))
            (chat-client2 (cl-agent/core:build-chat-client
                      :model (chat-client-model-for-test chat-client)
                      :tools '(ki-adder)
@@ -115,8 +116,12 @@
                      callback :args '(:a 1 :b 2)))))
         (is (null (cl-agent/core:tool-result-value resp))
             "结果被 filter 短路")
-        (is (eq :timeout
-                (getf (cl-agent/core:tool-result-error resp) :class)))))))
+        ;; 注：这里曾断言 :class 为 :timeout——一个**不在三分类体系里**的值。
+        ;; 错误当时是裸 plist，没有任何校验，于是这个测试连同它编造的分类
+        ;; 一起绿了十几个版本。真实的 timeout-filter 用的一直是 :transient
+        ;; （超时可重试）。tool-error-info 在构造时校验分类，这类编造当场就断。
+        (is (eq :transient
+                (cl-agent/core:tool-error-class (cl-agent/core:tool-result-error resp))))))))
 
 ;;; ============================================================
 ;;; run-tool-loop + invoke-turn
@@ -137,12 +142,12 @@
          (text-response "3+4=7")))
     (let ((result (cl-agent/core:invoke-turn
                    chat-client
-                   (cl-agent/core:make-turn-request
+                   (cl-agent/core:make-chat-client-request
                     (list (cl-agent/core:user-message "3+4=?"))))))
-      (is (eq :completed (cl-agent/core:turn-result-status result)))
+      (is (eq :completed (cl-agent/core:chat-client-response-status result)))
       (is (string= "3+4=7"
                    (cl-agent/core:chat-response-text
-                    (cl-agent/core:turn-result-response result))))
+                    (cl-agent/core:chat-client-response-chat-response result))))
       (is (= 2 (length (seq-provider-requests provider)))
           "模型被调用两轮"))))
 
@@ -152,12 +157,12 @@
       (make-test-chat-client (text-response "直接回答"))
     (let ((result (cl-agent/core:invoke-turn
                    chat-client
-                   (cl-agent/core:make-turn-request
+                   (cl-agent/core:make-chat-client-request
                     (list (cl-agent/core:user-message "你好"))))))
-      (is (eq :completed (cl-agent/core:turn-result-status result)))
+      (is (eq :completed (cl-agent/core:chat-client-response-status result)))
       (is (string= "直接回答"
                    (cl-agent/core:chat-response-text
-                    (cl-agent/core:turn-result-response result))))
+                    (cl-agent/core:chat-client-response-chat-response result))))
       (is (= 1 (length (seq-provider-requests provider)))
           "模型只调用一次"))))
 
@@ -167,11 +172,11 @@
       (make-test-chat-client (text-response "最终回答"))
     (let* ((guard-fn
             (lambda (req chain)
-              (let ((msgs (cl-agent/core:turn-request-messages req)))
+              (let ((msgs (cl-agent/core:chat-client-request-messages req)))
                 (if (some (lambda (m)
                             (search "炸弹" (or (cl-agent/core:message-text m) "")))
                           msgs)
-                    (cl-agent/core:make-turn-result :cancelled :response nil)
+                    (cl-agent/core:make-chat-client-response :cancelled :chat-response nil)
                     (funcall chain req)))))
            (guard-filter (cl-agent/core:make-filter :guard :turn guard-fn))
            (model (chat-client-model-for-test chat-client))
@@ -181,17 +186,17 @@
       ;; 被拦截
       (let ((blocked (cl-agent/core:invoke-turn
                       chat-client2
-                      (cl-agent/core:make-turn-request
+                      (cl-agent/core:make-chat-client-request
                        (list (cl-agent/core:user-message "我要炸弹"))))))
-        (is (eq :cancelled (cl-agent/core:turn-result-status blocked)))
+        (is (eq :cancelled (cl-agent/core:chat-client-response-status blocked)))
         (is (= 0 (length (seq-provider-requests provider)))
             "被拦截时模型未被调用"))
       ;; 正常通过
       (let ((ok (cl-agent/core:invoke-turn
                  chat-client2
-                 (cl-agent/core:make-turn-request
+                 (cl-agent/core:make-chat-client-request
                   (list (cl-agent/core:user-message "你好"))))))
-        (is (eq :completed (cl-agent/core:turn-result-status ok)))
+        (is (eq :completed (cl-agent/core:chat-client-response-status ok)))
         (is (= 1 (length (seq-provider-requests provider))))))))
 
 (test invoke-turn-max-iterations
@@ -205,10 +210,10 @@
            (chat-client (cl-agent/core:build-chat-client
                     :model (cl-agent/core:make-provider-chat-model provider)
                     :tools '(ki-adder)
-                     :settings '((:max-tool-iterations . 3)))))
+                     :max-tool-iterations 3)))
        (cl-agent/core:invoke-turn
        chat-client
-       (cl-agent/core:make-turn-request
+       (cl-agent/core:make-chat-client-request
         (list (cl-agent/core:user-message "loop")))))))
 
 ;;; ============================================================
@@ -267,7 +272,7 @@
          (res (cl-agent/core:execute-tool-calls mgr k (tcm-response n)
                                                 (list :tool-context nil))))
     (values *tcm-peak*
-            (mapcar #'cl-agent/core:tool-response-text (getf res :messages)))))
+            (mapcar #'cl-agent/core:tool-response-text (cl-agent/core:tool-execution-messages res)))))
 
 (test thread-pool-manager-actually-limits-concurrency
   "thread-pool manager 的并发峰值必须 **严格 ≤ pool-size**。
@@ -353,7 +358,7 @@
          (res (cl-agent/core:execute-tool-calls mgr k (tcm-response 3 "mt_echo")
                                                 (list :tool-context nil))))
     (is (equal '("e1" "e2" "e3")
-               (mapcar #'cl-agent/core:tool-response-text (getf res :messages))))))
+               (mapcar #'cl-agent/core:tool-response-text (cl-agent/core:tool-execution-messages res))))))
 
 (test ensure-tool-pool-respects-caller-binding
   "调用方自己绑了 lparallel:*kernel* 时，ensure-tool-pool 用调用方的"
@@ -408,7 +413,7 @@
          (req (cl-agent/core:make-tool-request
                (cl-agent/core:symbol-tool-callback sym) :args '(:x "1")))
          (r (cl-agent/core:invoke-tool k req)))
-    (getf (cl-agent/core:tool-result-error r) :class)))
+    (cl-agent/core:tool-error-class (cl-agent/core:tool-result-error r))))
 
 (test tool-failure-classified-through-wrapper
   "分类必须**穿透 tool-callback-call 的包装**。
@@ -494,20 +499,20 @@
   "一直瞬态失败 → 尝试 *transient-retry-attempts* 次后交出错误（不无限重试）"
   (multiple-value-bind (runs r) (fc-run-batch 'fc-always-transient)
     (is (= cl-agent/core:*transient-retry-attempts* runs))
-    (is (eq :transient (getf (cl-agent/core:tool-result-error r) :class)))))
+    (is (eq :transient (cl-agent/core:tool-error-class (cl-agent/core:tool-result-error r))))))
 
 (test transient-without-retry-declaration-not-retried
   ":transient 但没声明 :retry → 只跑一次。
 重试意味着重复副作用，必须由工具作者显式选择加入。"
   (multiple-value-bind (runs r) (fc-run-batch 'fc-transient-noretry)
     (is (= 1 runs))
-    (is (eq :transient (getf (cl-agent/core:tool-result-error r) :class)))))
+    (is (eq :transient (cl-agent/core:tool-error-class (cl-agent/core:tool-result-error r))))))
 
 (test semantic-failure-never-retried-even-with-retry-flag
   ":semantic 即便声明了 :retry 也不重试——参数错了重试一万次还是错"
   (multiple-value-bind (runs r) (fc-run-batch 'fc-semantic-retry)
     (is (= 1 runs))
-    (is (eq :semantic (getf (cl-agent/core:tool-result-error r) :class)))))
+    (is (eq :semantic (cl-agent/core:tool-error-class (cl-agent/core:tool-result-error r))))))
 
 ;;; ============================================================
 ;;; 真流式通路 + :token-xform 组装
@@ -670,8 +675,9 @@
       (cl-agent/core:apply-writes
        '(:other "keep")
        '((:notes ("a")) (:notes ("b")))
-       (list (list :notes :init nil
-                   :reduce (lambda (old new) (append old new)))))
+       (list (cl-agent/core:make-state-slot
+              :notes :init nil
+              :reduce-fn (lambda (old new) (append old new)))))
     (is (equal '("a" "b") (getf ctx :notes)) "reducer 按 call 序折叠")
     (is (null conflicts) "有 reducer 就不算冲突")
     (is (string= "keep" (getf ctx :other)) "未被写的键原样保留"))
@@ -679,7 +685,7 @@
   (let ((ctx (cl-agent/core:apply-writes
               '(:n 10)
               '((:n 5))
-              (list (list :n :init 0 :reduce #'+)))))
+              (list (cl-agent/core:make-state-slot :n :init 0 :reduce-fn #'+)))))
     (is (= 15 (getf ctx :n)) "老值在 context 里就不用 :init"))
   ;; 纯函数：不改实参
   (let ((orig (list :x 1)))
@@ -718,11 +724,12 @@
    :model "seq-model"))
 
 (defun ws-state-slots ()
-  (list (list :notes :init nil :reduce (lambda (old new) (append old new)))))
+  (list (cl-agent/core:make-state-slot
+         :notes :init nil :reduce-fn (lambda (old new) (append old new)))))
 
 (test writes-fold-end-to-end
   "端到端：批内两工具的 :writes 按 call 序折叠 → 下一轮工具看到折叠后
-快照 → 最终 turn-result-tool-context 交还累积状态"
+快照 → 最终 chat-client-response-context 交还累积状态"
   (let* ((provider (make-seq-provider
                     (ws-two-calls-response)
                     (tool-call-response "ws_read" nil :id "r1")
@@ -733,9 +740,9 @@
                   :state-slots (ws-state-slots)))
          (result (cl-agent/core:invoke-turn
                   chat-client
-                  (cl-agent/core:make-turn-request
+                  (cl-agent/core:make-chat-client-request
                    (list (cl-agent/core:user-message "记笔记"))))))
-    (is (eq :completed (cl-agent/core:turn-result-status result)))
+    (is (eq :completed (cl-agent/core:chat-client-response-status result)))
     ;; 第三轮请求里 ws_read 的 tool 消息 = 折叠后（a 在前 b 在后）。
     ;; 此时有两条 tool 消息（第一轮批次的 + 第二轮 ws_read 的），取**最后**一条
     (let* ((req3 (first (seq-provider-requests provider)))
@@ -743,17 +750,18 @@
                            :key (lambda (m) (getf m :role)))))
       (is (string= "笔记：a,b" (getf tool-msg :content))
           "下一轮工具读到按 call 序折叠的 context"))
-    ;; 最终 turn-result 交还累积状态
+    ;; 最终 chat-client-response 交还累积状态
     (is (equal '("a" "b")
-               (getf (cl-agent/core:turn-result-tool-context result) :notes))
-        "turn-result-tool-context 带出折叠后的最终 context")))
+               (getf (cl-agent/core:chat-client-response-context result) :notes))
+        "chat-client-response-context 带出折叠后的最终 context")))
 
 (test writes-of-failed-tool-discarded
   "失败调用的写意图不生效（事务性）"
   (let* ((ok (cl-agent/core:make-tool-result :value "ok" :writes '(:notes ("x"))))
          (bad (cl-agent/core:make-tool-result
                :writes '(:notes ("泄漏"))
-               :error '(:class :semantic :message "boom")))
+               :error (cl-agent/core:make-tool-error-info
+                       :class :semantic :message "boom")))
          (chat-client (cl-agent/core:build-chat-client :model nil
                                              :state-slots (ws-state-slots)))
          (ctx (cl-agent/core:fold-batch-writes chat-client (list ok bad) nil)))
@@ -778,9 +786,9 @@
                    :finish-reason :tool-call)))
            (result (cl-agent/core:execute-tool-calls
                     mgr chat-client resp (list :tool-context '(:seed t)))))
-      (is (equal '("hello") (getf (getf result :context) :notes))
+      (is (equal '("hello") (getf (cl-agent/core:tool-execution-context result) :notes))
           (format nil "~A 折叠 writes 进 :context" (type-of mgr)))
-      (is (eq t (getf (getf result :context) :seed))
+      (is (eq t (getf (cl-agent/core:tool-execution-context result) :seed))
           "既有 context 键保留"))))
 
 (test tool-callback-call-passes-writes-through
@@ -807,13 +815,13 @@
                  :finish-reason :tool-call)))
          (result (cl-agent/core:execute-tool-calls
                   mgr k resp (list :tool-context nil))))
-    (is (= 1 (length (getf result :messages))))
+    (is (= 1 (length (cl-agent/core:tool-execution-messages result))))
     (is (search "no_such_tool"
-                (cl-agent/core:tool-response-text (first (getf result :messages))))
+                (cl-agent/core:tool-response-text (first (cl-agent/core:tool-execution-messages result))))
         "错误文本报出工具名，模型才能自纠")
     ;; 共享骨架现在如实收集 :errors（virtual-thread 此前恒 nil）
-    (is (= 1 (length (getf result :errors))))
-    (is (eq :semantic (getf (first (getf result :errors)) :class)))))
+    (is (= 1 (length (cl-agent/core:tool-execution-errors result))))
+    (is (eq :semantic (getf (first (cl-agent/core:tool-execution-errors result)) :class)))))
 
 ;;; ============================================================
 ;;; P4 Code Review 回归测试
@@ -842,7 +850,7 @@
                                                        (setf (gethash "x" h) "42") h))))
                    :finish-reason :tool-call)))
            (result (cl-agent/core:execute-tool-calls mgr k resp (list :tool-context nil))))
-      (is (getf result :return-direct)
+      (is (cl-agent/core:tool-execution-return-direct-p result)
           "~A 路径应返回 :return-direct = t" (type-of mgr)))))
 
 (test return-direct-via-manager-end-to-end
@@ -857,12 +865,12 @@
              :tools '(rd-direct) :tool-manager mgr)))
     (let ((result (cl-agent/core:invoke-turn
                    k
-                   (cl-agent/core:make-turn-request
+                   (cl-agent/core:make-chat-client-request
                     (list (cl-agent/core:user-message "直接给我结果"))))))
-      (is (eq :completed (cl-agent/core:turn-result-status result)))
+      (is (eq :completed (cl-agent/core:chat-client-response-status result)))
       (is (search "结果是 42"
                   (cl-agent/core:chat-response-text
-                   (cl-agent/core:turn-result-response result))))
+                   (cl-agent/core:chat-client-response-chat-response result))))
       (is (= 1 (length (seq-provider-requests provider)))
           "return-direct 应短路——模型只被调用一次"))))
 
@@ -895,10 +903,10 @@ thread-pool(1) + HITL 暂停的组合下，续跑批并发不受限。"
     (unwind-protect
          (let* ((turn1 (cl-agent/core:invoke-turn
                         k
-                        (cl-agent/core:make-turn-request
+                        (cl-agent/core:make-chat-client-request
                          (list (cl-agent/core:user-message "跑3个工具")))))
-                (loop-state (cl-agent/core:turn-result-loop-state turn1)))
-           (is (eq :paused (cl-agent/core:turn-result-status turn1)))
+                (loop-state (cl-agent/core:chat-client-response-loop-state turn1)))
+           (is (eq :paused (cl-agent/core:chat-client-response-status turn1)))
            ;; 续跑：3 个慢工具经 thread-pool(1) → 峰值必须 ≤ 1
            (let ((turn2 (cl-agent/core:resume-turn k loop-state :approved)))
              (declare (ignore turn2)))
@@ -989,10 +997,10 @@ thread-pool(1) + HITL 暂停的组合下，续跑批并发不受限。"
          (k (cl-agent/core:build-chat-client
              :model (cl-agent/core:make-provider-chat-model provider)
              :tools '(mt-echo)
-             :settings '((:max-tool-iterations . 2)))))
+             :max-tool-iterations 2)))
     (signals cl-agent/core:max-tool-iterations-exceeded-error
       (cl-agent/core:invoke-turn
-       k (cl-agent/core:make-turn-request (list (cl-agent/core:user-message "go")))))
+       k (cl-agent/core:make-chat-client-request (list (cl-agent/core:user-message "go")))))
     ;; 2 轮工具执行（iter 0,1）+ 第 3 次探测（iter 2）触发 error = 恰 3 次
     (is (= 3 (atp-count provider))
         "上限 2 → 模型恰调 3 次（2 轮执行 + 1 次探测），不是旧的 4 次")))
@@ -1030,15 +1038,15 @@ return-direct 工具后又多调一次模型，拿到的是不该出现的续写
              :tool-gate (lambda (tc) (declare (ignore tc)) :pause))))
     (declare (ignore _))
     (let* ((paused (cl-agent/core:invoke-turn
-                    k (cl-agent/core:make-turn-request
+                    k (cl-agent/core:make-chat-client-request
                        (list (cl-agent/core:user-message "q")))))
            (final (cl-agent/core:resume-turn
-                   k (cl-agent/core:turn-result-loop-state paused) :approved)))
+                   k (cl-agent/core:chat-client-response-loop-state paused) :approved)))
       (is (= 0 extra) "resume 后不再调模型（return-direct 短路）")
-      (is (eq :completed (cl-agent/core:turn-result-status final)))
+      (is (eq :completed (cl-agent/core:chat-client-response-status final)))
       (is (search "直答：42"
                   (cl-agent/core:chat-response-text
-                   (cl-agent/core:turn-result-response final)))
+                   (cl-agent/core:chat-client-response-chat-response final)))
           "最终答复是工具结果本身，不是模型续写"))))
 
 (test memory-crop-keeps-tool-pairs-intact
@@ -1093,16 +1101,20 @@ subseq，window 落在对中间就产生孤儿 tool 开头。"
        (tool-call-response "ki_adder" '(("a" . 3) ("b" . 4)))
        (text-response "3+4=7"))
     (declare (ignore provider))
-    (is (null (cl-agent/core:chat-client-loop-fn chat-client)) "槽缺省为 nil")
-    (is (null (cl-agent/core:chat-client-resume-fn chat-client)) "槽缺省为 nil")
+    (is (null (cl-agent/core:tool-calling-loop-fn
+               (cl-agent/core:chat-client-tool-calling-config chat-client)))
+        "loop-fn 缺省为 nil")
+    (is (null (cl-agent/core:tool-calling-resume-fn
+               (cl-agent/core:chat-client-tool-calling-config chat-client)))
+        "resume-fn 缺省为 nil")
     (let ((result (cl-agent/core:invoke-turn
                    chat-client
-                   (cl-agent/core:make-turn-request
+                   (cl-agent/core:make-chat-client-request
                     (list (cl-agent/core:user-message "3+4=?"))))))
-      (is (eq :completed (cl-agent/core:turn-result-status result)))
+      (is (eq :completed (cl-agent/core:chat-client-response-status result)))
       (is (string= "3+4=7"
                    (cl-agent/core:chat-response-text
-                    (cl-agent/core:turn-result-response result)))))))
+                    (cl-agent/core:chat-client-response-chat-response result)))))))
 
 (test loop-fn-replaces-terminal
   "自定义 loop-fn 整体接管循环：模型一次都不调"
@@ -1115,21 +1127,21 @@ subseq，window 落在对中间就产生孤儿 tool 开头。"
                :tools '(ki-adder)
                :loop-fn (lambda (chat-client req)
                           (declare (ignore chat-client))
-                          (setf seen (cl-agent/core:turn-request-messages req))
-                          (cl-agent/core:make-turn-result
+                          (setf seen (cl-agent/core:chat-client-request-messages req))
+                          (cl-agent/core:make-chat-client-response
                            :completed
-                           :response (cl-agent/core:make-chat-response
+                           :chat-response (cl-agent/core:make-chat-response
                                       (cl-agent/core:make-generation
                                        (cl-agent/core:assistant-message "自定义循环")
                                        :finish-reason :stop))
                            :tool-calls-made 0))))
            (result (cl-agent/core:invoke-turn
-                    k (cl-agent/core:make-turn-request
+                    k (cl-agent/core:make-chat-client-request
                        (list (cl-agent/core:user-message "问"))))))
       (is (string= "自定义循环"
                    (cl-agent/core:chat-response-text
-                    (cl-agent/core:turn-result-response result))))
-      (is (= 1 (length seen)) "loop-fn 收到 turn-request 的 messages")
+                    (cl-agent/core:chat-client-response-chat-response result))))
+      (is (= 1 (length seen)) "loop-fn 收到 chat-client-request 的 messages")
       (is (= 0 (length (seq-provider-requests provider)))
           "默认循环被完全绕过，模型未被调用"))))
 
@@ -1149,14 +1161,14 @@ subseq，window 落在对中间就产生孤儿 tool 开头。"
              :loop-fn (lambda (chat-client req)
                         (declare (ignore chat-client req))
                         (push :loop trace)
-                        (cl-agent/core:make-turn-result
+                        (cl-agent/core:make-chat-client-response
                          :completed
-                         :response (cl-agent/core:make-chat-response
+                         :chat-response (cl-agent/core:make-chat-response
                                     (cl-agent/core:make-generation
                                      (cl-agent/core:assistant-message "x")
                                      :finish-reason :stop)))))))
     (cl-agent/core:invoke-turn
-     k (cl-agent/core:make-turn-request
+     k (cl-agent/core:make-chat-client-request
         (list (cl-agent/core:user-message "问"))))
     (is (equal '(:before :loop :after) (reverse trace))
         "filter 在自定义循环外层照常进出")))
@@ -1169,15 +1181,15 @@ subseq，window 落在对中间就产生孤儿 tool 开头。"
              :loop-fn (lambda (chat-client req)
                         (declare (ignore chat-client req))
                         (push :loop calls)
-                        (cl-agent/core:make-turn-result :completed))
+                        (cl-agent/core:make-chat-client-response :completed))
              :resume-fn (lambda (chat-client loop-state decision payload)
                           (declare (ignore chat-client payload))
                           (push (list :resume decision
                                       (cl-agent/core:loop-state-iteration loop-state))
                                 calls)
-                          (cl-agent/core:make-turn-result
+                          (cl-agent/core:make-chat-client-response
                            :completed
-                           :response (cl-agent/core:make-chat-response
+                           :chat-response (cl-agent/core:make-chat-response
                                       (cl-agent/core:make-generation
                                        (cl-agent/core:assistant-message "已续跑")
                                        :finish-reason :stop))))))
@@ -1187,7 +1199,7 @@ subseq，window 落在对中间就产生孤儿 tool 开头。"
         "只走自定义 resume-fn，未落到 loop-fn")
     (is (string= "已续跑"
                  (cl-agent/core:chat-response-text
-                  (cl-agent/core:turn-result-response result))))))
+                  (cl-agent/core:chat-client-response-chat-response result))))))
 
 (test default-hitl-resume-unaffected-by-loop-fn-seam
   "接缝引入后默认 HITL 暂停/续跑行为不变（回归）"
@@ -1199,14 +1211,14 @@ subseq，window 落在对中间就产生孤儿 tool 开头。"
              :tools '(ki-adder)
              :tool-gate (lambda (tc) (declare (ignore tc)) :pause)))
          (paused (cl-agent/core:invoke-turn
-                  k (cl-agent/core:make-turn-request
+                  k (cl-agent/core:make-chat-client-request
                      (list (cl-agent/core:user-message "1+2=?"))))))
-    (is (eq :paused (cl-agent/core:turn-result-status paused)))
+    (is (eq :paused (cl-agent/core:chat-client-response-status paused)))
     (is (= 1 (length (seq-provider-requests provider)))
         "暂停时工具未执行、模型只调了一轮")
     (let ((final (cl-agent/core:resume-turn
-                  k (cl-agent/core:turn-result-loop-state paused) :approved)))
-      (is (eq :completed (cl-agent/core:turn-result-status final)))
+                  k (cl-agent/core:chat-client-response-loop-state paused) :approved)))
+      (is (eq :completed (cl-agent/core:chat-client-response-status final)))
       (is (string= "1+2=3"
                    (cl-agent/core:chat-response-text
-                    (cl-agent/core:turn-result-response final)))))))
+                    (cl-agent/core:chat-client-response-chat-response final)))))))

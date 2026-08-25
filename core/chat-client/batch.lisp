@@ -51,8 +51,10 @@ find-callback-for-call 找不到工具时是 signal 而非返回 nil。它的调
                         nil)
     (cl-agent/core:tool-not-found-error (e)
       (values nil (make-tool-result
-                   :error (list :class :semantic
-                                :message (princ-to-string e)))))))
+                   :error (make-tool-error-info
+                           :class :semantic
+                           :message (princ-to-string e)
+                           :cause e))))))
 
 (defun tool-result->text (tool-result)
   "把 tool-result 转成回传模型的文本。
@@ -63,7 +65,7 @@ find-callback-for-call 找不到工具时是 signal 而非返回 nil。它的调
   (or (tool-result-value tool-result)
       (let ((err (tool-result-error tool-result)))
         (if err
-            (format nil "错误：~A" (or (getf err :message) "工具执行失败"))
+            (format nil "错误：~A" (or (tool-error-message err) "工具执行失败"))
             "（执行失败）"))))
 
 ;;; 下面两个助手是三处调用点（顺序批 / 并行批 / manager 骨架）的
@@ -88,15 +90,19 @@ id/name 一一对应——顺序错位 = 回传模型的消息 id 全错）。"
           tool-results tool-calls))
 
 (defun batch-error-summaries (tool-results tool-calls)
-  "收集批内失败调用的错误摘要 plist 列表（:id :name :class :message）。"
+  "收集批内失败调用的错误摘要 plist 列表（:id :name :class :message）。
+
+这一层仍是 plist：它是**面向调用方的只读摘要**，装进
+tool-execution-errors 交出去给日志/上报消费，不参与任何分派决策。
+参与分派的那个（tool-result-error）已经是 tool-error-info 类。"
   (loop for tr in tool-results
         for tc in tool-calls
         for err = (tool-result-error tr)
         when err
           collect (list :id (cl-agent/core:tool-call-id tc)
                         :name (cl-agent/core:tool-call-name tc)
-                        :class (getf err :class)
-                        :message (getf err :message))))
+                        :class (tool-error-class err)
+                        :message (tool-error-message err))))
 
 ;;; ============================================================
 ;;; 并行/串行执行
@@ -230,12 +236,14 @@ id/name 一一对应——顺序错位 = 回传模型的消息 id 全错）。"
           for result = (handler-case (invoke-tool chat-client req)
                          (error (e)
                            (make-tool-result
-                            :error (list :class (classify-tool-error e)
-                                         :message (princ-to-string e)))))
+                            :error (make-tool-error-info
+                                    :class (classify-tool-error e)
+                                    :message (princ-to-string e)
+                                    :cause e))))
           do (let ((err (tool-result-error result)))
                (cond
                  ;; 成功，或不是瞬态故障 → 立即返回
-                 ((or (null err) (not (eq (getf err :class) :transient)))
+                 ((or (null err) (not (eq (tool-error-class err) :transient)))
                   (return result))
                  ;; 瞬态但已是最后一次 → 交出最后的错误
                  ((>= attempt attempts)
@@ -245,7 +253,7 @@ id/name 一一对应——顺序错位 = 回传模型的消息 id 全错）。"
                   (let ((delay (* *transient-retry-base-delay*
                                   (expt 2 (1- attempt)))))
                     (log-debug "[batch] 瞬态故障，~,3Fs 后第 ~D/~D 次重试：~A"
-                               delay (1+ attempt) attempts (getf err :message))
+                               delay (1+ attempt) attempts (tool-error-message err))
                     (sleep delay))))))))
 
 (defun %submit-and-collect (chat-client prepared)
@@ -330,9 +338,15 @@ receive-result 不保证顺序，故任务里带上索引，回填到定位数�
     (let ((res (nreverse acc)))
       (if found res (list* key value res)))))
 
-(defun %slot-spec (slots key)
-  "在状态槽声明里找 KEY 的条目，返回 (:init v0 :reduce fn) 部分或 nil。"
-  (rest (assoc key slots)))
+(defun %slot-reducer (slots key)
+  "取 KEY 的 reducer，没声明或没 reducer 则 NIL。"
+  (let ((slot (find-state-slot slots key)))
+    (when slot (state-slot-reduce-fn slot))))
+
+(defun %slot-init (slots key)
+  "取 KEY 的初值（reducer 首次折叠、context 里还没这个键时用）。"
+  (let ((slot (find-state-slot slots key)))
+    (when slot (state-slot-init slot))))
 
 (defun apply-writes (context writes-seq &optional slots)
   "把一批工具的写意图按序折叠进 CONTEXT（纯函数，不修改实参）。
@@ -341,8 +355,8 @@ receive-result 不保证顺序，故任务里带上索引，回填到定位数�
   - context     轮初 context plist（工具执行时拿到的同一份快照）
   - writes-seq  writes-plist 列表；**顺序必须是 tool-call 原始序**——
                 这是合并确定性的来源，与并行执行的实际交错无关
-  - slots       状态槽声明 ((key :init v0 :reduce (老值 新值)→合并值) ...)；
-                未声明的槽 last-writer（后写覆盖，按序确定）
+  - slots       state-slot 实例列表；未声明的槽 last-writer
+                （后写覆盖，按序确定）
 
   返回 (values 新context 冲突键列表)。
   冲突 = 同批被写 ≥2 次且未声明 reducer 的键——last-writer 会静默丢掉
@@ -355,20 +369,19 @@ receive-result 不保证顺序，故任务里带上索引，回填到定位数�
       (loop for (k nil) on writes by #'cddr
             do (incf (gethash k counts 0))))
     (maphash (lambda (k n)
-               (when (and (> n 1) (null (getf (%slot-spec slots k) :reduce)))
+               (when (and (> n 1) (null (%slot-reducer slots k)))
                  (push k conflicts)))
              counts)
     (dolist (writes writes-seq)
       (loop for (k v) on writes by #'cddr
-            do (let* ((spec (%slot-spec slots k))
-                      (rf (getf spec :reduce)))
+            do (let ((rf (%slot-reducer slots k)))
                  (setf ctx
                        (%plist-put ctx k
                                    (if rf
                                        (let ((old (getf ctx k missing)))
                                          (funcall rf
                                                   (if (eq old missing)
-                                                      (getf spec :init)
+                                                      (%slot-init slots k)
                                                       old)
                                                   v))
                                        v))))))
