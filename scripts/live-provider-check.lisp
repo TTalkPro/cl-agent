@@ -216,10 +216,18 @@
 
 (defcheck check-error-message-surfaced "[8/8] 厂商错误原文透出（不是光一个状态码）"
   ;; 故意用一个不可能存在的模型名：期望 llm-error 的 message 里带上
-  ;; 厂商说的原因，而不只是「HTTP 请求失败: 400」
+  ;; 厂商说的原因，而不只是「HTTP 请求失败: 400」。
+  ;;
+  ;; 但不是所有厂商都会为此报错——MiniMax 对未知模型名**静默回落**到自家
+  ;; 默认模型并返回 200（实测 definitely-not-a-real-model-zzz → MiniMax-M3）。
+  ;; 那种情况下这项检查无从进行：它验的是「错误 body 有没有被解析出来」，
+  ;; 而这次根本没有错误。判 SKIP 而不是 FAIL——把厂商的宽容记成本库的缺陷
+  ;; 会让这个脚本对 MiniMax 永远红着，红久了就没人看了。
   (handler-case
-      (progn (chat-once "hi" :model "definitely-not-a-real-model-zzz")
-             (values nil "预期报错却成功返回了"))
+      (let ((response (chat-once "hi" :model "definitely-not-a-real-model-zzz")))
+        (values :skip
+                (format nil "该 provider 不为未知模型名报错（回落到 ~A）"
+                        (or (cl-agent/core:llm-response-model response) "默认模型"))))
     (cl-agent/core:llm-error (e)
       (let ((message (cl-agent/core:error-message e)))
         (values (and (stringp message)
