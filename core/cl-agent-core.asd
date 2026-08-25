@@ -1,7 +1,7 @@
 ;;;; cl-agent-core.asd
 ;;;; CL-Agent Core - 框架本体（单包）
 ;;;;
-;;;; Version: 10.0.0
+;;;; Version: 11.0.0
 ;;;; Author: David
 ;;;;
 ;;;; Overview:
@@ -30,7 +30,7 @@
   :description "CL-Agent Core - 框架本体（基础设施 + HTTP + Chat API + ChatClient/Filter）"
   :author "David"
   :license "MIT"
-  :version "10.0.0"
+  :version "11.0.0"
 
   :depends-on (#:alexandria
                #:serapeum
@@ -61,6 +61,7 @@
    ;; Core Infrastructure
    ;; ============================================================
    (:file "conditions")           ; Condition system
+   (:file "invariants")           ; definvariants + 校验原语（类不变式的统一表达）
    (:file "macros")               ; Utility macros
    ;; 注：曾有 types.lisp（旧消息/ToolCall/Response/Usage/InvokeResult
    ;; + 5 个从未实现的 plugin-* defgeneric，共 34 个符号）。SBCL 调用图
@@ -92,6 +93,16 @@
    (:file "dependency-injection")
    (:file "data-convert")         ; Data conversion (plist <-> hash-table)
    (:file "json-schema")          ; JSON Schema 生成（工具参数规格 → schema）
+
+   ;; ============================================================
+   ;; Model 抽象协议（对标 Spring AI org.springframework.ai.model.*）
+   ;; ============================================================
+   ;; ModelRequest / ModelResponse / ModelResult / ModelOptions 的形状，
+   ;; 各模态的具体类接入它：chat 的 prompt / chat-response / generation，
+   ;; llm 的 embedding-response。纯抽象、无依赖，所以排在两者之前。
+   (:module "model"
+    :components
+    ((:file "protocol")))
 
    ;; ============================================================
    ;; LLM Provider SPI (in core for dependency management)
