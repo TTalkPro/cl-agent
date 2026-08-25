@@ -12,8 +12,8 @@
 ;;;;
 ;;;;   以及面向应用的两个便捷函数（README 一直在文档里承诺、
 ;;;;   此前并不存在的那两个）：
-;;;;     (embed provider-or-client "文本")        → 单个向量
-;;;;     (embed-batch provider-or-client '("a" "b")) → 向量列表
+;;;;     (embed provider "文本")        → 单个向量
+;;;;     (embed-batch provider '("a" "b")) → 向量列表
 ;;;;
 ;;;; 顺序契约：
 ;;;;   响应 data 数组按 index 排序后再产出向量，调用方可以靠位置
@@ -274,18 +274,13 @@ ENCODING-FORMAT 被忽略——DashScope 只返回 float 数组，没有这个�
 ;;; 便捷 API
 ;;; ============================================================
 
-(defun embedding-provider (provider-or-client)
-  "取出 provider 实例：接受 provider 本身或 client。"
-  (if (typep provider-or-client 'client)
-      (client-provider provider-or-client)
-      provider-or-client))
 
-(defun embed (provider-or-client text &rest args
+(defun embed (provider text &rest args
               &key model dimensions encoding-format extra-params)
   "为单条文本生成嵌入向量。
 
 参数：
-  PROVIDER-OR-CLIENT - provider 实例或 client
+  PROVIDER           - provider 实例
   TEXT               - 文本
   其余关键字参数同 llm-embed。
 
@@ -298,11 +293,11 @@ ENCODING-FORMAT 被忽略——DashScope 只返回 float 数组，没有这个�
   (declare (ignore model dimensions encoding-format extra-params))
   (cl-agent/core:embedding-response-first
    (apply #'cl-agent/core:llm-embed
-          (embedding-provider provider-or-client)
+          provider
           (list text)
           args)))
 
-(defun embed-batch (provider-or-client texts &rest args
+(defun embed-batch (provider texts &rest args
                     &key model dimensions encoding-format extra-params)
   "批量生成嵌入向量。
 
@@ -315,16 +310,16 @@ ENCODING-FORMAT 被忽略——DashScope 只返回 float 数组，没有这个�
   (declare (ignore model dimensions encoding-format extra-params))
   (cl-agent/core:embedding-response-embeddings
    (apply #'cl-agent/core:llm-embed
-          (embedding-provider provider-or-client)
+          provider
           texts
           args)))
 
-(defun embed-response (provider-or-client texts &rest args
+(defun embed-response (provider texts &rest args
                        &key model dimensions encoding-format extra-params)
   "同 embed-batch，但返回完整的 embedding-response（含 usage / model）。"
   (declare (ignore model dimensions encoding-format extra-params))
   (apply #'cl-agent/core:llm-embed
-         (embedding-provider provider-or-client)
+         provider
          (if (stringp texts) (list texts) texts)
          args))
 

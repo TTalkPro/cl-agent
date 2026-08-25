@@ -192,26 +192,39 @@ Returns:
 ;;; 本函数的关键字参数覆盖全部场景，builder.lisp 整体删除。
 
 (defun create-chat-model (provider-name &rest args
-                          &key model api-key api-url options &allow-other-keys)
+                          &key model api-key api-url options
+                               retry-policy observation-fn
+                          &allow-other-keys)
   "从提供商规格创建 ChatModel（cl-agent-llm 与 cl-agent/chat 的桥梁）。
 
 参数：
-  PROVIDER-NAME - 提供商关键字（:anthropic、:openai 等）或别名
-  MODEL         - 模型名（可选）
-  API-KEY       - API 密钥（可选，默认取环境变量）
-  API-URL       - API 地址（可选，默认取提供商默认值）
-  OPTIONS       - 默认 chat-options（可选）
+  PROVIDER-NAME  - 提供商关键字（:anthropic、:openai 等）或别名
+  MODEL          - 模型名（可选）
+  API-KEY        - API 密钥（可选，默认取环境变量）
+  API-URL        - API 地址（可选，默认取提供商默认值）
+  OPTIONS        - 默认 chat-options（可选）
+  RETRY-POLICY   - retry-policy 实例（可选）。缺省不重试。
+  OBSERVATION-FN - 观测钩子 (model prompt thunk) → response（可选）
   其余关键字参数透传给提供商工厂。
 
 返回：
   cl-agent/core:provider-chat-model 实例
 
+重试与观测是 ChatModel 层能力、不是 provider 的：provider 只负责底层
+信息与如何调用。同一个 provider 可以被不同 ChatModel 实例配上不同的
+重试预算。
+
 用法：
   (create-chat-model :anthropic :model \"claude-sonnet-4-20250514\")
   (create-chat-model :openai :model \"gpt-4o\"
-                     :options (cl-agent/core:make-chat-options :temperature 0.3))"
+                     :options (cl-agent/core:make-chat-options :temperature 0.3)
+                     :retry-policy (cl-agent/core:make-retry-policy :max-attempts 4))"
   (declare (ignore model api-key api-url))
   (let* ((resolved-name (resolve-provider-name provider-name))
          (provider (apply #'create-provider resolved-name
-                          (alexandria:remove-from-plist args :options))))
-    (cl-agent/core:make-provider-chat-model provider :default-options options)))
+                          (alexandria:remove-from-plist
+                           args :options :retry-policy :observation-fn))))
+    (cl-agent/core:make-provider-chat-model provider
+                                            :default-options options
+                                            :retry-policy retry-policy
+                                            :observation-fn observation-fn)))

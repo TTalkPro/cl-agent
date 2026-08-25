@@ -223,16 +223,14 @@ SHUFFLED 为真时把 data 逆序摆放（index 仍然正确），用来锁住
     (is (= 3 (cl-agent/core:llm-usage-input-tokens
               (cl-agent/core:embedding-response-usage response))))))
 
-(test embed-accepts-client
-  "便捷 API 也接受 client（README 的用法就是传 client）"
-  (let* ((provider (make-fake-embed-provider))
-         (client (make-instance 'cl-agent/llm:client
-                                :provider provider
-                                :api-key "k"
-                                :model "m"
-                                :base-url "u"
-                                :max-tokens 100)))
-    (is (vectorp (cl-agent/llm:embed client "abc")))))
+(test embed-takes-provider-directly
+  "便捷 API 只接受 provider。
+
+此前它还接受 client 实例（内部 embedding-provider 做 typep 分派），
+README 的示例也传 client。client 类随 P1 退役后这条分支消失——
+嵌入与聊天一样，provider 是唯一入口。"
+  (let ((provider (make-fake-embed-provider)))
+    (is (vectorp (cl-agent/llm:embed provider "abc")))))
 
 (test embed-passes-options-through
   "model / dimensions 透传到 SPI"
