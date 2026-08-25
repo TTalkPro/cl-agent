@@ -1,7 +1,7 @@
 ;;;; cl-agent.asd
 ;;;; CL-Agent - Unified AI Agent Framework (Meta-System)
 ;;;;
-;;;; Version: 9.0.0 (ChatClient + Filter Architecture)
+;;;; Version: 11.0.0
 ;;;; Author: David
 ;;;;
 ;;;; Overview:
@@ -22,6 +22,16 @@
 ;;;;   (asdf:load-system :cl-agent)
 ;;;;
 ;;;; Changelog:
+;;;;   v11.0.0 - 三层职责对齐 Spring AI：Provider 只管「底层信息 + 如何调用」，
+;;;;             ChatModel 承担单次调用的全部重活（options 合并 / 重试 /
+;;;;             观测 / 响应规范化），ChatClient 收窄到四槽（model / filters /
+;;;;             default-request / tool-calling）。删除 cl-agent/llm 的 client
+;;;;             类与基于它的 chat-stream 一族（重试当年就困在那条死路径上，
+;;;;             主干因此从未重试过）。新增 Model 抽象协议、载体改名
+;;;;             turn-request/result → chat-client-request/response，并把
+;;;;             tool-error-info / state-slot / resume-payload /
+;;;;             tool-execution-result / retry-config 从 plist·struct 改为类。
+;;;;             全部子系统版本号在此统一。
 ;;;;   v9.0.0 - 移除 cl-agent/client（Spring AI 的 ChatClient + Builder +
 ;;;;            fluent RequestSpec 移植）；chat 宏搬入 cl-agent/chat-client。
 ;;;;            至此 Spring AI 的移植层全部退役，chat-client+filter 成为
@@ -37,10 +47,10 @@
 ;;;;   v3.0.0 - Initial modular design
 
 (asdf:defsystem #:cl-agent
-  :description "Unified AI Agent Framework - Meta System (ChatClient + Filter)"
+  :description "Unified AI Agent Framework - Meta System (Provider / ChatModel / ChatClient)"
   :author "David"
   :license "MIT"
-  :version "9.0.0"
+  :version "11.0.0"
 
   ;; Meta-system contains no components, only declares dependencies
   :depends-on (;; Layer 1: Core —— 框架本体（基础设施 + HTTP + Chat API + ChatClient/Filter）
@@ -64,7 +74,7 @@
   :description "CL-Agent Complete Test Suite"
   :author "David"
   :license "MIT"
-  :version "9.0.0"
+  :version "11.0.0"
 
   :depends-on (#:cl-agent
                #:cl-agent-mock
@@ -88,6 +98,8 @@
                (:file "tests/test-memory")      ; ChatMemory / Repository
 
                ;; ChatClient + Filter 测试
+               (:file "tests/test-invariants")      ; 类不变式（make-instance 后门）
+               (:file "tests/test-model-protocol")  ; Model 抽象协议（各模态接入）
                (:file "tests/test-filter")          ; filter 机制 + build-chain
                (:file "tests/test-chat-client-skeleton") ; chat-client 骨架 + 载体
                (:file "tests/test-chat-client-invoke")   ; invoke 原语 + 工具循环
