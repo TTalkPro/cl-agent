@@ -1,7 +1,7 @@
 ;;;; cl-agent-llm.asd
 ;;;; CL-Agent LLM ChatModel System
 ;;;;
-;;;; Version: 4.0.0
+;;;; Version: 11.0.0
 ;;;; Author: David
 ;;;;
 ;;;; Overview:
@@ -29,10 +29,10 @@
 ;;;;                                   :model "claude-sonnet-4-20250514")
 
 (asdf:defsystem #:cl-agent-llm
-  :description "CL-Agent LLM ChatModel Layer - Multi-Provider LLM Client (v4.2.0)"
+  :description "CL-Agent LLM ChatModel Layer - Multi-Provider LLM Client"
   :author "David"
   :license "MIT"
-  :version "4.2.0"
+  :version "11.0.0"
 
   :depends-on (#:cl-agent-core
                #:alexandria
@@ -60,10 +60,20 @@
     :pathname "providers/"
     :components ((:file "base")))
 
+   ;; 注：曾有 client.lisp / streaming.lisp（client 类 + 基于它的 chat-stream
+   ;; 一族），现已整体移除。两者是与主干平行的死路径：
+   ;;   - client 类持有 provider/model/api-key/temperature 等，重复
+   ;;     provider-chat-model 的职责，且 chat-client 主干从不经过它；
+   ;;   - 重试逻辑（chat-with-retry）困在这条路径里，于是主干无重试。
+   ;;     重试已按 Spring AI 的分层上提为 ChatModel 层能力
+   ;;     （core/chat/model.lisp 的 retry-policy + chat-model-call :around）；
+   ;;   - streaming.lisp 的 chat-stream 一族第一个参数就是 client，全库零调用，
+   ;;     与主干的 llm-chat-stream SPI（stream/ 模块）功能重复。
+   ;; 裸 HTTP 错误的重试分类（原 retryable-error-p）已收归
+   ;; core/http/conditions.lisp 的 error-retryable-p 方法。
+
    ;; 4. Main modules
    (:file "providers")
-   (:file "client")
-   (:file "streaming")
 
    ;; 5. Provider implementations
    (:module "provider-impls"

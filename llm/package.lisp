@@ -134,8 +134,9 @@
   (:nicknames #:cla/llm)
   ;; 注：本包曾 (:shadow #:chat)——低层 client 函数与 cl-agent/core 的
   ;; chat 宏（chat-client 声明式 DSL）同名。shadow 是给读者埋雷（同一个名字
-  ;; 在不同包里一个是宏一个是函数），函数已改名 client-chat，shadow 随之
-  ;; 消失。全库不再 shadow 任何符号。
+  ;; 在不同包里一个是宏一个是函数）。那个函数先改名 client-chat 让 shadow
+  ;; 消失，后来连同 client 类整体退役（能力上提到 ChatModel）。
+  ;; 全库不再 shadow 任何符号。
   ;; 门面层：这些符号的实现属于 cl-agent/llm/providers，此处引入*同一符号*
   ;; 再导出，而不是在本包另立同名符号。
   ;;
@@ -168,17 +169,9 @@
                 #:response-complete-p)
   (:export
    ;; ==================== 客户端 ====================
-   ;; 客户端结构和访问器
-   #:client
-   #:make-client
-   #:client-provider
-   #:client-api-key
-   #:client-model
-   #:client-base-url
-   #:client-max-tokens
-   #:client-temperature
-   #:client-provider-name
-   #:client-model-name
+   ;; 注：client 类及其访问器已移除。ChatModel 取代了它——
+   ;; (make-provider-chat-model provider :retry-policy ...) 是唯一入口，
+   ;; 重试/观测等重活归 ChatModel，provider 只管底层调用。
 
    ;; ==================== 提供商类 ====================
    ;; 基类
@@ -232,35 +225,23 @@
    #:response-complete-p
 
    ;; ==================== 聊天 API ====================
-   ;; 核心 API
-   #:client-chat
-   #:chat-simple
-   #:chat-with-tools
-   #:chat-multi-turn
-   #:batch-chat
+   ;; 注：client-chat / chat-simple / chat-with-tools / chat-multi-turn /
+   ;; batch-chat 随 client 类一并移除。对应能力在 cl-agent/core：
+   ;; chat-model-call（单次）、chat 宏 DSL / chat-client-call*（带 filter 链）。
 
    ;; 泛型函数
+   ;; 注：曾在此导出 llm-stream——全库零定义零实现，导出了一个不存在的
+   ;; 函数（照导出列表使用的人直接撞 UNDEFINED-FUNCTION）。流式的真入口
+   ;; 是 cl-agent/core:llm-chat-stream。已删除。
    #:llm-chat
-   #:llm-stream
    #:llm-available-p
    #:llm-provider-name
    #:llm-default-model
 
    ;; ==================== 流式处理 ====================
-   ;; 流式聊天
-   #:chat-stream
-   #:chat-stream-simple
-   #:chat-stream-to-string
-   #:chat-stream-to-file
-
-   ;; 流式迭代器
-   #:stream-iterator
-   #:chat-stream-iterator
-   #:stream-next
-
-   ;; 流式上下文
-   #:stream-context
-   #:make-stream-context
+   ;; 注：chat-stream 一族（基于 client）已移除。流式主干是
+   ;; cl-agent/core:llm-chat-stream SPI（各 provider 在 stream/ 下实现）
+   ;; 与 cl-agent/core:invoke-chat-stream（带 :chat 链 + :token-xform 管道）。
 
    ;; ==================== 嵌入向量 ====================
    ;; SPI 与统一响应定义在 cl-agent/core（core/llm/embedding.lisp），
@@ -287,8 +268,11 @@
    #:embedding-dimensions
 
    ;; ==================== Token 计算 ====================
+   ;; 注：count-tokens-for-client 随 client 类一并退役（它只是
+   ;; (count-tokens text (client-provider-name client))）。
+   ;; estimate-cost / *provider-pricing* 从 client.lisp 迁入
+   ;; providers.lisp，现在只接受 provider。
    #:count-tokens
-   #:count-tokens-for-client
    #:estimate-cost
    #:*provider-pricing*
 
@@ -309,7 +293,8 @@
    #:convert-message-to-provider
    #:convert-messages-to-provider
    #:convert-tools-to-provider
-   #:normalize-messages
+   ;; 注：normalize-messages 定义在已移除的 client.lisp 里，随之退役。
+   ;; 消息归一化现在由 make-prompt / messages->neutral 承担。
 
    ;; 请求/响应
    #:build-chat-request-body
