@@ -141,129 +141,168 @@ normalized in the ChatModel layer:
 
 ## Quick Start
 
-### Creating Clients
+### Creating a ChatModel
+
+`create-chat-model` is this module's application-facing entry point: it builds
+the provider, then wraps it in a ChatModel. The provider is responsible only for
+low-level details and how to call the API; retries, observation, and default
+options belong to the ChatModel.
 
 ```lisp
 ;; Anthropic Claude
 (defvar *claude*
-  (make-client
-    :provider :anthropic
-    :model "claude-3-5-sonnet-20241022"
+  (create-chat-model :anthropic
+    :model "claude-sonnet-4-20250514"
     :api-key (uiop:getenv "ANTHROPIC_API_KEY")))
 
 ;; OpenAI GPT
 (defvar *gpt*
-  (make-client
-    :provider :openai
+  (create-chat-model :openai
     :model "gpt-4o"
     :api-key (uiop:getenv "OPENAI_API_KEY")))
 
-;; ZhipuAI
+;; Zhipu AI
 (defvar *glm*
-  (make-client
-    :provider :zhipu
-    :model "glm-4-turbo"
-    :api-key (uiop:getenv "ZHIPU_API_KEY")))
+  (create-chat-model :zhipu :model "glm-4-turbo"))
 
 ;; Ollama (local)
 (defvar *local*
-  (make-client
-    :provider :ollama
+  (create-chat-model :ollama
     :model "llama2"
-    :base-url "http://localhost:11434"))
+    :api-url "http://localhost:11434"))
 ```
 
 ### Basic Chat
 
+`chat-model-call` is a single call: it does **not** execute tools and does not
+loop. For the tool loop, memory, or HITL, use the chat-client (see "Integrating
+with the chat-client" below).
+
 ```lisp
-;; Simple string
-(chat *claude* "Hello!")
+;; Plain string (wrapped into a prompt automatically)
+(cl-agent/core:chat-response-text
+  (cl-agent/core:chat-model-call *claude* "Hello!"))
 
-;; Multi-turn conversation
-(chat *claude*
-  '((:role :user :content "My name is John")
-    (:role :assistant :content "Hello, John!")
-    (:role :user :content "What's my name?")))
+;; Multi-turn: a message list
+(cl-agent/core:chat-model-call *claude*
+  (list (cl-agent/core:user-message "My name is Ming")
+        (cl-agent/core:assistant-message "Nice to meet you, Ming!")
+        (cl-agent/core:user-message "What is my name?")))
 
-;; With parameters
-(chat *claude* "Write a poem"
-  :temperature 0.9
-  :max-tokens 500)
+;; With parameters: via the prompt's options
+(cl-agent/core:chat-model-call *claude*
+  (cl-agent/core:make-prompt
+    "Write a poem"
+    :options (cl-agent/core:make-chat-options :temperature 0.9
+                                              :max-tokens 500)))
 ```
 
 ### Tool Calling
 
-```lisp
-;; Define tool schema
-(defvar *tools*
-  '((:name "get_weather"
-     :description "Get weather information"
-     :parameters (:type "object"
-                  :properties (:city (:type "string"
-                                      :description "City name"))
-                  :required ("city")))))
+The ChatModel injects tool schemas and hands tool-calls back untouched; it does
+**not** execute them. The caller decides what to do (Spring AI calls this
+user-controlled tool execution).
 
-;; Chat with tools
-(let ((response (chat *claude* "What's the weather in Beijing?" :tools *tools*)))
-  (when (response-tool-calls response)
-    ;; Handle tool calls
-    (dolist (call (response-tool-calls response))
-      (format t "Calling tool: ~A~%" (tool-call-name call))
-      (format t "Arguments: ~A~%" (tool-call-arguments call)))))
+```lisp
+(cl-agent/core:deftool get-weather (city)
+  "Get weather information"
+  (:city :type string :description "City name")
+  (format nil "~A: sunny, 22°C" city))
+
+(let ((response
+        (cl-agent/core:chat-model-call *claude*
+          (cl-agent/core:make-prompt
+            "What is the weather in Beijing?"
+            :options (cl-agent/core:make-chat-options :tool-names '(get-weather))))))
+  (dolist (call (cl-agent/core:chat-response-tool-calls response))
+    (format t "Tool: ~A~%" (cl-agent/core:tool-call-name call))
+    (format t "Args: ~A~%" (cl-agent/core:tool-call-arguments call))))
 ```
 
 ### Streaming Output
 
 ```lisp
-;; Basic streaming
-(chat-stream *claude* "Tell me a story"
-  :on-token (lambda (token)
-              (format t "~A" token)
-              (force-output)))
-
-;; Complete callbacks
-(chat-stream *claude* messages
-  :on-token (lambda (token) ...)
-  :on-tool-call (lambda (tool-call) ...)
-  :on-complete (lambda (response) ...)
-  :on-error (lambda (error) ...))
+;; ChatModel layer: incremental text callback, returns the final chat-response
+(cl-agent/core:chat-model-stream *claude* "Tell me a story"
+  (lambda (delta)
+    (format t "~A" delta)
+    (force-output)))
 ```
+
+When a provider does not support streaming this degrades to a single call, with
+the whole text delivered as one delta. To layer the filter chain and token
+transforms (redaction, hold-and-release) onto the streaming path, use
+`cl-agent/core:invoke-chat-stream`.
 
 ### Embeddings
 
 ```lisp
-;; Single text embedding
-(embed *gpt* "Hello, world!")
+;; Single text
+(embed *openai-provider* "Hello, world!")
 ;; => #(0.123 0.456 ...)
 
-;; Batch embeddings
-(embed-batch *gpt* '("Text 1" "Text 2" "Text 3"))
+;; Batch
+(embed-batch *openai-provider* '("text1" "text2" "text3"))
 ;; => (#(...) #(...) #(...))
 ```
+
+The embedding API takes a **provider**, not a ChatModel — it goes through the
+`llm-embed` SPI.
 
 ### Token Counting
 
 ```lisp
-(count-tokens *claude* "This is a test text")
-;; => 5
+(count-tokens "This is a test sentence")   ; rough estimate
+(count-tokens "text" :openai)
+;; => 8
 ```
 
-## Client Configuration
+### Cost Estimation
 
 ```lisp
-(make-client
-  :provider :anthropic
-  :model "claude-3-5-sonnet-20241022"
-  :api-key "sk-..."
-
-  ;; Optional configuration
-  :base-url "https://api.anthropic.com"  ; Custom API URL
-  :max-tokens 4096                        ; Max output tokens
-  :temperature 0.7                        ; Sampling temperature
-  :timeout 120                            ; Timeout (seconds)
-  :retry-attempts 3                       ; Retry count
-  :retry-delay 1000)                      ; Retry delay (milliseconds)
+(estimate-cost (make-anthropic-provider) 1000 500)
+;; => 0.0105   ; USD, rough figure at the provider's flagship tier
 ```
+
+## ChatModel Configuration
+
+```lisp
+(create-chat-model :anthropic
+  :model "claude-sonnet-4-20250514"
+  :api-key "sk-..."
+  :api-url "https://api.anthropic.com"     ; custom endpoint
+
+  ;; Model-level default options (request-level options win,
+  ;; merged per merge-chat-options)
+  :options (cl-agent/core:make-chat-options
+             :max-tokens 4096
+             :temperature 0.7)
+
+  ;; Retry: a ChatModel-layer capability, nil (no retry) by default
+  :retry-policy (cl-agent/core:make-retry-policy
+                  :max-attempts 4        ; total attempts, including the first
+                  :initial-delay 1.0     ; delay before the first retry (seconds)
+                  :backoff 2.0           ; backoff multiplier
+                  :max-delay 60.0        ; per-delay ceiling
+                  :jitter 0.1)           ; ±10% jitter
+
+  ;; Observation: wraps the whole call, retries included
+  :observation-fn (lambda (model prompt thunk)
+                    (declare (ignore model prompt))
+                    (let ((start (get-internal-real-time)))
+                      (prog1 (funcall thunk)
+                        (format t "took ~Dms~%"
+                                (round (- (get-internal-real-time) start)
+                                       (/ internal-time-units-per-second 1000)))))))
+```
+
+Retry classification has a single source of truth,
+`cl-agent/core:error-retryable-p`: transient HTTP statuses (408/409/425/429/5xx)
+and network-layer failures are retryable; auth and argument errors are not.
+
+> **Note on streaming**: tokens already handed to the callback cannot be taken
+> back. If a stream dies halfway and is retried, the caller sees the first part
+> twice. Leave `retry-policy` unset on streaming paths.
 
 ## Custom Providers
 
@@ -282,7 +321,7 @@ normalized in the ChatModel layer:
 (register-provider :my-provider #'make-my-provider)
 
 ;; Use
-(make-client :provider :my-provider :model "my-model")
+(create-chat-model :my-provider :model "my-model")
 ```
 
 ## Schema Conversion
@@ -290,30 +329,48 @@ normalized in the ChatModel layer:
 Different providers have different tool schema formats, the module handles conversion automatically:
 
 ```lisp
-;; Internal unified format
+;; Internal unified format (deftool generates it; you can also write it by hand)
 (:name "tool_name"
  :description "Description"
  :parameters (:type "object"
               :properties (...)
               :required (...)))
 
-;; Convert to OpenAI format
-(convert-schema-to-openai schema)
+;; Convert a batch into a provider's wire format
+(convert-tools-to-provider tools provider)
 
-;; Convert to Anthropic format
-(convert-schema-to-anthropic schema)
+;; Each provider's rule lives in this generic — specialize it for a new provider
+(cl-agent/core:provider-format-tools provider tools)
 ```
+
+> Note: this section used to name `convert-schema-to-openai` /
+> `convert-schema-to-anthropic` — functions from the long-deleted `schema/`
+> module (their near-twins under `providers/` differed by a single preposition,
+> which is part of why that module went away). The entry points above are the
+> real ones.
+
+You rarely touch this layer: pass `deftool`-defined tools through
+`chat-options`' `:tool-names` / `:tool-callbacks` and the ChatModel injects the
+schemas for you.
 
 ## Error Handling
 
+The condition hierarchy has a single source of truth in `core/conditions.lisp`:
+`cl-agent-error → api-error → llm-error`, and `execution-error → timeout-error`.
+Whether something should be retried is decided by `error-retryable-p` — do not
+grow a second set of rules at the call site.
+
 ```lisp
 (handler-case
-    (chat *claude* "Hello")
-  (llm-rate-limit-error (e)
-    (format t "Rate limit: ~A~%" (error-retry-after e)))
-  (llm-api-error (e)
-    (format t "API error: ~A~%" (error-message e)))
-  (llm-timeout-error (e)
+    (cl-agent/core:chat-model-call *claude* "Hello")
+  (cl-agent/core:llm-error (e)
+    (format t "LLM error (~A): ~A~%"
+            (cl-agent/core:api-status-code e)
+            (cl-agent/core:error-message e))
+    ;; When deciding for yourself, ask the same classifier
+    (when (cl-agent/core:error-retryable-p e)
+      (format t "(transient — a :retry-policy would have retried this)~%")))
+  (cl-agent/core:timeout-error (e)
     (format t "Timeout: ~A~%" e)))
 ```
 
