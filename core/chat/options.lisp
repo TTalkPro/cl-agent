@@ -23,7 +23,19 @@
     tool-callbacks tool-names tool-context)
   "chat-options 全部槽位（合并/拷贝时枚举用）")
 
-(defclass chat-options ()
+;;; ============================================================
+;;; 刻意没有 definvariants
+;;; ============================================================
+;;; 本类十几个槽全部**没有** :initform——槽 unbound 就是「未设置」的语义，
+;;; merge-chat-options 靠 slot-boundp 实现「运行时 > chat-client 默认 >
+;;; 模型默认」的覆盖链，options->spi-args 靠它实现「存在才下发」
+;;; （凭空补一个 temperature 会让 Opus 4.7+ 直接 400）。
+;;;
+;;; 给它加必填校验会直接毁掉这个设计。全库其余值对象都挂了 definvariants，
+;;; 这里的空缺是**结论**而不是遗漏——不是每个 unbound 槽都是漏洞。
+;;; 判据见 core/invariants.lisp 头注的三分类。
+
+(defclass chat-options (model-options)
   ((model
     :initarg :model
     :documentation "模型名称（字符串）")
@@ -81,7 +93,7 @@
   (:documentation "可移植的 Chat 调用选项
 （对标 Spring AI 2.0 ChatOptions + ToolCallingChatOptions；
 工具执行循环本身不在这里配置——它由 cl-agent/core:run-tool-loop
-承担，循环相关旋钮见 build-chat-client 的 :settings/:tool-manager）"))
+承担，循环相关旋钮见 build-chat-client 的 :max-tool-iterations/:tool-manager）"))
 
 (defun make-chat-options (&rest initargs
                           &key model temperature max-tokens top-p top-k

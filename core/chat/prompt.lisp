@@ -8,7 +8,7 @@
 
 (in-package #:cl-agent/core)
 
-(defclass prompt ()
+(defclass prompt (model-request)
   ((messages
     :initarg :messages
     :initform nil
@@ -19,7 +19,26 @@
     :initform nil
     :reader prompt-options
     :documentation "chat-options 实例（可为 NIL）"))
-  (:documentation "一次模型调用的完整输入（对标 Prompt）"))
+  (:documentation "一次模型调用的完整输入（对标 Prompt implements ModelRequest）。
+
+  领域访问器是 prompt-messages / prompt-options；协议访问器
+  request-instructions / request-options 映射到同一对槽，供不分模态的
+  横切代码使用。"))
+
+(definvariants prompt (self)
+  ;; messages 槽里存的必须已经是 message 实例——make-prompt 负责把字符串
+  ;; 归一过来（那是**入口的贴心**，不是类的性质）。这条不变式钉住的正是
+  ;; 「归一发生在入口、槽里只有一种东西」，否则下游每处都得自己判类型。
+  (require-that self (every (lambda (m) (typep m 'message)) (prompt-messages self))
+                "messages 必须是 message 实例列表——字符串请经 make-prompt 归一")
+  (require-type self 'options 'chat-options))
+
+;;; 接入 model-request 协议
+(defmethod request-instructions ((request prompt))
+  (prompt-messages request))
+
+(defmethod request-options ((request prompt))
+  (prompt-options request))
 
 (defun make-prompt (messages &key options system)
   "创建 prompt。
