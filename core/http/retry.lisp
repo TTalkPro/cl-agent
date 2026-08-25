@@ -27,22 +27,76 @@
 
 设置后，所有 http-request-with-retry 调用都会使用此配置")
 
-(defstruct retry-config
-  "重试配置
+(defclass retry-config ()
+  ((max-retries
+    :initarg :max-retries
+    :initform 3
+    :type fixnum
+    :reader retry-config-max-retries
+    :documentation "最大重试次数（**不含**首次请求）")
+   (delay
+    :initarg :delay
+    :initform 1.0
+    :type number
+    :reader retry-config-delay
+    :documentation "初始延迟时间（秒）")
+   (backoff
+    :initarg :backoff
+    :initform :exponential
+    :type keyword
+    :reader retry-config-backoff
+    :documentation "退避策略：:none | :linear | :exponential")
+   (max-delay
+    :initarg :max-delay
+    :initform 60.0
+    :type number
+    :reader retry-config-max-delay
+    :documentation "最大延迟时间（秒）")
+   (retry-on
+    :initarg :retry-on
+    :initform nil
+    :reader retry-config-retry-on
+    :documentation "重试条件：函数 (condition) → boolean，或状态码列表。
+NIL = 用 default-retry-predicate")
+   (on-retry
+    :initarg :on-retry
+    :initform nil
+    :reader retry-config-on-retry
+    :documentation "重试回调 (condition attempt delay) → nil"))
+  (:documentation "HTTP 传输层的重试配置。
 
-槽位说明：
-  MAX-RETRIES    - 最大重试次数（不含首次请求）
-  DELAY          - 初始延迟时间（秒）
-  BACKOFF        - 退避策略（:none, :linear, :exponential）
-  MAX-DELAY      - 最大延迟时间（秒）
-  RETRY-ON       - 重试条件函数或状态码列表
-  ON-RETRY       - 重试时的回调函数"
-  (max-retries 3 :type fixnum)
-  (delay 1.0 :type number)
-  (backoff :exponential :type keyword)
-  (max-delay 60.0 :type number)
-  (retry-on nil)
-  (on-retry nil))
+  注意与 ChatModel 层的 retry-policy（core/chat/model.lisp）区分：
+  - retry-config  管一次 **HTTP 请求**的重试，语义是「额外重试几次」
+                  （max-retries 不含首次）
+  - retry-policy  管一次 **模型调用**的重试，语义是「总共尝试几次」
+                  （max-attempts 含首次），分类走 error-retryable-p
+
+  两层各自有重试是刻意的：HTTP 层能看到连接与状态码，模型层能看到
+  这是一次语义上的模型调用。调用方通常只配后者。"))
+
+(defun make-retry-config (&key (max-retries 3) (delay 1.0) (backoff :exponential)
+                               (max-delay 60.0) retry-on on-retry)
+  "创建 HTTP 层重试配置。"
+  (make-instance 'retry-config
+                 :max-retries max-retries :delay delay :backoff backoff
+                 :max-delay max-delay :retry-on retry-on :on-retry on-retry))
+
+(definvariants retry-config (self)
+  ;; 注意与 ChatModel 层 retry-policy 的语义差：这里的 max-retries 是
+  ;; **额外**重试次数（不含首次），所以 0 是合法的「不重试」。
+  (require-that self (>= (retry-config-max-retries self) 0)
+                "max-retries 是额外重试次数（不含首次），不能为负")
+  (require-member self 'backoff '(:none :linear :exponential)
+                  "退避策略，calculate-delay 按它分派")
+  (require-that self (>= (retry-config-delay self) 0) "delay 不能为负")
+  (require-that self (>= (retry-config-max-delay self) 0) "max-delay 不能为负"))
+
+(defmethod print-object ((config retry-config) stream)
+  (print-unreadable-object (config stream :type t)
+    (format stream "~Ax ~,2Fs ~(~A~)"
+            (retry-config-max-retries config)
+            (retry-config-delay config)
+            (retry-config-backoff config))))
 
 ;;; ============================================================
 ;;; 退避策略

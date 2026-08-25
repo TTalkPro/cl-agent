@@ -192,3 +192,21 @@
          :port port
          :uri uri
          :cause cause))
+
+;;; ============================================================
+;;; 裸 HTTP 条件接入统一重试分类
+;;; ============================================================
+;;; http-error 体系（本文件）不在 core/conditions.lisp 的 cl-agent-error
+;;; 层次里——它先于 chat 层存在、由 HTTP 客户端直接 signal。error-retryable-p
+;;; 是「是否重试」的单一来源（core/conditions.lisp），ChatModel 的重试
+;;; :around 只认它，所以这一支必须在此接入，否则裸 5xx / 超时在
+;;; ChatModel 层被判为不可重试。
+;;;
+;;; 此前这段分类逻辑是 llm/client.lisp:287 的 retryable-error-p——那条
+;;; 路径（client 类）随 P1 一并退役，逻辑收归此处。
+
+(defmethod error-retryable-p ((condition http-error))
+  "裸 HTTP 错误：有状态码按 transient-status-p；无状态码视为网络层失败（可重试）。"
+  (let ((status (http-error-status condition)))
+    (or (null status)
+        (transient-status-p status))))
