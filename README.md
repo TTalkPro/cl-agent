@@ -65,12 +65,13 @@
 
 ```
 (agent-chat a "...")  或  (chat chat-client ...)
-  → messages + context → turn-request
+  → prompt + context → chat-client-request
   → :turn 链（护栏/校验/RAG/re-reading…）
       → run-tool-loop ─┬→ :chat 链（记忆/日志/工具披露）→ chat-model-call
+                       │     └→ ChatModel：options 合并 / 重试 / 观测 → provider
                        └→ :tool 链（超时/审批/日志）→ 工具执行
                             ↑ tool-gate 在此之前评估（HITL 暂停点）
-  → turn-result → 文本 / chat-response / turn-result
+  → chat-client-response → 文本 / chat-response / chat-client-response
 ```
 
 ## 快速开始
@@ -180,7 +181,7 @@
     :tools '(get-weather)
     :filters (list (memory-filter *memory*)      ; 靠前 = 靠外 = 先执行
                    (logging-chat-filter))
-    :settings '((:max-tool-iterations . 10))))
+    :max-tool-iterations 10))
 
 ;; 直接用 chat-client
 (chat *chat-client* (:user "东京天气？") (:conversation "conv-1"))
@@ -329,7 +330,7 @@ MINIMAX_API_KEY=... sbcl --script scripts/live-test.lisp
 | `make-chat-client` | `build-chat-client`（`:model` 是**关键字**参数） |
 | `chat-client-builder` + `default-system` … | `build-chat-client :system ...` |
 | fluent spec（`client-prompt` → `prompt-user` → `call-content`） | `chat` 宏子句，或 `chat-client-text` |
-| `(:call :client-response)` | `(:call :result)`（返回 turn-result） |
+| `(:call :client-response)` | `(:call :result)`（返回 chat-client-response） |
 
 ### 包合并（`cl-agent/http` / `/chat` / `/chat-client` → `cl-agent/core`）
 

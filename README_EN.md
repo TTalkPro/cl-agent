@@ -74,14 +74,16 @@ How one conversation executes:
 
 ```
 (agent-chat a "...")  or  (chat chat-client ...)
-  → messages + context → turn-request
+  → prompt + context → chat-client-request
   → :turn chain (guard / validation / RAG / re-reading …)
       → run-tool-loop ─┬→ :chat chain (memory/logging/tool disclosure)
                        │     → chat-model-call
+                       │         → ChatModel: option merge / retry / observation
+                       │             → provider
                        └→ :tool chain (timeout/approval/logging)
                             → tool execution
                               ↑ tool-gate is evaluated before this (HITL pause point)
-  → turn-result → text / chat-response / turn-result
+  → chat-client-response → text / chat-response / chat-client-response
 ```
 
 ## Quick Start
@@ -197,7 +199,7 @@ chat-client and pass it in:
     :tools '(get-weather)
     :filters (list (memory-filter *memory*)      ; earlier = outer = runs first
                    (logging-chat-filter))
-    :settings '((:max-tool-iterations . 10))))
+    :max-tool-iterations 10))
 
 ;; Use the chat-client directly
 (chat *chat-client* (:user "Weather in Tokyo?") (:conversation "conv-1"))
@@ -354,7 +356,7 @@ were left alone.
 | `make-chat-client` | `build-chat-client` (`:model` is a **keyword** argument) |
 | `chat-client-builder` + `default-system` … | `build-chat-client :system ...` |
 | fluent spec (`client-prompt` → `prompt-user` → `call-content`) | `chat` macro clauses, or `chat-client-text` |
-| `(:call :client-response)` | `(:call :result)` (returns a turn-result) |
+| `(:call :client-response)` | `(:call :result)` (returns a chat-client-response) |
 
 ### Package merge (`cl-agent/http` / `/chat` / `/chat-client` → `cl-agent/core`)
 
