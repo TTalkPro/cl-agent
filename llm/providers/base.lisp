@@ -24,6 +24,13 @@
 ;;; 提供商基类
 ;;; ============================================================
 
+;;; 刻意没有 definvariants：本类**不带槽**（各 provider 子类自带
+;;; api-key / api-url / model 等），而子类的这些槽也不适合挂必填——
+;;; API key 允许延迟提供（make-*-provider 从环境变量读，读不到时报的是
+;;; missing-api-key-error，那个错误信息本身就足够清楚），强制必填会挡掉
+;;; 「先建 provider、稍后设 key」的合法用法。
+;;; 判据见 core/invariants.lisp 头注的三分类。
+
 (defclass base-provider ()
   ((name :initarg :name
          :reader base-provider-name

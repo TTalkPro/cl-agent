@@ -458,7 +458,7 @@
   (is (equal 1 (cl-agent/llm::alist-get '(("a" . 1)) "a"))))
 
 ;;; ============================================================
-;;; make-provider / make-client 覆盖全部注册的 provider
+;;; make-provider 覆盖全部注册的 provider
 ;;; ============================================================
 
 (test make-provider-covers-every-registered-provider
@@ -504,9 +504,9 @@ provider 一律 ecase 落空，成本估算把整个调用打断。"
 (test every-provider-implements-provider-api-key
   "每个 provider 都必须实现 cl-agent/core:provider-api-key 协议。
 
-make-client 据此统一取密钥。此前 Anthropic 系（含 minimax）没实现它，
-于是 client 层只好维护一张手写的「provider → 环境变量名」ECASE 表，
-而那张表漏了 5 个 provider。"
+这是取密钥的唯一入口。此前 Anthropic 系（含 minimax）没实现它，于是当年
+的 client 层只好维护一张手写的「provider → 环境变量名」ECASE 表，而那张表
+漏了 5 个 provider。client 类已退役，协议留下。"
   (dolist (name (cl-agent/llm:list-providers))
     (let ((p (cl-agent/llm:make-provider name :api-key "test-key")))
       (is (stringp (cl-agent/core:provider-api-key p))
