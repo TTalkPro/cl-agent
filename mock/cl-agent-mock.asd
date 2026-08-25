@@ -5,7 +5,7 @@
   :description "CL-Agent Mock 实现（用于测试和开发）"
   :author "David"
   :license "MIT"
-  :version "1.0.0"
+  :version "11.0.0"
 
   :depends-on (#:cl-agent-core
                #:cl-agent-llm)

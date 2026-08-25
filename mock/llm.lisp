@@ -37,6 +37,15 @@
 ;;; 工厂函数
 ;;; ============================================================
 
+(cl-agent/core:definvariants mock-llm-provider (self)
+  ;; mock 也挂——它是测试里最常被直接 make-instance 的类，正是「构造函数
+  ;; 不是唯一入口」的活样本。
+  (cl-agent/core:require-that self (<= 0 (mock-error-rate self) 1)
+                              "error-rate 是概率，取值 [0, 1]")
+  (cl-agent/core:require-that self (>= (mock-response-delay self) 0)
+                              "response-delay 不能为负")
+  (cl-agent/core:require-type self 'responses 'hash-table))
+
 (defun make-mock-llm (&key (response-delay 0) (error-rate 0) (responses (make-hash-table :test #'equal)))
   "创建 Mock LLM 提供商
 
