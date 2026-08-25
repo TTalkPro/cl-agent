@@ -1081,3 +1081,132 @@ subseq，window 落在对中间就产生孤儿 tool 开头。"
               when (eq role :tool)
                 do (is (find :assistant (subseq sent 0 i))
                        "tool 消息前存在 assistant(tool_use)"))))))
+
+;;; ============================================================
+;;; :loop-fn / :resume-fn —— 可替换的循环骨架
+;;; ============================================================
+
+(test loop-fn-defaults-to-run-tool-loop
+  "不给 :loop-fn 时 terminal 仍是 run-tool-loop——默认路径零改动"
+  (multiple-value-bind (kernel provider)
+      (make-test-kernel
+       (tool-call-response "ki_adder" '(("a" . 3) ("b" . 4)))
+       (text-response "3+4=7"))
+    (declare (ignore provider))
+    (is (null (cl-agent/core:kernel-loop-fn kernel)) "槽缺省为 nil")
+    (is (null (cl-agent/core:kernel-resume-fn kernel)) "槽缺省为 nil")
+    (let ((result (cl-agent/core:invoke-turn
+                   kernel
+                   (cl-agent/core:make-turn-request
+                    (list (cl-agent/core:user-message "3+4=?"))))))
+      (is (eq :completed (cl-agent/core:turn-result-status result)))
+      (is (string= "3+4=7"
+                   (cl-agent/core:chat-response-text
+                    (cl-agent/core:turn-result-response result)))))))
+
+(test loop-fn-replaces-terminal
+  "自定义 loop-fn 整体接管循环：模型一次都不调"
+  (multiple-value-bind (kernel-unused provider)
+      (make-test-kernel (text-response "不该来"))
+    (declare (ignore kernel-unused))
+    (let* ((seen nil)
+           (k (cl-agent/core:build-kernel
+               :model (cl-agent/core:make-provider-chat-model provider)
+               :tools '(ki-adder)
+               :loop-fn (lambda (kernel req)
+                          (declare (ignore kernel))
+                          (setf seen (cl-agent/core:turn-request-messages req))
+                          (cl-agent/core:make-turn-result
+                           :completed
+                           :response (cl-agent/core:make-chat-response
+                                      (cl-agent/core:make-generation
+                                       (cl-agent/core:assistant-message "自定义循环")
+                                       :finish-reason :stop))
+                           :tool-calls-made 0))))
+           (result (cl-agent/core:invoke-turn
+                    k (cl-agent/core:make-turn-request
+                       (list (cl-agent/core:user-message "问"))))))
+      (is (string= "自定义循环"
+                   (cl-agent/core:chat-response-text
+                    (cl-agent/core:turn-result-response result))))
+      (is (= 1 (length seen)) "loop-fn 收到 turn-request 的 messages")
+      (is (= 0 (length (seq-provider-requests provider)))
+          "默认循环被完全绕过，模型未被调用"))))
+
+(test loop-fn-still-wrapped-by-turn-filters
+  ":turn filter 照常环绕自定义 loop-fn——换 terminal 不影响洋葱"
+  (let* ((trace nil)
+         (spy (cl-agent/core:make-filter
+               :spy
+               :turn (lambda (req chain)
+                       (push :before trace)
+                       (let ((r (funcall chain req)))
+                         (push :after trace)
+                         r))))
+         (k (cl-agent/core:build-kernel
+             :model nil
+             :filters (list spy)
+             :loop-fn (lambda (kernel req)
+                        (declare (ignore kernel req))
+                        (push :loop trace)
+                        (cl-agent/core:make-turn-result
+                         :completed
+                         :response (cl-agent/core:make-chat-response
+                                    (cl-agent/core:make-generation
+                                     (cl-agent/core:assistant-message "x")
+                                     :finish-reason :stop)))))))
+    (cl-agent/core:invoke-turn
+     k (cl-agent/core:make-turn-request
+        (list (cl-agent/core:user-message "问"))))
+    (is (equal '(:before :loop :after) (reverse trace))
+        "filter 在自定义循环外层照常进出")))
+
+(test resume-fn-replaces-continuation
+  "自定义 resume-fn 接管暂停延续；filter 递归重入仍落到 loop-fn"
+  (let* ((calls nil)
+         (k (cl-agent/core:build-kernel
+             :model nil
+             :loop-fn (lambda (kernel req)
+                        (declare (ignore kernel req))
+                        (push :loop calls)
+                        (cl-agent/core:make-turn-result :completed))
+             :resume-fn (lambda (kernel loop-state decision payload)
+                          (declare (ignore kernel payload))
+                          (push (list :resume decision
+                                      (cl-agent/core:loop-state-iteration loop-state))
+                                calls)
+                          (cl-agent/core:make-turn-result
+                           :completed
+                           :response (cl-agent/core:make-chat-response
+                                      (cl-agent/core:make-generation
+                                       (cl-agent/core:assistant-message "已续跑")
+                                       :finish-reason :stop))))))
+         (ls (cl-agent/core:make-loop-state :iteration 2 :context nil))
+         (result (cl-agent/core:resume-turn k ls :approved)))
+    (is (equal '((:resume :approved 2)) calls)
+        "只走自定义 resume-fn，未落到 loop-fn")
+    (is (string= "已续跑"
+                 (cl-agent/core:chat-response-text
+                  (cl-agent/core:turn-result-response result))))))
+
+(test default-hitl-resume-unaffected-by-loop-fn-seam
+  "接缝引入后默认 HITL 暂停/续跑行为不变（回归）"
+  (let* ((provider (make-seq-provider
+                    (tool-call-response "ki_adder" '(("a" . 1) ("b" . 2)))
+                    (text-response "1+2=3")))
+         (k (cl-agent/core:build-kernel
+             :model (cl-agent/core:make-provider-chat-model provider)
+             :tools '(ki-adder)
+             :tool-gate (lambda (tc) (declare (ignore tc)) :pause)))
+         (paused (cl-agent/core:invoke-turn
+                  k (cl-agent/core:make-turn-request
+                     (list (cl-agent/core:user-message "1+2=?"))))))
+    (is (eq :paused (cl-agent/core:turn-result-status paused)))
+    (is (= 1 (length (seq-provider-requests provider)))
+        "暂停时工具未执行、模型只调了一轮")
+    (let ((final (cl-agent/core:resume-turn
+                  k (cl-agent/core:turn-result-loop-state paused) :approved)))
+      (is (eq :completed (cl-agent/core:turn-result-status final)))
+      (is (string= "1+2=3"
+                   (cl-agent/core:chat-response-text
+                    (cl-agent/core:turn-result-response final)))))))
