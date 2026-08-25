@@ -12,7 +12,7 @@
 ;;;;   find-callback-for-call 按名在本次请求暴露的工具里定位 callback
 ;;;;
 ;;;; 工具的**执行**不在本层：解析响应中的 tool-calls 并执行是
-;;;; cl-agent/kernel 的事（run-tool-loop / invoke-tool-batch /
+;;;; cl-agent/chat-client 的事（run-tool-loop / invoke-tool-batch /
 ;;;; sequential|virtual-thread|thread-pool 三个 ToolCallingManager）。
 ;;;; 本层只负责「工具是什么」——定义、注册、schema、按名解析。
 ;;;;
@@ -23,7 +23,7 @@
 ;;;;     (chat client (:user "...") (:tools 'get-weather))
 ;;;;
 ;;;;   这与 clj-agent 一致——那边 deftool 生成 defn、schema 挂 var 元数据，
-;;;;   再用 (build-kernel {:tools [#'get-weather]}) 显式传入。Clojure 的 var
+;;;;   再用 (build-chat-client {:tools [#'get-weather]}) 显式传入。Clojure 的 var
 ;;;;   带元数据，CL 里对应的载体是符号的属性列表；#'get-weather 是裸函数
 ;;;;   对象，取不到 schema，因此不能用作工具引用。
 ;;;;
@@ -148,13 +148,13 @@
     :initform nil
     :reader tool-callback-serial-p
     :documentation "为 T 时该工具有副作用，批次内任一工具声明 :serial
-则整批退化按序执行（kernel invoke-tool-batch 用）")
+则整批退化按序执行（chat-client invoke-tool-batch 用）")
    (retry
     :initarg :retry
     :initform nil
     :reader tool-callback-retry-p
     :documentation "为 T 时瞬态故障（:transient）触发指数退避重试
-（kernel barrier routing 用）"))
+（chat-client barrier routing 用）"))
   (:documentation "可执行工具（对标 ToolCallback / FunctionToolCallback）"))
 
 (defun make-tool-callback (function &key name (description "") parameters
@@ -272,8 +272,8 @@
 ;;;   - 污染：光加载测试套件就会往表里塞 15 个工具，进程内永不消失；
 ;;;     且同名静默覆盖，两个模块各自 deftool 同名工具时后者赢、不告警。
 ;;;
-;;; 参照实现都没有这种全局表：clj-agent 的工具表挂在 kernel 实例上
-;;; （:tool-vars，由 (build-kernel {:tools [#'foo]}) 显式传入）；
+;;; 参照实现都没有这种全局表：clj-agent 的工具表挂在 chat-client 实例上
+;;; （:tool-vars，由 (build-chat-client {:tools [#'foo]}) 显式传入）；
 ;;; Spring 的 ToolCallbackResolver 是 ToolCallingManager 的实例字段，
 ;;; 默认是空的 DelegatingToolCallbackResolver。
 
@@ -416,7 +416,7 @@
   (chat client (:user \"...\") (:tools 'get-weather))
 
 这与 clj-agent 的 deftool 一致——那边生成 defn 并把 schema 挂在
-var 元数据上，再用 (build-kernel {:tools [#'get-weather]}) 显式传入；
+var 元数据上，再用 (build-chat-client {:tools [#'get-weather]}) 显式传入；
 Clojure 的 var 带元数据，CL 里对应的载体正是符号的属性列表
 （#'get-weather 是裸函数对象，取不到 schema，不能用作工具引用）。
 
@@ -482,9 +482,9 @@ register-tool-callback 把它放进全局注册表——那是 opt-in 的逃生�
 ;;; 曾长在 ToolCallingManager 区块里。那套 manager（对标 Spring 的
 ;;; ToolCallingManager，(execute-tool-calls manager prompt response)）
 ;;; 已随 ChatClient 一并退役——工具执行循环现在唯一住在
-;;; cl-agent/core:run-tool-loop，批执行在 kernel/batch.lisp，
-;;; 执行策略在 kernel/tool-calling-manager.lisp。
-;;; 本函数与 manager 无关（它只是「按名找工具」），且 kernel 的
+;;; cl-agent/core:run-tool-loop，批执行在 chat-client/batch.lisp，
+;;; 执行策略在 chat-client/tool-calling-manager.lisp。
+;;; 本函数与 manager 无关（它只是「按名找工具」），且 chat-client 的
 ;;; batch / manager / tool-search filter 都依赖它，故保留在 chat 层。
 
 (defun find-callback-for-call (options tool-call)
@@ -497,11 +497,11 @@ register-tool-callback 把它放进全局注册表——那是 opt-in 的逃生�
 而 deftool 是自动注册的，作者根本意识不到攻击面被扩大了。
 
 参照实现同样没有这种回退：clj-agent 的 find-function 只查
-kernel 的 :tool-vars，找不到即抛；Spring 的 ToolCallbackResolver
+chat-client 的 :tool-vars，找不到即抛；Spring 的 ToolCallbackResolver
 是 manager 的实例字段，默认为空。
 
 找不到时发 tool-not-found-error。调用方要负责把它转成文本回传模型
-（行为友好，不中断对话）——kernel 侧由 batch.lisp 的 resolve-callback
+（行为友好，不中断对话）——chat-client 侧由 batch.lisp 的 resolve-callback
 捕获、经 tool-result->text 渲染成「错误：找不到工具 xxx」喂回模型，
 让它自纠。直接调用本函数的代码若不捕获，条件会冒泡出整轮对话。"
   (let ((name (normalize-tool-name (tool-call-name tool-call))))

@@ -60,7 +60,7 @@
 ;;; 泛型函数定义
 ;;; ============================================================
 
-;;; llm-chat 泛型函数现定义在 cl-agent/kernel 包中（core/kernel/kernel.lisp）
+;;; llm-chat 泛型函数现定义在 cl-agent/chat-client 包中（core/chat-client/chat-client.lisp）
 ;;; cl-agent/llm 包通过 :import-from 导入并重导出该符号
 
 (defgeneric llm-available-p (provider)

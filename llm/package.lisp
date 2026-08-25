@@ -133,7 +133,7 @@
         #:cl-agent/core)
   (:nicknames #:cla/llm)
   ;; 注：本包曾 (:shadow #:chat)——低层 client 函数与 cl-agent/core 的
-  ;; chat 宏（kernel 声明式 DSL）同名。shadow 是给读者埋雷（同一个名字
+  ;; chat 宏（chat-client 声明式 DSL）同名。shadow 是给读者埋雷（同一个名字
   ;; 在不同包里一个是宏一个是函数），函数已改名 client-chat，shadow 随之
   ;; 消失。全库不再 shadow 任何符号。
   ;; 门面层：这些符号的实现属于 cl-agent/llm/providers，此处引入*同一符号*
@@ -220,7 +220,7 @@
    #:provider-timeout
 
 
-   ;; ==================== Service Layer (响应标准化) ====================
+   ;; ==================== ChatModel Layer (响应标准化) ====================
    ;; 归一化（单一来源：provider 自身产出 llm-response，
    ;; usage/finish-reason 别名归一在 cl-agent/core）
    #:ensure-llm-response

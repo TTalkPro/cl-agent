@@ -9,7 +9,7 @@ Two entry points:
 - **SimpleAgent** (`cl-agent/client`): stateful chat + callbacks + error
   normalization + HITL. See
   [cl-agent/client](#cl-agentclient--simpleagent-stateful-chat--hitl).
-- **Kernel + Filter** (`cl-agent/core`): the `chat` macro / `kernel-chat` →
+- **ChatClient + Filter** (`cl-agent/core`): the `chat` macro / `chat-client-call` →
   `cl-agent/core:invoke-turn` tri-chain. The former is a thin wrapper over the
   latter.
 
@@ -19,7 +19,7 @@ These are all the packages there are:
 
 | Package | Nickname | Role |
 |---|---|---|
-| `cl-agent/core` | `cla/core` | The framework proper (one package): infrastructure + HTTP/SSE + JSON Schema + `llm-chat` SPI + Chat API + Kernel/Filter tri-chain + the `chat` macro |
+| `cl-agent/core` | `cla/core` | The framework proper (one package): infrastructure + HTTP/SSE + JSON Schema + `llm-chat` SPI + Chat API + ChatClient/Filter tri-chain + the `chat` macro |
 | `cl-agent/client` | `cla/client` | SimpleAgent |
 | `cl-agent/llm` | `cla/llm` | Provider implementations, `create-chat-model` |
 | `cl-agent/llm/providers` | — | The nine provider implementations |
@@ -33,18 +33,18 @@ directly; no shadowing of any kind is needed:
   (:use :cl :cl-agent/core :cl-agent/client))
 ```
 
-This is exactly the `defpackage` used by `examples/kernel-usage.lisp` and
+This is exactly the `defpackage` used by `examples/chat-client-usage.lisp` and
 `scripts/live-test.lisp` (they `:use` core only).
 
-> **The `cl-agent/http` / `cl-agent/chat` / `cl-agent/kernel` packages have been
+> **The `cl-agent/http` / `cl-agent/chat` / `cl-agent/chat-client` packages have been
 > merged into `cl-agent/core`**, and the nicknames `cla/http` / `cla/chat` /
-> `cla/kernel` all collapse into `cla/core`. Before the merge, chat and kernel
+> `cla/chat-client` all collapse into `cla/core`. Before the merge, chat and chat-client
 > shared three exported names: `tool-response` / `make-tool-response` (chat's is
-> the protocol-level message value object; the kernel's was the execution-chain
+> the protocol-level message value object; the chat-client's was the execution-chain
 > response carrier) and `execute-tool-calls` (two manager protocols with
-> different signatures). That forced the kernel to `:shadow`, and forced
+> different signatures). That forced the chat-client to `:shadow`, and forced
 > downstream packages to write their own `:shadowing-import-from`. Fixed at the
-> root: the kernel carrier was renamed to `tool-request` / `tool-result`, chat's
+> root: the chat-client carrier was renamed to `tool-request` / `tool-result`, chat's
 > old ToolCallingManager was deleted outright, and the three packages were then
 > merged. **Every "you must shadowing-import" claim in older docs is obsolete.**
 > See [Migration](#migration).
@@ -72,7 +72,7 @@ This is exactly the `defpackage` used by `examples/kernel-usage.lisp` and
 
 > This `tool-response` is the **protocol-level** value object (id/name/text) that
 > goes inside a role=:tool message sent back to the model. It is a **different
-> thing at a different layer** from the kernel's execution-chain response carrier
+> thing at a different layer** from the chat-client's execution-chain response carrier
 > `cl-agent/core:tool-result` (value/writes/error, see
 > [Chain carriers](#chain-carriers)) — and the two no longer share a name.
 
@@ -106,8 +106,8 @@ This is exactly the `defpackage` used by `examples/kernel-usage.lisp` and
 
 Options not explicitly passed are "unset" and fall back on merge.
 
-> **Tool-loop options do not live in chat-options.** The iteration cap is a kernel
-> setting: `(build-kernel :settings '((:max-tool-iterations . 10)))`; the
+> **Tool-loop options do not live in chat-options.** The iteration cap is a chat-client
+> setting: `(build-chat-client :settings '((:max-tool-iterations . 10)))`; the
 > continue-or-stop verdict is `:eligibility-fn`. chat-options describes **one**
 > model call.
 
@@ -161,10 +161,10 @@ translates into its own wire format:
   body...)
 ;; Generates a plain function plus a tool-callback stored on the SYMBOL.
 ;; No global side effect — a tool's identity IS its symbol:
-;;   (chat kernel (:user "...") (:tools 'get-weather))
+;;   (chat chat-client (:user "...") (:tools 'get-weather))
 ;; Type keywords: :string :number :integer :boolean :array :object
 ;; Mirrors clj-agent, where deftool emits a defn with the schema in var
-;; metadata and tools are passed explicitly: (build-kernel {:tools [#'foo]}).
+;; metadata and tools are passed explicitly: (build-chat-client {:tools [#'foo]}).
 ;; A Clojure var carries metadata; the CL equivalent is the symbol plist —
 ;; #'get-weather is a bare function object with no schema, so it cannot be
 ;; used as a tool reference.
@@ -188,7 +188,7 @@ translates into its own wire format:
 (unregister-tool-callback "get_weather")
 ```
 
-**Tool resolution** (the kernel's batch / manager / tool-search filter depend on
+**Tool resolution** (the chat-client's batch / manager / tool-search filter depend on
 this):
 
 ```lisp
@@ -199,7 +199,7 @@ this):
 ;; boundary: a tool the model was not given is never executed.
 ```
 
-> Models hallucinate tool names routinely. The kernel's `batch.lisp`
+> Models hallucinate tool names routinely. The chat-client's `batch.lisp`
 > catches `tool-not-found-error` and turns it into a `:semantic` error
 > `tool-result`, which `tool-result->text` renders as "错误：找不到工具 xxx" and
 > feeds back to the model so it can self-correct — the condition does not escape
@@ -214,11 +214,11 @@ Conditions: `tool-execution-error`, `tool-not-found-error`,
 > `execute-tool-calls` (the `(manager prompt response)` arity),
 > `tool-execution-result`, `process-tool-execution-error`,
 > `with-concurrent-tool-calling-manager` and friends no longer exist. Tool
-> execution lives ONLY in the kernel layer: `run-tool-loop` +
+> execution lives ONLY in the chat-client layer: `run-tool-loop` +
 > `invoke-tool-batch` + the three
 > [ToolCallingManagers](#toolcallingmanager-implementations). The
 > "user-controlled" path — call `chat-model-call` yourself and drive the loop
-> with `execute-tool-calls` — is gone; the kernel is the only path.
+> with `execute-tool-calls` — is gone; the chat-client is the only path.
 >
 > `*inherited-special-variables*` / `with-inherited-specials` did not belong to
 > the deleted manager: they still live in `core/utils.lisp`, sharing one list
@@ -256,10 +256,10 @@ of the `:turn` chain).
 Window truncation is pairing-safe: system messages are kept and don't count;
 orphaned leading tool messages are dropped.
 
-Memory is **not** a kernel field — attach it as a filter:
+Memory is **not** a chat-client field — attach it as a filter:
 `(cl-agent/core:memory-filter memory)`.
 
-## cl-agent/core — Kernel + Filter tri-chain (execution core)
+## cl-agent/core — ChatClient + Filter tri-chain (execution core)
 
 Three onion chains, each with its own carriers and terminal:
 
@@ -391,10 +391,10 @@ downstream** — upstream can never be re-run, and recursive re-entry is free.
 > `cl-agent/core:tool-response` — a protocol-level value object at a different
 > layer. The rename removed the collision.
 
-### Kernel
+### ChatClient
 
 ```lisp
-(build-kernel &key model tools filters eligibility-fn settings tool-manager
+(build-chat-client &key model tools filters eligibility-fn settings tool-manager
                    system options tool-gate state-slots loop-fn resume-fn)
 ;; model          chat-model instance
 ;; tools          list of tool symbols or tool-callbacks (default nil)
@@ -409,17 +409,17 @@ downstream** — upstream can never be re-run, and recursive re-entry is free.
 ;;                | (:pause . reason); nil (default) = no approval, all execute
 ;; state-slots    state-slot declarations ((key :init v0 :reduce fn) ...) —
 ;;                merge semantics for tool-batch :writes (see below)
-;; loop-fn        custom tool loop: (kernel turn-request) → turn-result;
+;; loop-fn        custom tool loop: (chat-client turn-request) → turn-result;
 ;;                nil (default) = run-tool-loop. It IS the :turn chain's
 ;;                terminal — replacing it replaces the whole loop skeleton
 ;; resume-fn      custom pause continuation:
-;;                (kernel loop-state decision payload) → turn-result;
+;;                (chat-client loop-state decision payload) → turn-result;
 ;;                nil (default) = the built-in one. Pairs with loop-fn
 
-(kernel-model k) (kernel-tools k) (kernel-filters k)
-(kernel-eligibility-fn k) (kernel-settings k) (kernel-tool-manager k)
-(kernel-default-system k) (kernel-default-options k) (kernel-tool-gate k)
-(kernel-state-slots k) (kernel-loop-fn k) (kernel-resume-fn k)
+(chat-client-model k) (chat-client-tools k) (chat-client-filters k)
+(chat-client-eligibility-fn k) (chat-client-settings k) (chat-client-tool-manager k)
+(chat-client-default-system k) (chat-client-default-options k) (chat-client-tool-gate k)
+(chat-client-state-slots k) (chat-client-loop-fn k) (chat-client-resume-fn k)
 ```
 
 ### :loop-fn / :resume-fn — swapping the loop skeleton
@@ -431,8 +431,8 @@ filters still wrap it, `:chat` / `:tool` filters still apply to whatever it
 invokes.
 
 ```lisp
-(build-kernel :model m
-              :loop-fn (lambda (kernel turn-request) ... ))   ; → turn-result
+(build-chat-client :model m
+              :loop-fn (lambda (chat-client turn-request) ... ))   ; → turn-result
 ```
 
 **HITL is opt-in for a custom loop.** The built-in pause continuation reads the
@@ -461,7 +461,7 @@ interleaving never affects the merged result:
           (list :notes (list text))))      ; write intent: takes no effect here
 
 ;; :state-slots declares the merge semantics
-(build-kernel :model m :tools '(take-note)
+(build-chat-client :model m :tools '(take-note)
               :state-slots (list (list :notes :init nil
                                        :reduce (lambda (old new)
                                                  (append old new)))))
@@ -486,32 +486,32 @@ Low-level primitives (rarely needed directly):
 ```lisp
 (apply-writes context writes-seq &optional slots)
 ;; → (values new-context conflict-keys); pure, does not mutate its arguments
-(fold-batch-writes kernel tool-results context)
+(fold-batch-writes chat-client tool-results context)
 ;; → new-context; skips failed calls' writes, warns on conflicts
 ```
 
-The kernel is minimal: **no memory field** — memory is a filter, not an intrinsic
-property of the kernel.
+The chat-client is minimal: **no memory field** — memory is a filter, not an intrinsic
+property of the chat-client.
 
-> **There is no Builder.** Assembling a kernel *is* `build-kernel`'s keyword
+> **There is no Builder.** Assembling a chat-client *is* `build-chat-client`'s keyword
 > arguments — the old Builder's `default-system` / `default-options` /
 > `default-tools` map to `:system` / `:options` / `:tools`.
 
 How the two levels combine:
 
-| Item | Kernel level | Request level | Combination |
+| Item | ChatClient level | Request level | Combination |
 |---|---|---|---|
-| system | `build-kernel :system` | `(:system ...)` | request **overrides** |
-| options | `build-kernel :options` | `(:options ...)` | request **wins**; untouched defaults survive |
-| tools | `build-kernel :tools` | `(:tools ...)` | **union** |
+| system | `build-chat-client :system` | `(:system ...)` | request **overrides** |
+| options | `build-chat-client :options` | `(:options ...)` | request **wins**; untouched defaults survive |
+| tools | `build-chat-client :tools` | `(:tools ...)` | **union** |
 
-### HITL: pause and resume (kernel primitive)
+### HITL: pause and resume (chat-client primitive)
 
 `:tool-gate` is the low-level primitive behind human approval
 (`cl-agent/client`'s [SimpleAgent HITL](#human-approval-hitl) wraps it).
 
 ```lisp
-(build-kernel
+(build-chat-client
   :model *model* :tools '(rm-file)
   ;; (tool-call) → :proceed | :pause | (:pause . reason)
   :tool-gate (lambda (tc)
@@ -527,7 +527,7 @@ turn: **not one tool executes**, and `run-tool-loop` returns
 `turn-result(:paused)`.
 
 ```lisp
-(resume-turn kernel loop-state decision &key payload)
+(resume-turn chat-client loop-state decision &key payload)
 ;; loop-state  (turn-result-loop-state r) from the paused turn-result
 ;; decision    :approved | :rejected | :reply
 ;; payload     :approved + (:args new-args) → edit-then-approve (run with new args)
@@ -557,14 +557,14 @@ Pause carriers:
 (pending-tool-name p) (pending-tool-args p) (pending-tool-id p)
 ```
 
-`loop-state` deliberately holds **no** kernel / gate / callbacks — those are
+`loop-state` deliberately holds **no** chat-client / gate / callbacks — those are
 code-side things, re-supplied at resume; this class carries only the data
 needed to continue.
 
 ### The chat macro — declarative request DSL (the caller's entry point)
 
 ```lisp
-(chat kernel
+(chat chat-client
   [(:system text [format-args...])]
   [(:user text [format-args...])]
   [(:messages msg...)]
@@ -575,7 +575,7 @@ needed to continue.
   [(:call :content | :response | :result | :entity)]   ; default (:call :content)
   [(:stream callback)])
 
-(chat kernel "Hi")   ; shorthand for (chat kernel (:user "Hi"))
+(chat chat-client "Hi")   ; shorthand for (chat chat-client (:user "Hi"))
 ```
 
 Terminal operations:
@@ -588,7 +588,7 @@ Terminal operations:
 | `(:call :entity)` | the reply parsed as JSON (**parses only, does not validate**) |
 | `(:stream fn)` | calls `(fn delta)` per text delta; returns the final `chat-response` |
 
-- `(:tools ...)` are **request-level** tools, **unioned** with `build-kernel`'s
+- `(:tools ...)` are **request-level** tools, **unioned** with `build-chat-client`'s
   `:tools`.
 - `(:conversation id)` ≡ `(:context :conversation-id id)`; `memory-filter` reads it.
 - `(:options ...)` with a single non-keyword argument is treated as a ready-made
@@ -596,7 +596,7 @@ Terminal operations:
   `make-chat-options`.
 
 ```lisp
-(chat *kernel*
+(chat *chat-client*
   (:system "You are a weather assistant")
   (:user "What's the weather in ~A?" city)   ; extra args → format
   (:tools 'get-weather)
@@ -608,17 +608,17 @@ Terminal operations:
 Handier than the macro when arguments are assembled programmatically:
 
 ```lisp
-(kernel-chat kernel &key system user messages options tools context)  ; → turn-result
-(kernel-chat-text kernel &rest args)                                  ; → text
-(kernel-chat-entity kernel &rest args)                                ; → JSON value (parse only)
-(kernel-chat-stream kernel on-chunk &rest args)                       ; → chat-response
+(chat-client-call chat-client &key system user messages options tools context)  ; → turn-result
+(chat-client-text chat-client &rest args)                                  ; → text
+(chat-client-entity chat-client &rest args)                                ; → JSON value (parse only)
+(chat-client-stream chat-client on-chunk &rest args)                       ; → chat-response
 ```
 
-`args` are `kernel-chat`'s keyword arguments. The `chat` macro expands into
+`args` are `chat-client-call`'s keyword arguments. The `chat` macro expands into
 exactly these four functions.
 
 ```lisp
-(kernel-chat-text k
+(chat-client-text k
                   :system "You are a translator"
                   :user (format nil "Translate ~S into French" "hello, world")
                   :options (make-chat-options :temperature 0.1))
@@ -640,7 +640,7 @@ no schema parameter).
 ```
 
 To get "re-prompt the model with the validation error until it complies", attach a
-`validation-turn-filter` to the kernel — it owns the verdict:
+`validation-turn-filter` to the chat-client — it owns the verdict:
 
 ```lisp
 (defvar *schema*
@@ -649,32 +649,32 @@ To get "re-prompt the model with the validation error until it complies", attach
                    \"population\":{\"type\":\"integer\"}},
     \"required\":[\"name\",\"population\"]}")
 
-(defvar *validating-kernel*
-  (cl-agent/core:build-kernel
+(defvar *validating-chat-client*
+  (cl-agent/core:build-chat-client
     :model *model*
     :filters (list (cl-agent/core:validation-turn-filter
                     (cl-agent/core:structured-output-validate-fn
                      *schema* :parse-fn #'cl-agent/core:json-parse)
                     :max-retries 2))))
 
-(cl-agent/core:chat *validating-kernel*
+(cl-agent/core:chat *validating-chat-client*
   (:user "Give me Tokyo's info as JSON")
   (:call :entity))
 ```
 
-> **Streaming**: `(:stream fn)` / `kernel-chat-stream` go through
+> **Streaming**: `(:stream fn)` / `chat-client-stream` go through
 > `invoke-chat-stream` — the `:chat` filter chain applies as usual and the
 > `:token-xform` pipeline is assembled inside the streaming terminal. Two limits:
 > - **No tool loop** (it is a single streaming call). A request that would send
 >   tools to the model **signals an error** rather than silently dropping tool
->   execution; use `kernel-chat` when you need tools.
+>   execution; use `chat-client-call` when you need tools.
 > - If the provider has no streaming, `chat-model-stream` degrades to a one-shot
 >   call and the whole text arrives as a single chunk (`:token-xform` still runs).
 
 ### Invoke primitives
 
 ```lisp
-(invoke-chat kernel prompt)          ; :chat chain → chat-model-call. Single call,
+(invoke-chat chat-client prompt)          ; :chat chain → chat-model-call. Single call,
                                      ; executes no tools
                                      ; → (values chat-response effective-prompt)
                                      ; The 2nd value is the prompt **as rewritten by
@@ -682,25 +682,25 @@ To get "re-prompt the model with the validation error until it complies", attach
                                      ; options the model actually saw, else filter-
                                      ; injected tools (e.g. tool-search's search_tools)
                                      ; come back as "tool not found"
-(invoke-chat-stream kernel prompt on-token)
+(invoke-chat-stream chat-client prompt on-token)
                                      ; :chat chain → chat-model-stream; the
                                      ; :token-xform pipeline is assembled inside the
                                      ; terminal → chat-response
                                      ; Single call — does NOT run the tool loop
-(invoke-tool kernel tool-request)    ; :tool chain → tool execution → kernel:tool-result
-(invoke-tool-batch kernel tool-calls options context)
+(invoke-tool chat-client tool-request)    ; :tool chain → tool execution → chat-client:tool-result
+(invoke-tool-batch chat-client tool-calls options context)
                                      ; → (values tool-results return-direct-p)
                                      ; parallel by default (lparallel); if any tool
                                      ; in the batch declares :serial the whole batch
                                      ; goes sequential; errors are classified/routed
-(invoke-turn kernel turn-request)    ; :turn chain → run-tool-loop → turn-result
-(run-tool-loop kernel turn-request)  ; the loop itself (terminal of the :turn chain,
+(invoke-turn chat-client turn-request)    ; :turn chain → run-tool-loop → turn-result
+(run-tool-loop chat-client turn-request)  ; the loop itself (terminal of the :turn chain,
                                      ; NOT a filter)
-(resume-turn kernel loop-state decision &key payload)
+(resume-turn chat-client loop-state decision &key payload)
                                      ; resume from a pause (see "HITL: pause and resume")
 ```
 
-Each `run-tool-loop` iteration: build a prompt (messages + kernel tools, merged
+Each `run-tool-loop` iteration: build a prompt (messages + chat-client tools, merged
 with the caller's options) → `invoke-chat` → if the response has tool calls and
 `eligibility-fn` says continue → execute tools → append the assistant(tool-calls)
 message and the tool-result message → next iteration; otherwise return
@@ -710,25 +710,25 @@ message and the tool-result message → next iteration; otherwise return
   signals `cl-agent/core:max-tool-iterations-exceeded-error`
 - `:return-direct` tools: when the whole batch declares it, the loop short-circuits
   and the tool output becomes the final answer without going back to the model
-- A non-nil `kernel-tool-manager` routes execution through `execute-tool-calls`;
+- A non-nil `chat-client-tool-manager` routes execution through `execute-tool-calls`;
   otherwise `invoke-tool-batch` is used
 - A hallucinated tool name does not break the loop: `batch.lisp` turns
   `tool-not-found-error` into a `:semantic` error result, which
   `tool-result->text` renders as "错误：找不到工具 xxx" and feeds back to the
   model to self-correct
-- When `kernel-tool-gate` is non-nil, every batch passes the gate **before**
+- When `chat-client-tool-gate` is non-nil, every batch passes the gate **before**
   execution; a `:pause` verdict returns `turn-result(:paused)` with not one tool
-  executed (see [HITL: pause and resume](#hitl-pause-and-resume-kernel-primitive))
+  executed (see [HITL: pause and resume](#hitl-pause-and-resume-chat-client-primitive))
 
 ### ToolCallingManager implementations
 
 Mirrors Spring's `ToolCallingManager` — it promotes the *execution entry point* to
 an injectable protocol. Loop control, eligibility and the `:tool` filter chain all
-stay on the kernel side; the manager only picks the scheduling strategy. This is
+stay on the chat-client side; the manager only picks the scheduling strategy. This is
 the project's **only** ToolCallingManager (chat's old one is deleted).
 
 ```lisp
-(cl-agent/core:execute-tool-calls manager kernel response options)
+(cl-agent/core:execute-tool-calls manager chat-client response options)
 ;; options plist: (:tool-context ctx ...)
 ;; → tool-execution-result plist: (:messages ... :records ... :context ... :errors ...)
 (make-tool-execution-result &key messages records context errors)
@@ -739,15 +739,15 @@ the project's **only** ToolCallingManager (chat's old one is deleted).
 (default-tool-calling-manager)                ; = virtual-thread
 ```
 
-> There is only one signature now: `(manager kernel response options)`.
+> There is only one signature now: `(manager chat-client response options)`.
 > The pre-merge `cl-agent/chat` once had a same-named generic function taking
-> `(manager prompt response)`, which forced the kernel to `shadow` the symbol;
+> `(manager prompt response)`, which forced the chat-client to `shadow` the symbol;
 > that layer is deleted, so `execute-tool-calls` now belongs solely to
 > `cl-agent/core`.
 >
 > `thread-pool-tool-calling-manager` currently behaves exactly like
 > virtual-thread (lparallel is already pool-backed); `pool-size` does not yet bind
-> a dedicated kernel.
+> a dedicated chat-client.
 
 ### Failure classification
 
@@ -866,7 +866,7 @@ the tool author.
 ;; Measured (MiniMax, 12 tools): first round 1 vs 12; 13 vs 24 schemas over the
 ;; whole turn — 46% saved. The more tools, the bigger the saving.
 
-(build-kernel :model m
+(build-chat-client :model m
               :tools '(get-weather get-stock send-mail ...)   ; the full set
               :filters (list (tool-search-filter
                               (make-keyword-tool-index
@@ -899,7 +899,7 @@ the tool author.
 
 The application-facing convenience layer: a stateful agent object that handles
 the conversation, observability, error normalization and human approval. It is a
-thin wrapper over the kernel — `agent-chat` ultimately lands on `kernel-chat`.
+thin wrapper over the chat-client — `agent-chat` ultimately lands on `chat-client-call`.
 
 The agent **does not store history itself**: history is still managed by core's
 `memory-filter` keyed by conversation-id; the agent only holds the
@@ -909,8 +909,8 @@ conversation-id plus lightweight control state.
 
 ```lisp
 (make-agent &key model system options tools memory conversation-id
-                 callbacks kernel settings)
-;; model           chat-model instance (required unless :kernel is given)
+                 callbacks chat-client settings)
+;; model           chat-model instance (required unless :chat-client is given)
 ;; system          default system prompt
 ;; options         default chat-options
 ;; tools           list of tool symbols
@@ -918,22 +918,22 @@ conversation-id plus lightweight control state.
 ;;                 nil = no memory (each turn independent)
 ;; conversation-id conversation ID (auto-generated by default)
 ;; callbacks       callback plist (below)
-;; settings        kernel settings alist, e.g. '((:max-tool-iterations . 10))
-;; kernel          prebuilt kernel (use this when you need filters)
+;; settings        chat-client settings alist, e.g. '((:max-tool-iterations . 10))
+;; chat-client          prebuilt chat-client (use this when you need filters)
 
-(agent-id a) (agent-kernel a) (agent-memory a) (agent-conversation-id a)
+(agent-id a) (agent-chat-client a) (agent-memory a) (agent-conversation-id a)
 (agent-callbacks a) (agent-turn-count a)
 ```
 
 > **This layer does not accept `:filters`** — passing it **signals an error**
 > with migration guidance rather than silently ignoring it. The agent exposes
-> only `:callbacks`; to mount filters, build your own kernel and pass it via
-> `:kernel`. The boundary is deliberate: once a simple layer starts forwarding
-> filters it slowly grows into a second kernel — exactly how the ChatClient this
+> only `:callbacks`; to mount filters, build your own chat-client and pass it via
+> `:chat-client`. The boundary is deliberate: once a simple layer starts forwarding
+> filters it slowly grows into a second chat-client — exactly how the ChatClient this
 > repo just deleted rotted.
 >
-> When you pass `:kernel`, mounting the `memory-filter` is **the caller's** job
-> (`make-agent` does not touch a prebuilt kernel's filters); `:memory` merely
+> When you pass `:chat-client`, mounting the `memory-filter` is **the caller's** job
+> (`make-agent` does not touch a prebuilt chat-client's filters); `:memory` merely
 > tells the agent where to read `agent-history` from.
 
 Thread safety: a single agent instance **must not** be driven by concurrent
@@ -1003,7 +1003,7 @@ not control flow; the exception is logged and ignored. Even if `:on-tool-call`
 throws, it is treated as "no opinion" (proceed).
 
 Internally: `:on-tool-result` is bridged to a `:tool` filter (a result only
-exists after execution), and `:on-tool-call` is bridged to the kernel's
+exists after execution), and `:on-tool-call` is bridged to the chat-client's
 `tool-gate` (it must be able to veto **before** execution).
 
 ### Human approval (HITL)
@@ -1050,30 +1050,30 @@ Calling `agent-resume` while not paused signals an error (check
 
 ## Migration
 
-### Package merge (`cl-agent/http` / `/chat` / `/kernel` → `cl-agent/core`)
+### Package merge (`cl-agent/http` / `/chat` / `/chat-client` → `cl-agent/core`)
 
 The three packages have been merged into a single `cl-agent/core`. A mechanical
 rename, one for one:
 
 | Old | New |
 |---|---|
-| `cl-agent/kernel:X` | `cl-agent/core:X` |
+| `cl-agent/chat-client:X` | `cl-agent/core:X` |
 | `cl-agent/chat:X` | `cl-agent/core:X` |
 | `cl-agent/http:X` | `cl-agent/core:X` |
-| nicknames `cla/kernel` / `cla/chat` / `cla/http` | `cla/core` |
-| `cl-agent/kernel:build-kernel` | `cl-agent/core:build-kernel` |
+| nicknames `cla/chat-client` / `cla/chat` / `cla/http` | `cla/core` |
+| `cl-agent/chat-client:build-chat-client` | `cl-agent/core:build-chat-client` |
 | `cl-agent/chat:deftool` | `cl-agent/core:deftool` |
 | `cl-agent/http:http-request` | `cl-agent/core:http-request` |
 | any `:shadowing-import-from` incantation | **no longer needed** — delete it |
 
 Code written against the old package names hits
-`Package CL-AGENT/KERNEL does not exist` immediately.
+`Package CL-AGENT/CHAT-CLIENT does not exist` immediately.
 
 ### Migrating from ChatClient
 
 **The ChatClient porting layer is deleted** — it was a port of Spring AI's
 ChatClient + Builder + fluent RequestSpec. Builders and chained specs are a Java
-idiom; in Lisp, `build-kernel`'s keyword arguments plus the declarative `chat`
+idiom; in Lisp, `build-chat-client`'s keyword arguments plus the declarative `chat`
 macro cover the same ground with one layer less.
 
 > **Note: the package name `cl-agent/client` has been reused.** It used to be
@@ -1083,14 +1083,19 @@ macro cover the same ground with one layer less.
 > different thing — not one of the old ChatClient symbols remains.
 
 These symbols **no longer exist**:
-`make-kernel-client`, `make-chat-client`, `chat-client`, `chat-client-builder`,
+`make-chat-client`, `chat-client-builder`,
 `default-system`, `default-options`, `default-tools`, `build-client`,
 `client-prompt`, `prompt-system`, `prompt-user`, `prompt-add-messages`,
 `prompt-with-options`, `prompt-tools`, `prompt-context`, `prompt-conversation`,
 `call-client-response`, `call-response`, `call-content`, `call-entity`,
 `stream-content`, `client-request`, `client-response`, `make-client-request`,
-`make-client-response`, `context-get`, `context-set`, `client-kernel`,
+`make-client-response`, `context-get`, `context-set`, `client-chat-client`,
 `client-default-system`, `client-default-options`, `client-default-tools`.
+
+> The porting layer also had a class called `chat-client`, deleted along with the
+> rest. **That name was later reused**: today's `cl-agent/core:chat-client` is
+> this framework's core class (formerly `kernel`) and has nothing to do with the
+> porting layer's class of the same name.
 
 The `chat` macro **survived** — the syntax is unchanged, the symbol just comes
 from `cl-agent/core` now.
@@ -1100,35 +1105,34 @@ ChatClient usage), use
 [SimpleAgent](#cl-agentclient--simpleagent-stateful-chat--hitl) now:
 `(make-agent :model m :system "..." :tools '(...))` + `(agent-chat a "...")`.
 
-| Old (ChatClient) | New (Kernel) |
+| Old (ChatClient porting layer, deleted in v9.0.0) | New (ChatClient core) |
 |---|---|
-| `(make-kernel-client model :filters ... :tools ...)` | `(build-kernel :model model :filters ... :tools ...)` — `:model` is a **keyword** argument, not positional |
-| `(make-chat-client model)` | `(build-kernel :model model)` |
-| `(chat client ...)` | `(chat kernel ...)` — clauses unchanged |
-| fluent spec (`client-prompt` → `prompt-user` → `call-content`) | `chat` macro clauses, or the `kernel-chat-text` function forms |
-| `(call-content spec)` | `(:call :content)` / `kernel-chat-text` |
+| `(make-chat-client model)` | `(build-chat-client :model model)` — `:model` is a **keyword** argument, not positional |
+| `(chat client ...)` | `(chat chat-client ...)` — clauses unchanged |
+| fluent spec (`client-prompt` → `prompt-user` → `call-content`) | `chat` macro clauses, or the `chat-client-text` function forms |
+| `(call-content spec)` | `(:call :content)` / `chat-client-text` |
 | `(call-response spec)` | `(:call :response)` |
 | `(call-client-response spec)` | `(:call :result)` → a `turn-result` (the `client-response` carrier is gone) |
-| `(call-entity spec :schema s)` | `(:call :entity)` / `kernel-chat-entity` — **no schema parameter**; attach `validation-turn-filter` to validate |
-| `(stream-content spec fn)` | `(:stream fn)` / `kernel-chat-stream` |
+| `(call-entity spec :schema s)` | `(:call :entity)` / `chat-client-entity` — **no schema parameter**; attach `validation-turn-filter` to validate |
+| `(stream-content spec fn)` | `(:stream fn)` / `chat-client-stream` |
 | `(prompt-context spec k v)` | `(:context k v)` |
 | `(prompt-conversation spec id)` | `(:conversation id)` |
-| `default-tools` (Builder) | `build-kernel :tools` (request-level `(:tools ...)` unions with it) |
-| `default-options` (Builder) | `build-kernel :options` (request-level `(:options ...)` merges over it) |
-| `default-system` (Builder) | `build-kernel :system` (request-level `(:system ...)` overrides it) |
+| `default-tools` (Builder) | `build-chat-client :tools` (request-level `(:tools ...)` unions with it) |
+| `default-options` (Builder) | `build-chat-client :options` (request-level `(:options ...)` merges over it) |
+| `default-system` (Builder) | `build-chat-client :system` (request-level `(:system ...)` overrides it) |
 | `client-request` / `client-response` / `context-get` / `context-set` | `turn-request` / `turn-result` + `turn-request-context` (a plist) |
 
-### Migrating from `kernel:tool-response` (carrier rename)
+### Migrating from `chat-client:tool-response` (carrier rename)
 
-The kernel tool chain's response carrier was renamed to `tool-result`, symmetric
+The chat-client tool chain's response carrier was renamed to `tool-result`, symmetric
 with the turn chain's `turn-request` / `turn-result`, which also removed the
 collision with the protocol-message-layer `tool-response` (once that collision
 was gone, the three packages could be merged).
 
 | Old (gone) | New |
 |---|---|
-| `cl-agent/kernel:tool-response` (the class) | `cl-agent/core:tool-result` |
-| `cl-agent/kernel:make-tool-response` | `cl-agent/core:make-tool-result` |
+| `cl-agent/chat-client:tool-response` (the class) | `cl-agent/core:tool-result` |
+| `cl-agent/chat-client:make-tool-response` | `cl-agent/core:make-tool-result` |
 | `(make-tool-response :result X)` | `(make-tool-result :value X)` — **the initarg changed from `:result` to `:value`** |
 | `tool-response-result` | `tool-result-value` |
 | `tool-response-writes` | `tool-result-writes` |
@@ -1142,7 +1146,7 @@ becomes `cl-agent/core:`). `cl-agent/core:tool-result->text` is a new export.
 > `make-tool-response` / `tool-response-message` / `tool-response-text` **still
 > exist** — that is the **protocol-message-layer** value object (id/name/text)
 > that goes inside a role=:tool message back to the model, a different thing at a
-> different layer from the kernel's `tool-result` (value/writes/error). It lived
+> different layer from the chat-client's `tool-result` (value/writes/error). It lived
 > in `cl-agent/chat` before the merge and now shares `cl-agent/core` with
 > `tool-result`; since they no longer share a name, both coexist.
 
@@ -1158,14 +1162,14 @@ These pre-merge `cl-agent/chat` symbols **no longer exist**: `tool-calling-manag
 `tool-execution-result`, `tool-execution-conversation-history`,
 `tool-execution-return-direct-p`, `tool-execution-last-message`.
 
-| Old (chat-level manager) | New (kernel) |
+| Old (chat-level manager) | New (chat-client) |
 |---|---|
 | `(make-default-tool-calling-manager)` | `(make-sequential-tool-calling-manager)` |
 | `(make-concurrent-tool-calling-manager :pool-size 4)` | `(make-thread-pool-tool-calling-manager 4)` |
 | parallel default | `(make-virtual-thread-tool-calling-manager)` = `(default-tool-calling-manager)` |
-| `(execute-tool-calls mgr prompt response)` | `(execute-tool-calls mgr kernel response options)` |
-| driving the loop yourself: `chat-model-call` + `execute-tool-calls` | `(chat kernel ...)` / `kernel-chat` — the kernel is the only path |
-| `(shutdown-tool-calling-manager mgr)` / `with-concurrent-tool-calling-manager` | not needed — kernel managers hold no pool requiring explicit release |
+| `(execute-tool-calls mgr prompt response)` | `(execute-tool-calls mgr chat-client response options)` |
+| driving the loop yourself: `chat-model-call` + `execute-tool-calls` | `(chat chat-client ...)` / `chat-client-call` — the chat-client is the only path |
+| `(shutdown-tool-calling-manager mgr)` / `with-concurrent-tool-calling-manager` | not needed — chat-client managers hold no pool requiring explicit release |
 | `tool-execution-conversation-history` / `-last-message` / `-return-direct-p` | `turn-result-response` / `turn-result-tool-context`; at the manager layer, `make-tool-execution-result`'s `:messages` |
 | specializing `process-tool-execution-error` | a `:tool` filter, or read `tool-result-error`'s `:class` |
 | `:inherit-specials` / `manager-inherit-specials` | `cl-agent/core:with-inherited-specials` + `*inherited-special-variables*` |

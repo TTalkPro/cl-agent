@@ -1,8 +1,8 @@
-;;;; kernel-usage.lisp
-;;;; CL-Agent - Kernel + Filter 完整用法示例
+;;;; chat-client-usage.lisp
+;;;; CL-Agent - ChatClient + Filter 完整用法示例
 ;;;;
 ;;;; 运行方式（无需 API 密钥，用 mock provider 演示）：
-;;;;   sbcl --load examples/kernel-usage.lisp
+;;;;   sbcl --load examples/chat-client-usage.lisp
 ;;;;   然后逐个调用 (example-1) ... (example-8)
 ;;;;
 ;;;; 接真实提供商时把 *model* 换成：
@@ -21,9 +21,9 @@
 (asdf:load-system :cl-agent)
 (asdf:load-system :cl-agent-mock)
 
-(defpackage :kernel-examples
+(defpackage :chat-client-examples
   (:use :cl :cl-agent/core))
-(in-package :kernel-examples)
+(in-package :chat-client-examples)
 
 ;;; ============================================================
 ;;; 准备：ChatModel（这里用 mock，换真实 provider 只改这一处）
@@ -39,20 +39,20 @@
 ;;; ============================================================
 
 (defun example-1 ()
-  "一行对话。build-kernel 装配，chat 宏发起。"
-  (let ((k (build-kernel :model *model*)))
+  "一行对话。build-chat-client 装配，chat 宏发起。"
+  (let ((k (build-chat-client :model *model*)))
     (chat k "你是谁？")))
 
 ;;; ============================================================
-;;; 示例 2：带默认 system / options 的 kernel
+;;; 示例 2：带默认 system / options 的 chat-client
 ;;; ============================================================
 ;;;
-;;; 没有 Builder：kernel 的装配就是 build-kernel 的关键字参数，
+;;; 没有 Builder：chat-client 的装配就是 build-chat-client 的关键字参数，
 ;;; 一次请求的覆盖就是 chat 宏的子句。
 
 (defun example-2 ()
   "请求级 system + options"
-  (let ((k (build-kernel :model *model*)))
+  (let ((k (build-chat-client :model *model*)))
     (chat k
       (:system "你是一个言简意赅的助手。")
       (:user "介绍一下你自己")
@@ -77,9 +77,9 @@
                      (error () "无法计算"))))
 
 (defun example-3 ()
-  "带工具的对话：kernel 的 run-tool-loop 自动执行 tool-call 循环
+  "带工具的对话：chat-client 的 run-tool-loop 自动执行 tool-call 循环
 （对标 @Tool）"
-  (let ((k (build-kernel :model *model* :tools '(get-weather))))
+  (let ((k (build-chat-client :model *model* :tools '(get-weather))))
     (chat k
       (:system "你是一个天气助手，用工具查询实时数据。")
       (:user "东京的天气怎么样？"))))
@@ -90,9 +90,9 @@
 
 (defun example-4 ()
   "memory-filter 多轮记忆（对标 MessageWindowChatMemory）。
-横切能力经 filter 挂载：build-kernel :filters。"
+横切能力经 filter 挂载：build-chat-client :filters。"
   (let* ((memory (make-message-window-chat-memory :max-messages 20))
-         (k (build-kernel :model *model*
+         (k (build-chat-client :model *model*
                           :filters (list (memory-filter memory)))))
     ;; 同一 conversation-id 共享记忆
     (chat k (:user "我叫大卫") (:conversation "conv-1"))
@@ -123,7 +123,7 @@
 
 (defun example-5 ()
   "自定义 filter + 内置日志/护栏 filter 组成洋葱链"
-  (let ((k (build-kernel
+  (let ((k (build-chat-client
             :model *model*
             :filters (list (timing-filter)
                            (safeguard-turn-filter '("密码"))
@@ -137,9 +137,9 @@
 ;;; ============================================================
 
 (defun example-6 ()
-  "kernel-chat-text：chat 宏的函数形态，参数由程序拼时更顺手"
-  (let ((k (build-kernel :model *model*)))
-    (kernel-chat-text k
+  "chat-client-text：chat 宏的函数形态，参数由程序拼时更顺手"
+  (let ((k (build-chat-client :model *model*)))
+    (chat-client-text k
                       :system "你是一个翻译"
                       :user (format nil "把「~A」翻译成英文" "你好，世界")
                       :options (make-chat-options :temperature 0.1))))
@@ -172,7 +172,7 @@
   "(:call :entity) 只解析 JSON（会剥掉 markdown 围栏）。
 要「不符合 schema 就带着错误让模型重出」，挂 validation-turn-filter
 —— 判据由它承担，(:call :entity) 本身不校验。"
-  (let ((k (build-kernel
+  (let ((k (build-chat-client
             :model *json-model*
             :filters (list (validation-turn-filter
                             (structured-output-validate-fn
@@ -189,8 +189,8 @@
 
 (defun example-8 ()
   "流式回调。注意：当前为同步降级——整段文本作为单个 chunk 回调一次。
-真正的增量流式需要 kernel 的 invoke-chat-stream（尚未实现）。"
-  (let ((k (build-kernel :model *model*)))
+真正的增量流式需要 chat-client 的 invoke-chat-stream（尚未实现）。"
+  (let ((k (build-chat-client :model *model*)))
     (chat k
       (:user "写一首关于 Lisp 的短诗")
       (:stream (lambda (delta)
@@ -198,6 +198,6 @@
                  (force-output))))))
 
 (format t "~%已加载示例：
-  REPL 流程：先 (in-package :kernel-examples)，再 (example-1)...(example-8)
-  或直接： (kernel-examples::example-1)...(kernel-examples::example-8)
+  REPL 流程：先 (in-package :chat-client-examples)，再 (example-1)...(example-8)
+  或直接： (chat-client-examples::example-1)...(chat-client-examples::example-8)
 ~%")

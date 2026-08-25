@@ -4,7 +4,7 @@
 ;;;; Version: 10.0.0
 ;;;;
 ;;;; 三模块分层（对标 clj-agent 的 core / provider / client）：
-;;;;   cl-agent-core    框架本体：基础设施 + HTTP + Chat API + Kernel/Filter
+;;;;   cl-agent-core    框架本体：基础设施 + HTTP + Chat API + ChatClient/Filter
 ;;;;   cl-agent-llm     提供商适配器（独立可插拔）
 ;;;;   cl-agent-client  Agent 运行时 ← 本模块
 ;;;;

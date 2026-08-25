@@ -1,10 +1,10 @@
 ;;;; invoke.lisp
-;;;; CL-Agent Kernel - invoke-chat / invoke-tool / invoke-turn + run-tool-loop
+;;;; CL-Agent ChatClient - invoke-chat / invoke-tool / invoke-turn + run-tool-loop
 ;;;;
 ;;;; 概述（Phase P2）：
-;;;;   三链 invoke 原语让 kernel 活起来——连接 ChatModel 和工具执行。
+;;;;   三链 invoke 原语让 chat-client 活起来——连接 ChatModel 和工具执行。
 ;;;;   run-tool-loop 是 :turn 链的 terminal（不是 filter），可经
-;;;;   build-kernel 的 :loop-fn 整体替换。
+;;;;   build-chat-client 的 :loop-fn 整体替换。
 ;;;;
 ;;;;   三链组装点：
 ;;;;   - invoke-chat  → build-chain(:chat) → terminal = chat-model-call
@@ -22,8 +22,8 @@
 ;;;;       └── else: return turn-result(:completed)
 ;;;;
 ;;;;   Chat 链请求/响应 = prompt / chat-response（最简，不加包装层）。
-;;;;   Tool 链请求/响应 = tool-request / tool-result（kernel 载体）。
-;;;;   Turn 链请求/响应 = turn-request / turn-result（kernel 载体）。
+;;;;   Tool 链请求/响应 = tool-request / tool-result（chat-client 载体）。
+;;;;   Turn 链请求/响应 = turn-request / turn-result（chat-client 载体）。
 
 (in-package #:cl-agent/core)
 
@@ -31,7 +31,7 @@
 ;;; invoke-chat：:chat 链 → ChatModel
 ;;; ============================================================
 
-(defun invoke-chat (kernel prompt)
+(defun invoke-chat (chat-client prompt)
   "经 :chat filter 链调用 LLM（单次，不执行工具）。
 
   PROMPT 可以是 string / 消息列表 / prompt 实例（ChatModel 自动包装）。
@@ -51,12 +51,12 @@
   - chain   = 下游函数 (prompt) → chat-response
   - 返回值  = chat-response"
   (let* ((effective nil)
-         (chain (build-chain (kernel-filters kernel)
+         (chain (build-chain (chat-client-filters chat-client)
                              #'filter-chat-hook
                              (lambda (p)
                                ;; terminal 拿到的就是穿过整条链后的最终 prompt
                                (setf effective p)
-                               (chat-model-call (kernel-model kernel) p)))))
+                               (chat-model-call (chat-client-model chat-client) p)))))
     (let ((response (funcall chain prompt)))
       (values response (or effective prompt)))))
 
@@ -97,7 +97,7 @@
               (dolist (fin finishers)
                 (when fin (funcall fin)))))))
 
-(defun invoke-chat-stream (kernel prompt on-token)
+(defun invoke-chat-stream (chat-client prompt on-token)
   "经 :chat filter 链 + :token-xform 管道的**流式**调用。
 
   ON-TOKEN 收到 plist：(:token \"增量文本\")。
@@ -112,16 +112,16 @@
   此时整段文本作为单个 token 送出——token-xform 仍然生效。"
   (let* ((effective nil)
          (chain (build-chain
-                 (kernel-filters kernel)
+                 (chat-client-filters chat-client)
                  #'filter-chat-hook
                  (lambda (p)
                    (setf effective p)
                    (multiple-value-bind (emit finish)
-                       (compose-token-xforms (kernel-filters kernel)
+                       (compose-token-xforms (chat-client-filters chat-client)
                                              (lambda (tok) (funcall on-token tok)))
                      (let ((response
                              (cl-agent/core:chat-model-stream
-                              (kernel-model kernel) p
+                              (chat-client-model chat-client) p
                               ;; chat-model-stream 给的是裸字符串增量，
                               ;; 这里包成 plist 交给 xform 管道
                               (lambda (delta) (funcall emit (list :token delta))))))
@@ -135,14 +135,14 @@
 ;;; invoke-tool：:tool 链 → 工具执行
 ;;; ============================================================
 
-(defun invoke-tool (kernel tool-request)
+(defun invoke-tool (chat-client tool-request)
   "经 :tool filter 链执行单个工具。
 
   :tool filter 钩子签名：(tool-request chain) → tool-result
-  - tool-request  = kernel:tool-request 实例
+  - tool-request  = chat-client:tool-request 实例
   - chain         = 下游函数
-  - 返回值        = kernel:tool-result 实例"
-  (let ((chain (build-chain (kernel-filters kernel)
+  - 返回值        = chat-client:tool-result 实例"
+  (let ((chain (build-chain (chat-client-filters chat-client)
                             #'filter-tool-hook
                             (lambda (req) (tool-apply-terminal req)))))
     (funcall chain tool-request)))
@@ -188,12 +188,12 @@
 ;;; （invoke-tool-batch 在 batch.lisp 中定义，通过 package 导出）
 
 ;;; ============================================================
-;;; resolve-kernel-tools：kernel 工具符号 → chat-options
+;;; resolve-chat-client-tools：chat-client 工具符号 → chat-options
 ;;; ============================================================
 
-(defun resolve-kernel-tools (kernel)
-  "把 kernel 的 :tools（符号列表）解析为 chat-options（含 tool-callbacks）。"
-  (let ((tools (kernel-tools kernel)))
+(defun resolve-chat-client-tools (chat-client)
+  "把 chat-client 的 :tools（符号列表）解析为 chat-options（含 tool-callbacks）。"
+  (let ((tools (chat-client-tools chat-client)))
     (if tools
         (cl-agent/core:make-chat-options
          :tool-callbacks (cl-agent/core:resolve-tool-callbacks tools))
@@ -228,13 +228,13 @@ context。不桥接则二者各说各话（memory-filter 的 :conversation-id �
 ;;; run-tool-loop：工具调用循环（:turn 链的 terminal）
 ;;; ============================================================
 
-(defun resolve-turn-options (kernel context)
-  "把 kernel 工具 + caller-options + turn context 解析成本轮的 chat-options。"
+(defun resolve-turn-options (chat-client context)
+  "把 chat-client 工具 + caller-options + turn context 解析成本轮的 chat-options。"
   (let* ((caller-options (getf context :caller-options))
-         (kernel-options (resolve-kernel-tools kernel))
+         (chat-client-options (resolve-chat-client-tools chat-client))
          (merged (if caller-options
-                     (cl-agent/core:merge-chat-options caller-options kernel-options)
-                     kernel-options)))
+                     (cl-agent/core:merge-chat-options caller-options chat-client-options)
+                     chat-client-options)))
     ;; 把 turn context 折进 options 的 tool-context——:chat 链的 filter
     ;; （memory-filter 等）只拿得到 prompt，读的是 prompt options 的
     ;; tool-context，而 (:conversation ...) / prompt-context 写的是
@@ -265,9 +265,9 @@ some+filter 那种两阶段扫描。"
   (cl-agent/core:tool-response-message
    (tool-results->responses tool-results tool-calls)))
 
-(defun run-tool-loop (kernel turn-request)
+(defun run-tool-loop (chat-client turn-request)
   "工具调用循环。不是 filter——是 :turn 链的**缺省** terminal
-（经 build-kernel 的 :loop-fn 可整体替换）。
+（经 build-chat-client 的 :loop-fn 可整体替换）。
 
   每轮：
   1. 构建 prompt（messages + tools）
@@ -280,27 +280,27 @@ some+filter 那种两阶段扫描。"
   5. 回到 1
   6. 无 tool-calls 或未通过 eligibility → 返回 turn-result(:completed)
 
-  最大循环次数从 kernel settings 取（缺省 10）。"
+  最大循环次数从 chat-client settings 取（缺省 10）。"
   (let ((context (turn-request-context turn-request)))
-    (%tool-loop kernel
+    (%tool-loop chat-client
                 (turn-request-messages turn-request)
-                (resolve-turn-options kernel context)
+                (resolve-turn-options chat-client context)
                 context
                 0)))
 
-(defun %tool-loop (kernel messages options context iteration)
+(defun %tool-loop (chat-client messages options context iteration)
   "循环主体。从第 ITERATION 轮开始跑——resume 靠它从中点续跑。"
-  (let ((max-iter (or (cdr (assoc :max-tool-iterations (kernel-settings kernel)))
+  (let ((max-iter (or (cdr (assoc :max-tool-iterations (chat-client-settings chat-client)))
                       10))
-        (eligibility (kernel-eligibility-fn kernel))
-        (gate (kernel-tool-gate kernel)))
+        (eligibility (chat-client-eligibility-fn chat-client))
+        (gate (chat-client-tool-gate chat-client)))
     (loop for iter from iteration
           for prompt = (cl-agent/core:make-prompt messages :options options)
           ;; exec-options = :chat 链改写后**真正发给模型**的那份。
           ;; 工具执行必须用它，否则模型看到的工具集与可执行的不一致
           ;; （tool-search-filter 注入的 search_tools 就会「找不到工具」）。
           for exec-options = nil
-          for response = (multiple-value-bind (r eff) (invoke-chat kernel prompt)
+          for response = (multiple-value-bind (r eff) (invoke-chat chat-client prompt)
                            (setf exec-options (cl-agent/core:prompt-options eff))
                            r)
           do (cond
@@ -343,7 +343,7 @@ some+filter 那种两阶段扫描。"
                            :tool-calls-made iter))
                         ;; 放行：执行整批
                         (multiple-value-bind (result done new-context)
-                            (%execute-and-append kernel response tool-calls
+                            (%execute-and-append chat-client response tool-calls
                                                  messages exec-options context iter)
                           (if done
                               (return result)      ; return-direct 收尾
@@ -364,7 +364,7 @@ some+filter 那种两阶段扫描。"
                                           :tool-context context
                                           :tool-calls-made iter)))))))
 
-(defun %execute-and-append (kernel response tool-calls messages options context iteration)
+(defun %execute-and-append (chat-client response tool-calls messages options context iteration)
   "执行一批工具并把结果追加进 messages。
 
 返回 (values X done-p new-context)：
@@ -373,13 +373,13 @@ some+filter 那种两阶段扫描。"
   - new-context  = 屏障处折叠本批 :writes 后的 context（无写意图时
                    与 CONTEXT 同一对象）——循环用它跑下一轮，
                    下轮工具看到的就是折叠后的快照"
-  (let ((tm (kernel-tool-manager kernel)))
+  (let ((tm (chat-client-tool-manager chat-client)))
     (if tm
         ;; === Manager 路径 ===
         ;; execute-tool-calls 的 :context 按协议就是「应用 writes 后的
         ;; context」——此前协议这么写、三个实现全都原样透传。
         ;; :return-direct 也由共享骨架计算（全批声明才短路）。
-        (let* ((result (execute-tool-calls tm kernel response
+        (let* ((result (execute-tool-calls tm chat-client response
                                            (list :tool-context context)))
                (return-direct (getf result :return-direct))
                (new-context (or (getf result :context) context))
@@ -406,9 +406,9 @@ some+filter 那种两阶段扫描。"
                       new-context)))
         ;; === 原路径（invoke-tool-batch）===
         (multiple-value-bind (tool-results return-direct)
-            (invoke-tool-batch kernel tool-calls options context)
+            (invoke-tool-batch chat-client tool-calls options context)
           (let ((tool-msg (tool-results->message tool-results tool-calls))
-                (new-context (fold-batch-writes kernel tool-results context)))
+                (new-context (fold-batch-writes chat-client tool-results context)))
             (if return-direct
                 ;; return-direct：工具结果即最终答案，不再回传模型。
                 ;; 写意图照常折叠——工具确实执行了，状态不能丢
@@ -472,7 +472,7 @@ some+filter 那种两阶段扫描。"
           (t (push tc callable)))))
     (values (nreverse callable) (nreverse decided))))
 
-(defun %resume-continuation (kernel loop-state decision payload)
+(defun %resume-continuation (chat-client loop-state decision payload)
   "暂停延续：按决定处理 pending 批次，然后接着跑循环。"
   (let* ((tool-calls (loop-state-tool-calls loop-state))
          (pending-id (loop-state-pending-id loop-state))
@@ -498,17 +498,17 @@ some+filter 那种两阶段扫描。"
       ;; 真要执行的那部分走正常批执行；被拒/被答复的直接用现成文本
       ;; 经 manager-run-batch 路由：若配了 thread-pool manager，续跑批也受限流
       ;; （此前直接调 invoke-tool-batch，manager 被绕过）
-      (let* ((tm (kernel-tool-manager kernel))
+      (let* ((tm (chat-client-tool-manager chat-client))
              (executed (when callable
                          (multiple-value-list
                           (if tm
-                              (manager-run-batch tm kernel callable options context)
-                              (invoke-tool-batch kernel callable options context)))))
+                              (manager-run-batch tm chat-client callable options context)
+                              (invoke-tool-batch chat-client callable options context)))))
              (results (first executed))
              ;; 屏障折叠：真执行了的那部分照常提交写意图（callable 保持
              ;; 原始相对序）；被拒/被答复的没执行，自然没有写
              (context (if results
-                          (fold-batch-writes kernel results context)
+                          (fold-batch-writes chat-client results context)
                           context))
              ;; 按**原始顺序**拼回结果——模型看到的 tool 消息顺序必须与
              ;; 它发出的 tool_calls 一致，否则 id 对不上
@@ -546,7 +546,7 @@ some+filter 那种两阶段扫描。"
                          :finish-reason :stop))
              :tool-context context
              :tool-calls-made (1+ iteration))
-            (%tool-loop kernel
+            (%tool-loop chat-client
                         (append messages
                                 (list (cl-agent/core:chat-response-message response) tool-msg))
                         ;; context 若被写意图更新，options 的 tool-context 也要跟上
@@ -557,20 +557,20 @@ some+filter 那种两阶段扫描。"
 ;;; 循环实现的解析：loop-fn / resume-fn
 ;;; ============================================================
 ;;;
-;;; 缺省值不能写进 kernel 的 initform——kernel.lisp 先于本文件加载，
+;;; 缺省值不能写进 chat-client 的 initform——chat-client.lisp 先于本文件加载，
 ;;; 那时 run-tool-loop / %resume-continuation 还不存在。故在调用点兜底。
 
-(defun kernel-loop-function (kernel)
-  "本 kernel 的工具循环实现：(kernel turn-request) → turn-result。
+(defun chat-client-loop-function (chat-client)
+  "本 chat-client 的工具循环实现：(chat-client turn-request) → turn-result。
 缺省 run-tool-loop。"
-  (or (kernel-loop-fn kernel) #'run-tool-loop))
+  (or (chat-client-loop-fn chat-client) #'run-tool-loop))
 
-(defun kernel-resume-function (kernel)
-  "本 kernel 的暂停延续实现：(kernel loop-state decision payload) → turn-result。
+(defun chat-client-resume-function (chat-client)
+  "本 chat-client 的暂停延续实现：(chat-client loop-state decision payload) → turn-result。
 缺省 %resume-continuation（配套 run-tool-loop）。"
-  (or (kernel-resume-fn kernel) #'%resume-continuation))
+  (or (chat-client-resume-fn chat-client) #'%resume-continuation))
 
-(defun resume-turn (kernel loop-state decision &key payload)
+(defun resume-turn (chat-client loop-state decision &key payload)
   "从暂停点续跑工具循环。
 
   参数：
@@ -595,29 +595,29 @@ some+filter 那种两阶段扫描。"
          (terminal (lambda (req)
                      (if (not consumed)
                          (progn (setf consumed t)
-                                (funcall (kernel-resume-function kernel)
-                                         kernel loop-state decision payload))
+                                (funcall (chat-client-resume-function chat-client)
+                                         chat-client loop-state decision payload))
                          ;; turn filter 递归重入 → 走常规循环（新 delta）
-                         (funcall (kernel-loop-function kernel) kernel req))))
-         (chain (build-chain (kernel-filters kernel) #'filter-turn-hook terminal)))
+                         (funcall (chat-client-loop-function chat-client) chat-client req))))
+         (chain (build-chain (chat-client-filters chat-client) #'filter-turn-hook terminal)))
     (funcall chain (make-turn-request nil :context context :resume-p t))))
 
 ;;; ============================================================
 ;;; invoke-turn：:turn 链包住 run-tool-loop
 ;;; ============================================================
 
-(defun invoke-turn (kernel turn-request)
+(defun invoke-turn (chat-client turn-request)
   "经 :turn filter 链执行一轮对话。
 
-  :turn 链包住 terminal（缺省 run-tool-loop，可由 kernel 的 :loop-fn
+  :turn 链包住 terminal（缺省 run-tool-loop，可由 chat-client 的 :loop-fn
   替换）。turn filter 可：
   - 改写入口 messages（RAG 注入、re-reading）
   - 短路（safeguard 拦截）
   - 递归重入（validation 校验失败 → 再调 chain）
 
   :turn filter 钩子签名：(turn-request chain) → turn-result"
-  (let ((chain (build-chain (kernel-filters kernel)
+  (let ((chain (build-chain (chat-client-filters chat-client)
                             #'filter-turn-hook
                             (lambda (req)
-                              (funcall (kernel-loop-function kernel) kernel req)))))
+                              (funcall (chat-client-loop-function chat-client) chat-client req)))))
     (funcall chain turn-request)))

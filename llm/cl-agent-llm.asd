@@ -1,11 +1,11 @@
 ;;;; cl-agent-llm.asd
-;;;; CL-Agent LLM Service System
+;;;; CL-Agent LLM ChatModel System
 ;;;;
 ;;;; Version: 4.0.0
 ;;;; Author: David
 ;;;;
 ;;;; Overview:
-;;;;   LLM (Large Language Model) service layer supporting multiple providers
+;;;;   LLM (Large Language Model) chat-model layer supporting multiple providers
 ;;;;
 ;;;; Architecture:
 ;;;;   - schema/: Tool schema converters (OpenAI, Anthropic formats)
@@ -29,7 +29,7 @@
 ;;;;                                   :model "claude-sonnet-4-20250514")
 
 (asdf:defsystem #:cl-agent-llm
-  :description "CL-Agent LLM Service Layer - Multi-Provider LLM Client (v4.2.0)"
+  :description "CL-Agent LLM ChatModel Layer - Multi-Provider LLM Client (v4.2.0)"
   :author "David"
   :license "MIT"
   :version "4.2.0"
@@ -94,8 +94,8 @@
    ;; 6.5 嵌入向量（llm-embed SPI 的 OpenAI 兼容实现 + 便捷 API）
    (:file "embeddings")
 
-   ;; 7. Service layer (response normalization)
-   (:file "service")
+   ;; 7. ChatModel layer (response normalization)
+   (:file "chat-model")
 
    ;; 7. Factory (registry, builder)
    ;; 注：曾有 config.lisp（provider 配置表 + 环境变量加载），但它是个
@@ -115,11 +115,11 @@
 ;; v4.0.0:
 ;; - Added schema/ module for tool schema converters
 ;; - Added factory/ module with registry, config, builder
-;; - Added create-service for Kernel integration
+;; - Added create-chat-model for ChatClient integration
 ;; - Provider builder with fluent API
 ;;
 ;; v3.0.0:
-;; - Kernel integration via llm-chat generic function
+;; - ChatClient integration via llm-chat generic function
 ;;
 ;; v2.0.0:
 ;; - HTTP client from cl-agent/http

@@ -1,5 +1,5 @@
 ;;;; conditions.lisp
-;;;; CL-Agent Kernel - 工具故障分类条件体系
+;;;; CL-Agent ChatClient - 工具故障分类条件体系
 ;;;;
 ;;;; 概述：
 ;;;;   三类故障（对标 clj-agent 的 err/classify-exception）：

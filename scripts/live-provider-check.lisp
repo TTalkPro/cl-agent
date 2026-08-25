@@ -100,7 +100,7 @@
 (defvar *provider*)
 
 (defun chat-once (text &key model media tools extra-params)
-  "向 provider 直接发一次 llm-chat（绕开 kernel，验证的是 provider 层）"
+  "向 provider 直接发一次 llm-chat（绕开 chat-client，验证的是 provider 层）"
   (let ((message (append (list :role :user :content text)
                          (when media (list :media media)))))
     (apply #'llm-chat *provider* (list message)

@@ -1,5 +1,5 @@
 ;;;; batch.lisp
-;;;; CL-Agent Kernel - 批量工具执行（并行默认 + :serial 退化 + 故障路由）
+;;;; CL-Agent ChatClient - 批量工具执行（并行默认 + :serial 退化 + 故障路由）
 ;;;;
 ;;;; 概述（对标 clj-agent 的 react/execute-batch）：
 ;;;;   批次内工具默认并行执行（lparallel）；任一工具声明 :serial
@@ -122,7 +122,7 @@ id/name 一一对应——顺序错位 = 回传模型的消息 id 全错）。"
             (and cb (cl-agent/core:tool-callback-serial-p cb))))
         tool-calls))
 
-(defun execute-batch-sequential (kernel tool-calls options context)
+(defun execute-batch-sequential (chat-client tool-calls options context)
   "顺序执行整批工具调用。
 返回 (values tool-results return-direct-p errors)"
   (let ((return-direct t)
@@ -138,7 +138,7 @@ id/name 一一对应——顺序错位 = 回传模型的消息 id 全错）。"
                ;; 那些打外部依赖、最需要重试的。
                (resp (or resolve-error
                          (%run-one-tool
-                          kernel (tool-call->request callback tc context)))))
+                          chat-client (tool-call->request callback tc context)))))
           (unless direct-p (setf return-direct nil))
           (push resp results)
           (when (tool-result-error resp)
@@ -153,7 +153,7 @@ id/name 一一对应——顺序错位 = 回传模型的消息 id 全错）。"
   "默认工具执行线程池的 worker 数。
 
 只在**进程级默认池尚未创建**时生效——改它得在第一次并行执行工具之前。
-要精确控制某个 kernel 的并发，用 thread-pool-tool-calling-manager
+要精确控制某个 chat-client 的并发，用 thread-pool-tool-calling-manager
 （它有自己的池，且严格限流）。")
 
 (defvar *tool-pool* nil
@@ -169,7 +169,7 @@ id/name 一一对应——顺序错位 = 回传模型的消息 id 全错）。"
 
 为什么需要它：lparallel 的 submit-task/future 都作用于 lparallel:*kernel*，
 而那个变量**默认是 NIL**——lparallel 要求使用者自己 make-kernel。本库此前
-既不建也不提，于是默认路径（build-kernel 不给 :tool-manager）只要模型一次
+既不建也不提，于是默认路径（build-chat-client 不给 :tool-manager）只要模型一次
 发 2 个 tool_call 就直接 NO-KERNEL-ERROR 崩掉；1 个 tool_call 反而没事
 （≤1 走顺序路径，不碰 lparallel）。而多工具并行是 LLM 的常见行为。
 这里懒建一个进程级池兜底，用户仍可自己绑 lparallel:*kernel* 覆盖。"
@@ -212,7 +212,7 @@ id/name 一一对应——顺序错位 = 回传模型的消息 id 全错）。"
     (and (typep fn 'cl-agent/core:tool-callback)
          (cl-agent/core:tool-callback-retry-p fn))))
 
-(defun %run-one-tool (kernel req)
+(defun %run-one-tool (chat-client req)
   "执行单个工具，任何逃逸的条件都归一化成带分类的错误结果。
 
   故障路由（这里是唯一实现点——并行与顺序两条路径都经过它）：
@@ -227,7 +227,7 @@ id/name 一一对应——顺序错位 = 回传模型的消息 id 全错）。"
   消费者。"
   (let ((attempts (if (retryable-p req) *transient-retry-attempts* 1)))
     (loop for attempt from 1 to attempts
-          for result = (handler-case (invoke-tool kernel req)
+          for result = (handler-case (invoke-tool chat-client req)
                          (error (e)
                            (make-tool-result
                             :error (list :class (classify-tool-error e)
@@ -248,7 +248,7 @@ id/name 一一对应——顺序错位 = 回传模型的消息 id 全错）。"
                                delay (1+ attempt) attempts (getf err :message))
                     (sleep delay))))))))
 
-(defun %submit-and-collect (kernel prepared)
+(defun %submit-and-collect (chat-client prepared)
   "把 PREPARED 里需要执行的提交到当前 lparallel kernel，按**原序**收回结果。
 
 为什么用 channel（submit-task + receive-result）而不是 future + force：
@@ -278,20 +278,20 @@ receive-result 不保证顺序，故任务里带上索引，回填到定位数�
                      (incf submitted)
                      (lparallel:submit-task
                       channel
-                      (lambda () (cons idx (%run-one-tool kernel r))))))))
+                      (lambda () (cons idx (%run-one-tool chat-client r))))))))
     (loop repeat submitted
           do (let ((pair (lparallel:receive-result channel)))
                (setf (aref slots (car pair)) (cdr pair))))
     (coerce slots 'list)))
 
-(defun execute-batch-parallel (kernel tool-calls options context)
+(defun execute-batch-parallel (chat-client tool-calls options context)
   "并行执行整批工具调用。
 ≤1 个工具时退化顺序执行。
 并发度由当前 lparallel:*kernel* 的 worker 数决定——thread-pool manager
 绑自己的固定大小池即得限流，virtual-thread manager 用进程默认池。
 返回 (values tool-results return-direct-p errors)"
   (if (<= (length tool-calls) 1)
-      (execute-batch-sequential kernel tool-calls options context)
+      (execute-batch-sequential chat-client tool-calls options context)
       ;; 预处理：解析 callback + 构建 req + 记录 direct-p
       ;; 解析在**提交并行任务之前**完成：解析失败直接产出错误结果，
       ;; 不占用 worker，也不会把条件抛出这个 mapcar（那会中断整轮对话）。
@@ -306,7 +306,7 @@ receive-result 不保证顺序，故任务里带上索引，回填到定位数�
                                   (when callback
                                     (tool-call->request callback tc context))))))
                       tool-calls))
-             (results (%submit-and-collect kernel prepared))
+             (results (%submit-and-collect chat-client prepared))
              ;; prepared 的元素是 (direct-p resolve-error req)
              (return-direct (every #'first prepared))
              (errors (remove-if-not #'tool-result-error results)))
@@ -374,7 +374,7 @@ receive-result 不保证顺序，故任务里带上索引，回填到定位数�
                                        v))))))
     (values ctx conflicts)))
 
-(defun fold-batch-writes (kernel tool-results context)
+(defun fold-batch-writes (chat-client tool-results context)
   "屏障折叠：把本批 tool-result 的写意图折进 CONTEXT，返回新 context。
 
 失败调用（error 非 nil）的写意图**不生效**——工具失败即整个调用作废
@@ -387,13 +387,13 @@ receive-result 不保证顺序，故任务里带上索引，回填到定位数�
     (if (null writes-seq)
         context
         (multiple-value-bind (new-ctx conflicts)
-            (apply-writes context writes-seq (kernel-state-slots kernel))
+            (apply-writes context writes-seq (chat-client-state-slots chat-client))
           (when conflicts
             (log-warn "[batch] 同批多个工具写入未声明 reducer 的槽（last-writer 按调用序生效）：~S"
                       conflicts))
           new-ctx))))
 
-(defun invoke-tool-batch (kernel tool-calls options context)
+(defun invoke-tool-batch (chat-client tool-calls options context)
   "批量执行 tool-call 列表。
 
   策略：
@@ -404,10 +404,10 @@ receive-result 不保证顺序，故任务里带上索引，回填到定位数�
   - 其他故障 → 转文本回传模型（error 放进 tool-result）
 
   返回 (values tool-results return-direct-p)：
-  - tool-results = kernel:tool-result 列表（与 tool-calls 同序）
+  - tool-results = chat-client:tool-result 列表（与 tool-calls 同序）
   - return-direct-p = 批内所有工具都声明了 return-direct 时为 t"
   (if (batch-has-serial-p tool-calls options)
       ;; 有 :serial → 顺序执行
-      (execute-batch-sequential kernel tool-calls options context)
+      (execute-batch-sequential chat-client tool-calls options context)
       ;; 默认并行
-      (execute-batch-parallel kernel tool-calls options context)))
+      (execute-batch-parallel chat-client tool-calls options context)))

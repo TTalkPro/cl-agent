@@ -60,9 +60,9 @@ Returns:
     :finish-reason - Reason for completion
 
 Note:
-  This generic function is defined in cl-agent/kernel but
+  This generic function is defined in cl-agent/chat-client but
   specialized by LLM provider modules (cl-agent-llm).
-  Kernel uses this protocol to communicate with LLMs without
+  ChatClient uses this protocol to communicate with LLMs without
   knowing specific provider implementations."))
 
 (defgeneric llm-chat-stream (provider messages callback

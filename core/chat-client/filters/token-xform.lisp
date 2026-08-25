@@ -1,5 +1,5 @@
 ;;;; token-xform.lisp
-;;;; CL-Agent Kernel Filters - 流式 token 变换 (:token-xform)
+;;;; CL-Agent ChatClient Filters - 流式 token 变换 (:token-xform)
 ;;;;
 ;;;; 概述（对标 clj-agent token-redact-filter / hold-release-filter）：
 ;;;;   :token-xform 不是 around filter——它作用于**出站 token 流**，
@@ -16,7 +16,7 @@
 ;;;;
 ;;;; 历史：这两个 filter 曾是**装饰品**，而且是三重的：
 ;;;;   1. 没有任何代码读 filter-token-xform 去组装流——invoke-chat-stream
-;;;;      当时根本不存在，kernel-chat-stream 是同步降级；
+;;;;      当时根本不存在，chat-client-stream 是同步降级；
 ;;;;   2. 它们**返回裸 lambda 而不是 filter 实例**，压根放不进 :filters
 ;;;;      （名字叫 xxx-filter 却不是 filter）；
 ;;;;   3. 协议照搬 transducer 的 arity 重载，0-arity 竟然返回一个函数当

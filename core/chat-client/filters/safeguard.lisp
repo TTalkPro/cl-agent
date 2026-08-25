@@ -1,5 +1,5 @@
 ;;;; safeguard.lisp
-;;;; CL-Agent Kernel Filters - 安全护栏 (:turn, 最外层)
+;;;; CL-Agent ChatClient Filters - 安全护栏 (:turn, 最外层)
 ;;;;
 ;;;; 概述（对标 clj-agent safeguard-turn-filter + Spring SafeGuardAdvisor）：
 ;;;;   入口消息命中敏感词 → 不进循环，直接返回拒答。

@@ -6,7 +6,7 @@
 
 - **SimpleAgent**（第 3～6 节，推荐入门）：一个有状态的 agent 对象，管住会话、
   可观测性、错误归一化与人工审批（HITL）。
-- **Kernel + Filter**（第 7 节起，完全控制）：三链洋葱中间件 + 工具循环。
+- **ChatClient + Filter**（第 7 节起，完全控制）：三链洋葱中间件 + 工具循环。
 
 前者是后者的薄封装，随时可下沉。
 
@@ -40,14 +40,14 @@ sbcl
 (in-package :my-app)
 ```
 
-`examples/kernel-usage.lisp` 与 `scripts/live-test.lisp` 就是这么写的
+`examples/chat-client-usage.lisp` 与 `scripts/live-test.lisp` 就是这么写的
 （它们只 `:use` core）。不 `:use`、一律写全限定名亦可——本文其余部分
 都用全限定名。
 
-> 曾经的 `cl-agent/http` / `cl-agent/chat` / `cl-agent/kernel` 三个包已
-> **合并进 `cl-agent/core`**。旧代码里的 `cl-agent/kernel:build-kernel`、
+> 曾经的 `cl-agent/http` / `cl-agent/chat` / `cl-agent/chat-client` 三个包已
+> **合并进 `cl-agent/core`**。旧代码里的 `cl-agent/chat-client:build-chat-client`、
 > `cl-agent/chat:deftool` 一律改写成 `cl-agent/core:` 前缀即可；
-> 昵称 `cla/kernel` / `cla/chat` / `cla/http` 统一为 `cla/core`。
+> 昵称 `cla/chat-client` / `cla/chat` / `cla/http` 统一为 `cla/core`。
 > 合并顺带消掉了所有 `:shadow`——旧文档里教你写 `:shadowing-import-from`
 > 的段落已经作废。
 
@@ -102,7 +102,7 @@ ChatModel 是对具体 LLM 提供商的统一抽象（对标 Spring AI `ChatMode
 
 ```lisp
 (cl-agent/client:make-agent
-  :model *model*                          ; ChatModel（不给 :kernel 时必填）
+  :model *model*                          ; ChatModel（不给 :chat-client 时必填）
   :system "你是一个天气助手"                ; 默认系统提示
   :options (cl-agent/core:make-chat-options :temperature 0.3)
   :tools '(get-weather)                   ; 工具符号列表（见第 4 节）
@@ -110,13 +110,13 @@ ChatModel 是对具体 LLM 提供商的统一抽象（对标 Spring AI `ChatMode
   :conversation-id "c1"                   ; 缺省自动生成
   :settings '((:max-tool-iterations . 10))
   :callbacks (list ...)                   ; 可观测性（见第 5 节）
-  :kernel prebuilt-kernel)                ; 自建 kernel（见第 7 节）
+  :chat-client prebuilt-chat-client)                ; 自建 chat-client（见第 7 节）
 ```
 
 > **`make-agent` 不接受 `:filters`**——传了会**直接报错**并给出迁移指引。
-> agent 层只暴露 `:callbacks`；要挂 filter 请自建 kernel 经 `:kernel` 传入
+> agent 层只暴露 `:callbacks`；要挂 filter 请自建 chat-client 经 `:chat-client` 传入
 > （见第 7 节）。这条边界是刻意的：简单层一旦开始转发 filter，
-> 就会慢慢长成第二个 kernel。
+> 就会慢慢长成第二个 chat-client。
 
 ### 结果与错误：不抛异常
 
@@ -281,82 +281,82 @@ agent 层的横切入口是 `:callbacks`——一个 plist：
 续跑后可能**再次 `:paused`**（本批还有别的敏感工具，或后续轮次又触发）——
 按状态循环处理即可，别假设 resume 一次就到底。
 
-## 7. Kernel：完全控制
+## 7. ChatClient：完全控制
 
-需要 filter（记忆策略、护栏、RAG、校验…）时下沉到 kernel。
-`build-kernel` 装配，`chat` 宏发起：
+需要 filter（记忆策略、护栏、RAG、校验…）时下沉到 chat-client。
+`build-chat-client` 装配，`chat` 宏发起：
 
 ```lisp
-(defvar *kernel*
-  (cl-agent/core:build-kernel
+(defvar *chat-client*
+  (cl-agent/core:build-chat-client
     :model *model*                       ; ChatModel
     :system "你是一个天气助手"            ; 默认 system（请求级 (:system ...) 覆盖）
     :options (cl-agent/core:make-chat-options :temperature 0.3)  ; 默认选项
     :tools '(get-weather)                ; 默认工具（请求级 (:tools ...) 与之取并集）
     :filters (list ...)                  ; 横切能力（见第 8 节）
     :settings '((:max-tool-iterations . 10))
-    :tool-gate nil))                     ; kernel 级 HITL 闸门（见本节末）
+    :tool-gate nil))                     ; chat-client 级 HITL 闸门（见本节末）
 
 ;; chat 宏：最简形式
-(cl-agent/core:chat *kernel* "你好！")
+(cl-agent/core:chat *chat-client* "你好！")
 
 ;; 完整子句
-(cl-agent/core:chat *kernel*
-  (:system "你是一个言简意赅的助手")   ; 覆盖 kernel 的 :system
+(cl-agent/core:chat *chat-client*
+  (:system "你是一个言简意赅的助手")   ; 覆盖 chat-client 的 :system
   (:user "用一句话介绍 Common Lisp")
-  (:tools 'get-weather)                 ; 与 kernel :tools 取并集
-  (:options :temperature 0.2)           ; 与 kernel :options 合并，请求级优先
+  (:tools 'get-weather)                 ; 与 chat-client :tools 取并集
+  (:options :temperature 0.2)           ; 与 chat-client :options 合并，请求级优先
   (:conversation "c1")                  ; = (:context :conversation-id "c1")
   (:call :content))                     ; :content(默认) | :response | :result | :entity
 ```
 
-> `build-kernel` 的 `:model` 是**关键字参数**，不是位置参数。
-> `(build-kernel :model *model*)` 建的 kernel 没有任何 filter——只有模型调用 +
+> `build-chat-client` 的 `:model` 是**关键字参数**，不是位置参数。
+> `(build-chat-client :model *model*)` 建的 chat-client 没有任何 filter——只有模型调用 +
 > 工具循环。
 
-建好的 kernel 可以交给 agent，拿回会话管理 + HITL + 错误归一化：
+建好的 chat-client 可以交给 agent，拿回会话管理 + HITL + 错误归一化：
 
 ```lisp
 (defvar *memory* (cl-agent/core:make-message-window-chat-memory))
-(defvar *kernel*
-  (cl-agent/core:build-kernel
+(defvar *chat-client*
+  (cl-agent/core:build-chat-client
     :model *model*
     :filters (list (cl-agent/core:memory-filter *memory*))))
 
-(cl-agent/client:make-agent :kernel *kernel* :memory *memory*)
+(cl-agent/client:make-agent :chat-client *chat-client* :memory *memory*)
 ```
 
-> 给 `:kernel` 时，`memory-filter` 由**你自己**负责挂载——`make-agent` 不会
-> 改动预构建 kernel 的 filters。`:memory` 只是告诉 agent 去哪读
+> 给 `:chat-client` 时，`memory-filter` 由**你自己**负责挂载——`make-agent` 不会
+> 改动预构建 chat-client 的 filters。`:memory` 只是告诉 agent 去哪读
 > `agent-history`。
 
-没有 Builder——kernel 的装配就是 `build-kernel` 的关键字参数。
+没有 Builder——chat-client 的装配就是 `build-chat-client` 的关键字参数。
 旧 Builder 的三个默认值一一对应：
 
 | 旧 Builder | 现在放哪 |
 |---|---|
-| `default-tools` | `build-kernel :tools` |
-| `default-options` | `build-kernel :options`（请求级 `(:options ...)` 合并覆盖） |
-| `default-system` | `build-kernel :system`（请求级 `(:system ...)` 覆盖） |
+| `default-tools` | `build-chat-client :tools` |
+| `default-options` | `build-chat-client :options`（请求级 `(:options ...)` 合并覆盖） |
+| `default-system` | `build-chat-client :system`（请求级 `(:system ...)` 覆盖） |
 
 程序拼参数时，用函数形态比宏顺手（`chat` 宏正是展开到它们）：
 
 ```lisp
-(cl-agent/core:kernel-chat-text *kernel*
+(cl-agent/core:chat-client-text *chat-client*
   :system "你是一个翻译"
   :user (format nil "翻译：~A" "hello world"))
 ```
 
-`kernel-chat` 返回 `turn-result`，`kernel-chat-text` 取文本，
-`kernel-chat-entity` 取 JSON，`kernel-chat-stream` 走流式。
+`chat-client-call` 返回 `turn-result`，`chat-client-text` 取文本，
+`chat-client-entity` 取 JSON，`chat-client-stream` 走流式。
 
-### kernel 级 HITL：tool-gate
+### chat-client 级 HITL：tool-gate
 
-第 6 节的 agent HITL 就是这个原语的封装。直接用 kernel 时：
+第 6 节的 agent HITL 就是这个原语的封装。直接用 chat-client 时：
 
 ```lisp
-(defvar *kernel*
-  (cl-agent/core:build-kernel
+(defvar *chat-client*
+  (cl-agent/core:build-chat-client
     :model *model* :tools '(rm-file)
     ;; (tool-call) → :proceed | :pause | (:pause . 原因)
     :tool-gate (lambda (tc)
@@ -364,12 +364,12 @@ agent 层的横切入口是 `:callbacks`——一个 plist：
                      (cons :pause "删除需审批")
                      :proceed))))
 
-(let ((r (cl-agent/core:chat *kernel* (:user "删除 /tmp/x.log") (:call :result))))
+(let ((r (cl-agent/core:chat *chat-client* (:user "删除 /tmp/x.log") (:call :result))))
   (cl-agent/core:turn-result-status r)        ; => :paused
   (cl-agent/core:turn-result-pending-tool r)  ; => pending-tool
   (cl-agent/core:turn-result-pause-reason r)  ; => "删除需审批"
   ;; 审批后从快照续跑
-  (cl-agent/core:resume-turn *kernel*
+  (cl-agent/core:resume-turn *chat-client*
                              (cl-agent/core:turn-result-loop-state r)
                              :approved))
 ```
@@ -378,7 +378,7 @@ gate 在**批执行之前**对本批每个 tool-call **恰好评估一次**（ga
 ——审计日志、审批 UI、计数器，所以「恰好一次」是契约的一部分）。任一判
 `:pause` 则整轮暂停，**工具一个都不执行**。
 
-## 8. Filter：kernel 的洋葱链
+## 8. Filter：chat-client 的洋葱链
 
 Filter 是环绕执行的洋葱层（对标 Spring AI 的 Advisor API）。每个 filter
 最多挂四个钩子，对应三条链 + 流式 transducer：
@@ -404,8 +404,8 @@ Filter 是环绕执行的洋葱层（对标 Spring AI 的 Advisor API）。每�
                        (/ (- (get-internal-real-time) start)
                           internal-time-units-per-second)))))))
 
-(defvar *kernel*
-  (cl-agent/core:build-kernel
+(defvar *chat-client*
+  (cl-agent/core:build-chat-client
     :model *model*
     :filters (list (timing-filter)
                    (cl-agent/core:safeguard-turn-filter '("密码"))
@@ -449,21 +449,21 @@ Filter 是环绕执行的洋葱层（对标 Spring AI 的 Advisor API）。每�
 
 ## 9. 会话记忆（ChatMemory）
 
-用 SimpleAgent 时记忆是自动的（缺省就建了滑动窗口记忆）。直接用 kernel 时，
+用 SimpleAgent 时记忆是自动的（缺省就建了滑动窗口记忆）。直接用 chat-client 时，
 记忆是一个 filter，挂在 `:chat` 链上（循环内每轮生效）：
 
 ```lisp
 (defvar *memory* (cl-agent/core:make-message-window-chat-memory
                   :max-messages 20))
 
-(defvar *kernel*
-  (cl-agent/core:build-kernel
+(defvar *chat-client*
+  (cl-agent/core:build-chat-client
     :model *model*
     :filters (list (cl-agent/core:memory-filter *memory*))))
 
 ;; 同一 :conversation 共享记忆
-(cl-agent/core:chat *kernel* (:user "我叫大卫") (:conversation "c1"))
-(cl-agent/core:chat *kernel* (:user "我叫什么？") (:conversation "c1"))
+(cl-agent/core:chat *chat-client* (:user "我叫大卫") (:conversation "c1"))
+(cl-agent/core:chat *chat-client* (:user "我叫什么？") (:conversation "c1"))
 ;; => 模型能看到第一轮历史
 
 ;; 检查/清空记忆
@@ -471,7 +471,7 @@ Filter 是环绕执行的洋葱层（对标 Spring AI 的 Advisor API）。每�
 (cl-agent/core:memory-clear *memory* "c1")
 ```
 
-kernel 本身**没有 memory 字段**——记忆是 filter，不是 kernel 的固有属性。
+chat-client 本身**没有 memory 字段**——记忆是 filter，不是 chat-client 的固有属性。
 
 自定义存储后端：实现 `repository-find` / `repository-save` /
 `repository-delete` / `repository-conversation-ids` 四个泛型函数即可。
@@ -480,12 +480,12 @@ kernel 本身**没有 memory 字段**——记忆是 filter，不是 kernel 的�
 
 ```lisp
 ;; 流式
-(cl-agent/core:chat *kernel*
+(cl-agent/core:chat *chat-client*
   (:user "写一首关于 Lisp 的短诗")
   (:stream (lambda (delta) (princ delta) (force-output))))
 
 ;; 结构化输出（JSON → hash-table）
-(let ((entity (cl-agent/core:chat *kernel*
+(let ((entity (cl-agent/core:chat *chat-client*
                 (:user "用 JSON 给出东京信息（name/population）")
                 (:call :entity))))
   (gethash "name" entity))
@@ -498,13 +498,13 @@ kernel 本身**没有 memory 字段**——记忆是 filter，不是 kernel 的�
 要看 `turn-result-status` 之类的整轮信息，用 `(:call :result)`：
 
 ```lisp
-(let ((result (cl-agent/core:chat *kernel* (:user "你好") (:call :result))))
+(let ((result (cl-agent/core:chat *chat-client* (:user "你好") (:call :result))))
   (values (cl-agent/core:turn-result-status result)          ; :completed / :cancelled ...
           (cl-agent/core:turn-result-tool-calls-made result)))
 ```
 
 要「不符合 schema 就带着校验错误让模型重新输出」（对标 Spring AI 2.0 的
-`StructuredOutputValidationAdvisor`），给 kernel 挂 `validation-turn-filter`
+`StructuredOutputValidationAdvisor`），给 chat-client 挂 `validation-turn-filter`
 ——校验判据由它承担：
 
 ```lisp
@@ -514,8 +514,8 @@ kernel 本身**没有 memory 字段**——记忆是 filter，不是 kernel 的�
                    \"population\":{\"type\":\"integer\"}},
     \"required\":[\"name\",\"population\"]}")
 
-(defvar *validating-kernel*
-  (cl-agent/core:build-kernel
+(defvar *validating-chat-client*
+  (cl-agent/core:build-chat-client
     :model *model*
     :filters (list (cl-agent/core:validation-turn-filter
                     ;; 判据：(response) → (values ok-p 反馈文本)
@@ -523,7 +523,7 @@ kernel 本身**没有 memory 字段**——记忆是 filter，不是 kernel 的�
                      *schema* :parse-fn #'cl-agent/core:json-parse)
                     :max-retries 2))))
 
-(let ((entity (cl-agent/core:chat *validating-kernel*
+(let ((entity (cl-agent/core:chat *validating-chat-client*
                 (:user "用 JSON 给出东京信息")
                 (:call :entity))))
   (gethash "population" entity))
@@ -562,5 +562,5 @@ SSE 分片，共 8 项）。
 
 - [API 参考](API_CN.md) —— 含 [迁移对照表](API_CN.md#迁移)
 - [工具调用架构](tool-calling_CN.md) —— Filter 与 Manager 的分工
-- [完整示例](../examples/kernel-usage.lisp) —— 8 个渐进示例，全部用 mock，
+- [完整示例](../examples/chat-client-usage.lisp) —— 8 个渐进示例，全部用 mock，
   无需 API 密钥

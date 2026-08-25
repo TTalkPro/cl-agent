@@ -12,11 +12,11 @@
 ;;;;   - LLM Provider SPI：llm-chat 协议 + 统一 llm-response
 ;;;;   - Chat Model API：CLOS 消息体系 / Prompt / ChatOptions / ChatResponse /
 ;;;;     deftool 工具体系 / ChatModel 协议 / ChatMemory
-;;;;   - Kernel + Filter（唯一执行路径）：Filter 三链 / build-chain / defilter /
-;;;;     Kernel / build-kernel / invoke-chat|tool|turn / run-tool-loop /
+;;;;   - ChatClient + Filter（唯一执行路径）：Filter 三链 / build-chain / defilter /
+;;;;     ChatClient / build-chat-client / invoke-chat|tool|turn / run-tool-loop /
 ;;;;     ToolCallingManager / 10 个内置 filter / chat 宏 DSL
 ;;;;
-;;;; v10.0.0 包合并：cl-agent/http / cl-agent/chat / cl-agent/kernel 三个包
+;;;; v10.0.0 包合并：cl-agent/http / cl-agent/chat / cl-agent/chat-client 三个包
 ;;;; 并入 cl-agent/core，对齐 clj-agent 的 core/provider/client 三模块分层。
 ;;;; 合并前先清掉了三处死代码，否则会正面撞名：
 ;;;;   - types.lisp 整个文件（34 个零调用符号，与 chat 的 CLOS 消息体系撞 11 个）
@@ -27,7 +27,7 @@
 ;;;; fluent RequestSpec 移植）。该名字在 v10 被复用为 SimpleAgent 层。
 
 (asdf:defsystem #:cl-agent-core
-  :description "CL-Agent Core - 框架本体（基础设施 + HTTP + Chat API + Kernel/Filter）"
+  :description "CL-Agent Core - 框架本体（基础设施 + HTTP + Chat API + ChatClient/Filter）"
   :author "David"
   :license "MIT"
   :version "10.0.0"
@@ -129,13 +129,13 @@
      (:file "model")))            ; ChatModel 协议 + Provider 适配器
 
    ;; ============================================================
-   ;; Kernel + Filter（clj-agent kernel+filter 架构，全量对齐 Spring AI 2.0）
+   ;; ChatClient + Filter（clj-agent chat-client+filter 架构，全量对齐 Spring AI 2.0）
    ;; ============================================================
-     (:module "kernel"
+     (:module "chat-client"
       :components
       ((:file "carriers")             ; 三链请求/响应载体
        (:file "filter")               ; filter CLOS 类 + build-chain + defilter
-       (:file "kernel")               ; kernel CLOS 类 + build-kernel
+       (:file "chat-client")               ; chat-client CLOS 类 + build-chat-client
       (:file "conditions")           ; 工具故障分类条件体系
       (:file "batch")                ; 批量工具执行（并行/:serial/故障路由）
       (:file "tool-calling-manager") ; ToolCallingManager 协议 + 多实现
@@ -153,20 +153,20 @@
          (:file "timeout")            ; timeout-filter (:tool)
          (:file "approval")           ; approval-filter (:tool)
          (:file "token-xform")))     ; token-redact/hold-release (:token-xform)
-       ;; chat 宏排在 filters 之后：kernel-chat-entity 用 filters/validation
+       ;; chat 宏排在 filters 之后：chat-client-entity 用 filters/validation
        ;; 里定义的 strip-json-fences。
-       (:file "chat")))))           ; chat 宏 DSL + kernel-chat* 调用方入口
+       (:file "chat")))))           ; chat 宏 DSL + chat-client-call* 调用方入口
 
 ;; ============================================================
 ;; Changelog
 ;; ============================================================
 ;;
-;; v8.2.0 —— Phase P1：Filter 机制 + Kernel 骨架（新增 cl-agent/kernel）：
+;; v8.2.0 —— Phase P1：Filter 机制 + ChatClient 骨架（新增 cl-agent/chat-client）：
 ;; - filter CLOS 类，四钩子槽（:tool/:chat/:turn/:token-xform）
 ;; - build-chain 洋葱折叠函数（reduce → 嵌套闭包），对标 clj-agent
 ;; - defilter 宏（一个表达式定义 filter 子类 + 构造函数）
-;; - kernel CLOS 类（model/tools/filters/settings，无 memory）
-;; - build-kernel 构造函数
+;; - chat-client CLOS 类（model/tools/filters/settings，无 memory）
+;; - build-chat-client 构造函数
 ;; - 三链请求/响应载体：tool-request/response、turn-request/result
 ;;   （chat 链复用现有 client-request/client-response，零修改现有代码）
 ;; - 纯加法，不接入 ChatClient——invoke-chat/invoke-tool/invoke-turn
@@ -180,11 +180,11 @@
 ;; - 结构化输出校验：JSON Schema 校验 + 失败自我纠正重试
 ;;
 ;; v8.0.0:
-;; - 全面对标 Spring AI 2.0：删除 Kernel/Filter/SimpleAgent 体系，
+;; - 全面对标 Spring AI 2.0：删除 ChatClient/Filter/SimpleAgent 体系，
 ;;   新增 cl-agent/chat（消息/Prompt/ChatOptions/ChatResponse/
 ;;   deftool 工具体系/ChatModel/ChatMemory）与 cl-agent/client
 ;;   （横切链 + ChatClient + chat 宏，均已在后续重构中退役）
 ;; - Process 框架与 Checkpoint 存储体系随 cl-agent-extra 一并移除
 ;; - JSON Schema 工具函数（params->json-schema 等）上移至 cl-agent/core
 ;;
-;; v6.x/v5.x/v4.x/v3.x: 见 git 历史（Semantic Kernel 时期）
+;; v6.x/v5.x/v4.x/v3.x: 见 git 历史（Semantic ChatClient 时期）

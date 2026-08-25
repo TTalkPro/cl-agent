@@ -1,16 +1,16 @@
-# Refactoring Plan: cl-agent Advisor → Kernel+Filter (Spring AI 2.0 full alignment)
+# Refactoring Plan: cl-agent Advisor → ChatClient+Filter (Spring AI 2.0 full alignment)
 
 ## 0. Executive summary
 
-cl-agent v8.0.0 implements Spring AI 2.0 via a **single onion Advisor chain** where the tool loop *is* an advisor (`tool-calling-advisor`) that re-enters its downstream chain, and `ToolCallingManager` executes one batch. The target is clj-agent's **kernel + three-chain filter** model: a minimal kernel (`invoke-chat`/`invoke-tool`/`invoke-turn`), three onion chains (`:tool`/`:chat`/`:turn`) assembled at three call sites, the loop as a plain function wrapped by the `:turn` terminal, memory *inside* the loop at `:chat`'s first position, and no `ToolCallingManager` (split into `execute-batch` + per-tool `:serial`).
+cl-agent v8.0.0 implements Spring AI 2.0 via a **single onion Advisor chain** where the tool loop *is* an advisor (`tool-calling-advisor`) that re-enters its downstream chain, and `ToolCallingManager` executes one batch. The target is clj-agent's **chat-client + three-chain filter** model: a minimal chat-client (`invoke-chat`/`invoke-tool`/`invoke-turn`), three onion chains (`:tool`/`:chat`/`:turn`) assembled at three call sites, the loop as a plain function wrapped by the `:turn` terminal, memory *inside* the loop at `:chat`'s first position, and no `ToolCallingManager` (split into `execute-batch` + per-tool `:serial`).
 
-The migration builds the new kernel+filter system **adjacent** to the advisor system, keeps the public `chat` macro / `ChatClient` behavior-equivalent via a bridge, and retires the advisor API only at the end. **Baseline: 715 checks (SBCL + CCL).** Each phase is additive-green.
+The migration builds the new chat-client+filter system **adjacent** to the advisor system, keeps the public `chat` macro / `ChatClient` behavior-equivalent via a bridge, and retires the advisor API only at the end. **Baseline: 715 checks (SBCL + CCL).** Each phase is additive-green.
 
 ## 1. Architecture mapping (current → target)
 
 | Concept | cl-agent today | Target (clj-agent style) |
 |---|---|---|
-| Core abstraction | `advisor` + `advisor-chain` (single chain, numeric `order`) | `kernel` + `filter` (three chains, registration order) |
+| Core abstraction | `advisor` + `advisor-chain` (single chain, numeric `order`) | `chat-client` + `filter` (three chains, registration order) |
 | Chain fold | `make-advisor-chain` / `chain-next` (advisor.lisp) | `build-chain` (reduce → nested closures) |
 | Loop | `tool-calling-advisor` re-enters downstream (tool-advisor.lisp) | `run-tool-loop` plain fn = `:turn` terminal (NOT a filter) |
 | Batch tool exec | `execute-tool-calls` on `ToolCallingManager` (tool.lisp) | `invoke-tool-batch` + `:serial` declaration |
@@ -26,9 +26,9 @@ The migration builds the new kernel+filter system **adjacent** to the advisor sy
 ## 2. DECISION POINTS (need confirmation before execution)
 
 - **DP1 — Ordering model.** clj-agent dropped numeric `order` in favor of **registration order**. cl-agent's current advisor system uses numeric `order` + constants. **Recommendation:** follow clj-agent — registration order, drop numeric order.
-- **DP2 — End-state of `chat` macro / `ChatClient`.** **(A)** keep `chat`/`ChatClient` as public DSL, reimplemented on kernel+filter; **(B)** deprecate them. **Recommendation: (A)** — `chat` is a good CL-idiomatic DSL; kernel+filter is the lower-level assembly.
+- **DP2 — End-state of `chat` macro / `ChatClient`.** **(A)** keep `chat`/`ChatClient` as public DSL, reimplemented on chat-client+filter; **(B)** deprecate them. **Recommendation: (A)** — `chat` is a good CL-idiomatic DSL; chat-client+filter is the lower-level assembly.
 - **DP3 — Memory default behavior shift.** Current default stores only final Q&A (memory outside loop). Target stores full transcript per round (memory inside loop). This is a **real behavior change**. **Recommendation:** shift the default; re-baseline the memory tests in P4.
-- **DP4 — Package placement.** **Recommendation:** new `cl-agent/kernel` package under `core/kernel/`; `cl-agent/chat` and `cl-agent/client` stay.
+- **DP4 — Package placement.** **Recommendation:** new `cl-agent/chat-client` package under `core/chat-client/`; `cl-agent/chat` and `cl-agent/client` stay.
 - **DP5 — Streaming.** clj-agent's `:token-xform` is a transducer. cl-agent's `advise-stream` currently threads an `on-chunk` callback. **Recommendation:** port `:token-xform` as a transducer; full streaming parity lands in P4/P5.
 
 ## 3. Preserve-unchanged components
@@ -83,11 +83,11 @@ A filter may carry any subset of hooks (multi-chain). Filters with private state
   ...)
 ```
 
-### 4.4 Kernel — CLOS class, NO memory, NO loop
+### 4.4 ChatClient — CLOS class, NO memory, NO loop
 
 ```lisp
-(defclass kernel ()
-  ((model          :initarg :model          :reader kernel-model)
+(defclass chat-client ()
+  ((model          :initarg :model          :reader chat-client-model)
    (tools          :initarg :tools          :initform nil)
    (filters        :initarg :filters        :initform nil)
    (eligibility-fn :initarg :eligibility-fn :initform (constantly t))
@@ -97,19 +97,19 @@ A filter may carry any subset of hooks (multi-chain). Filters with private state
 ### 4.5 Three invoke primitives
 
 ```lisp
-(defun invoke-chat (kernel chat-request)   ; :chat terminal = chat-model-call
-  (funcall (build-chain (kernel-filters kernel) #'filter-chat-hook
-                        (lambda (req) (chat-llm-terminal kernel req)))
+(defun invoke-chat (chat-client chat-request)   ; :chat terminal = chat-model-call
+  (funcall (build-chain (chat-client-filters chat-client) #'filter-chat-hook
+                        (lambda (req) (chat-llm-terminal chat-client req)))
           chat-request))
 
-(defun invoke-tool (kernel tool-request)   ; :tool terminal = apply tool fn
-  (funcall (build-chain (kernel-filters kernel) #'filter-tool-hook
-                        (lambda (req) (tool-apply-terminal kernel req)))
+(defun invoke-tool (chat-client tool-request)   ; :tool terminal = apply tool fn
+  (funcall (build-chain (chat-client-filters chat-client) #'filter-tool-hook
+                        (lambda (req) (tool-apply-terminal chat-client req)))
           tool-request))
 
-(defun invoke-turn (kernel turn-request)   ; :turn terminal = run-tool-loop
-  (funcall (build-chain (kernel-filters kernel) #'filter-turn-hook
-                        (lambda (req) (run-tool-loop kernel req)))
+(defun invoke-turn (chat-client turn-request)   ; :turn terminal = run-tool-loop
+  (funcall (build-chain (chat-client-filters chat-client) #'filter-turn-hook
+                        (lambda (req) (run-tool-loop chat-client req)))
           turn-request))
 ```
 
@@ -132,9 +132,9 @@ Reuse `client-request`/`client-response` as `chat-request`/`chat-response`. Add:
 
 **Baseline: 715 checks (SBCL + CCL), 0 skip, 0 fail.**
 
-### PHASE P1 — Filter mechanism + Kernel skeleton (additive foundation)
+### PHASE P1 — Filter mechanism + ChatClient skeleton (additive foundation)
 
-**Goal:** onion filter mechanism + kernel CLOS skeleton as pure, un-integrated machinery. Advisor system untouched.
+**Goal:** onion filter mechanism + chat-client CLOS skeleton as pure, un-integrated machinery. Advisor system untouched.
 
 **TDD sequence (each = 1 commit):**
 1. `build-chain` onion ordering test → implement `build-chain` + `filter` class
@@ -142,12 +142,12 @@ Reuse `client-request`/`client-response` as `chat-request`/`chat-response`. Add:
 3. Around-with-shared-state test
 4. Recursive re-entry test (validation filter calls `chain` twice)
 5. Multi-chain hook selection test
-6. `kernel` class + `build-kernel` smoke test
+6. `chat-client` class + `build-chat-client` smoke test
 
 **Files:**
-- New: `core/kernel/package.lisp`, `core/kernel/filter.lisp`, `core/kernel/carriers.lisp`, `core/kernel/kernel.lisp`
+- New: `core/chat-client/package.lisp`, `core/chat-client/filter.lisp`, `core/chat-client/carriers.lisp`, `core/chat-client/chat-client.lisp`
 - Modify: `core/cl-agent-core.asd`
-- New tests: `tests/test-filter.lisp`, `tests/test-kernel-skeleton.lisp`
+- New tests: `tests/test-filter.lisp`, `tests/test-chat-client-skeleton.lisp`
 
 **Verification:** 715 + ~40-60 new checks. No integration.
 
@@ -155,7 +155,7 @@ Reuse `client-request`/`client-response` as `chat-request`/`chat-response`. Add:
 
 ### PHASE P2 — invoke-chat / invoke-tool / invoke-turn + run-tool-loop
 
-**Goal:** three invoke primitives assemble three chains; `run-tool-loop` is the `:turn` terminal. Kernel works end-to-end with mock provider.
+**Goal:** three invoke primitives assemble three chains; `run-tool-loop` is the `:turn` terminal. ChatClient works end-to-end with mock provider.
 
 **TDD sequence:**
 1. `invoke-chat` bare LLM call (mock model, no filters)
@@ -167,8 +167,8 @@ Reuse `client-request`/`client-response` as `chat-request`/`chat-response`. Add:
 7. **Loop equivalence test:** same mock script through `invoke-turn` (new) vs `tool-calling-advisor` (old) → identical `chat-response`
 
 **Files:**
-- New: `core/kernel/loop.lisp`; expand `core/kernel/kernel.lisp`
-- New tests: `tests/test-kernel-invoke.lisp`, `test-kernel-loop.lisp`, `test-kernel-turn.lisp`
+- New: `core/chat-client/loop.lisp`; expand `core/chat-client/chat-client.lisp`
+- New tests: `tests/test-chat-client-invoke.lisp`, `test-chat-client-loop.lisp`, `test-chat-client-turn.lisp`
 
 **Verification:** 715 + new. **Equivalence anchor** proves new and old produce identical results.
 
@@ -176,7 +176,7 @@ Reuse `client-request`/`client-response` as `chat-request`/`chat-response`. Add:
 
 ### PHASE P3 — Tool execution split + failure model
 
-**Goal:** dismantle `ToolCallingManager` semantics *in new kernel only*. Add `:serial`, `:return-direct`, `:eligibility-fn`, three failure classes + barrier routing.
+**Goal:** dismantle `ToolCallingManager` semantics *in new chat-client only*. Add `:serial`, `:return-direct`, `:eligibility-fn`, three failure classes + barrier routing.
 
 **TDD sequence:**
 1. `:serial` slot on `tool-callback`/`tool-definition`; `deftool` accepts `(:serial t)`
@@ -189,9 +189,9 @@ Reuse `client-request`/`client-response` as `chat-request`/`chat-response`. Add:
 8. Barrier routing: `:transient` + `:retry` → backoff; `:environment` + `:pause` → pause; default → text to model
 
 **Files:**
-- New: `core/kernel/conditions.lisp`, `core/kernel/batch.lisp`
-- Modify: `core/chat/tool.lisp` (add `:serial`/`:retry`), `core/kernel/loop.lisp`
-- New tests: `tests/test-kernel-batch.lisp`, `test-kernel-failures.lisp`, `test-tool-declarations.lisp`
+- New: `core/chat-client/conditions.lisp`, `core/chat-client/batch.lisp`
+- Modify: `core/chat/tool.lisp` (add `:serial`/`:retry`), `core/chat-client/loop.lisp`
+- New tests: `tests/test-chat-client-batch.lisp`, `test-chat-client-failures.lisp`, `test-tool-declarations.lisp`
 
 **Verification:** 715 + new. Old `ToolCallingManager` untouched until P5.
 
@@ -199,7 +199,7 @@ Reuse `client-request`/`client-response` as `chat-request`/`chat-response`. Add:
 
 ### PHASE P4 — Built-in filters + memory placement migration + ChatClient bridge
 
-**Goal:** all 10 filter types as native filters; `chat` macro gains kernel-backed path (bridge); memory moves to `:chat` first position **inside** loop. **This is the behavior-shift phase.**
+**Goal:** all 10 filter types as native filters; `chat` macro gains chat-client-backed path (bridge); memory moves to `:chat` first position **inside** loop. **This is the behavior-shift phase.**
 
 **TDD sequence (filters):**
 1. `memory-filter` (`:chat`, first, inside loop) — behavior shift test
@@ -213,13 +213,13 @@ Reuse `client-request`/`client-response` as `chat-request`/`chat-response`. Add:
 9. `token-xform` filters: `token-redact-filter`, `hold-release-filter`
 
 **Bridge:**
-10. `chat-client` kernel-backed path behind flag
+10. `chat-client` chat-client-backed path behind flag
 11. **Equivalence harness:** run old advisor tests through *both* paths; assert identical `chat-response` (modulo documented memory-transcript shift)
 
 **Files:**
-- New: `core/kernel/filters/{memory,logging,safeguard,validation,re-reading,rag,tool-search,timeout,approval,token-xform}.lisp`; `core/kernel/retriever.lisp`
-- Modify: `core/client/chat-client.lisp` (add kernel-backed path)
-- New tests: per-filter tests + `test-kernel-client-bridge.lisp` + `test-advisor-kernel-equivalence.lisp`
+- New: `core/chat-client/filters/{memory,logging,safeguard,validation,re-reading,rag,tool-search,timeout,approval,token-xform}.lisp`; `core/chat-client/retriever.lisp`
+- Modify: `core/client/chat-client.lisp` (add chat-client-backed path)
+- New tests: per-filter tests + `test-chat-client-bridge.lisp` + `test-advisor-chat-client-equivalence.lisp`
 
 **Verification:** 715 (advisor path) + new filter tests + equivalence harness green. Memory tests re-baselined.
 
@@ -229,10 +229,10 @@ Reuse `client-request`/`client-response` as `chat-request`/`chat-response`. Add:
 
 ### PHASE P5 — Retire advisor API + full alignment audit + cleanup
 
-**Goal:** remove advisor system + `ToolCallingManager`; flip default to kernel+filter; sync docs; alignment audit.
+**Goal:** remove advisor system + `ToolCallingManager`; flip default to chat-client+filter; sync docs; alignment audit.
 
 **TDD sequence:**
-1. Flip `make-chat-client` / `chat` default to kernel-backed; harness green
+1. Flip `make-chat-client` / `chat` default to chat-client-backed; harness green
 2. Delete advisor files + `ToolCallingManager` from tool.lisp
 3. Delete/adapt old advisor tests
 4. Alignment audit test: all 10 filter types present + smoke-invokable
@@ -248,9 +248,9 @@ Reuse `client-request`/`client-response` as `chat-request`/`chat-response`. Add:
 ## 6. Final API form (target end-state)
 
 ```lisp
-;; ---- build a kernel (no :memory field — memory is a filter) ----
-(defparameter *kernel*
-  (build-kernel
+;; ---- build a chat-client (no :memory field — memory is a filter) ----
+(defparameter *chat-client*
+  (build-chat-client
     :model *model*
     :tools '(get-weather save-note handoff)
     :filters (list (memory-filter *memory*)                     ; :chat, FIRST, inside loop
@@ -264,10 +264,10 @@ Reuse `client-request`/`client-response` as `chat-request`/`chat-response`. Add:
     :eligibility-fn (lambda (resp ctx) t)))
 
 ;; ---- low-level invoke ----
-(invoke-turn *kernel* (make-turn-request :messages (list (user-message "..."))
+(invoke-turn *chat-client* (make-turn-request :messages (list (user-message "..."))
                                           :context ctx))
 
-;; ---- high-level DSL preserved, reimplemented on kernel ----
+;; ---- high-level DSL preserved, reimplemented on chat-client ----
 (chat *client* (:user "...") (:tools 'get-weather) (:conversation "c1"))
 
 ;; ---- custom filter (multi-chain) ----
@@ -288,7 +288,7 @@ Reuse `client-request`/`client-response` as `chat-request`/`chat-response`. Add:
 |---|---|---|
 | Memory placement shift breaks downstream | High | DP3 explicit; re-baseline in P4; equivalence harness isolates |
 | Registration vs numeric order (DP1) | Medium | Decide upfront; 1-line diff to switch |
-| `:serial` / failure routing has no precedent | Medium | New kernel only; old manager untouched until P5 |
+| `:serial` / failure routing has no precedent | Medium | New chat-client only; old manager untouched until P5 |
 | Streaming + `:token-xform` hardest port | High | Defer to P4/P5; P1-P3 sync-only |
 | `return-direct` persistence knife easy to miss | Medium | Dedicated test in P3 |
 | Bridge complexity in P4 | Medium | Equivalence harness mandatory before P5 flip |
@@ -299,5 +299,5 @@ Reuse `client-request`/`client-response` as `chat-request`/`chat-response`. Add:
 
 - **Baseline:** 715 checks (SBCL + CCL), 0 skip, 0 fail
 - **Per-phase gate:** suite green at every commit; phase boundary requires equivalence harness green
-- **Equivalence harness:** parameterized runner — mock-script + tool set + config → executes through *both* old advisor and new kernel paths → asserts identical `chat-response` + memory state (modulo P4 transcript shift)
+- **Equivalence harness:** parameterized runner — mock-script + tool set + config → executes through *both* old advisor and new chat-client paths → asserts identical `chat-response` + memory state (modulo P4 transcript shift)
 - **Alignment audit (P5):** single test asserting all 10 filter types present + smoke-invokable

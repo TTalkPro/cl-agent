@@ -7,20 +7,20 @@ An AI Agent framework for Common Lisp. Two ways to use it — pick per need:
 - **SimpleAgent** (recommended starting point): a stateful agent object that
   handles the conversation, observability, error normalization and
   human-in-the-loop approval (HITL).
-- **Kernel + Filter** (full control): the tri-chain onion middleware plus the
+- **ChatClient + Filter** (full control): the tri-chain onion middleware plus the
   tool loop — every knob is yours to turn.
 
 Capabilities track Spring AI 2.0 and the architecture follows clj-agent
-(the Clojure kernel+filter implementation), but it does not copy Java's idioms —
+(the Clojure chat-client+filter implementation), but it does not copy Java's idioms —
 ChatClient, Builder and the fluent RequestSpec are not used here (see the
 migration note at the end).
 
 ## Features
 
-- **Two entry points**: `make-agent` / `agent-chat` (easy) and `build-kernel` /
+- **Two entry points**: `make-agent` / `agent-chat` (easy) and `build-chat-client` /
   `chat` (full control). The former is a thin wrapper over the latter — drop
   down whenever you need to.
-- **Kernel + Filter tri-chain**: three onion chains — `:chat` / `:tool` /
+- **ChatClient + Filter tri-chain**: three onion chains — `:chat` / `:tool` /
   `:turn` (plus a `:token-xform` transducer). `build-chain` folds them into
   nested closures that capture only what is downstream, so recursive re-entry
   is free. Ten built-in filters: memory, logging (chat/tool), safety guard,
@@ -35,7 +35,7 @@ migration note at the end).
 - **Tool calling**: the `deftool` macro mirrors the `@Tool` annotation — JSON
   Schema derived automatically; a tool's identity is its symbol (no global side
   effects), referenced as `(:tools 'get-weather)`; ToolCallback /
-  ToolCallingManager (the kernel-bound execution model and isolation
+  ToolCallingManager (the chat-client-bound execution model and isolation
   mechanism) / `:return-direct` / ToolContext
 - **ChatMemory**: repository storage protocol + message-window memory with
   pairing-safe truncation
@@ -53,7 +53,7 @@ Three packages, mirroring clj-agent's core / provider / client layering:
 │                    make-agent / agent-chat            │
 ├──────────────────────────────────────────────────────┤
 │  cl-agent/core     the framework proper (one package) │
-│                    Kernel + Filter tri-chain + chat   │
+│                    ChatClient + Filter tri-chain + chat   │
 │                    Message/Prompt/Options/Response     │
 │                    deftool / ChatModel / ChatMemory    │
 │                    infrastructure + HTTP/SSE + Schema  │
@@ -73,7 +73,7 @@ shadowing whatsoever:
 How one conversation executes:
 
 ```
-(agent-chat a "...")  or  (chat kernel ...)
+(agent-chat a "...")  or  (chat chat-client ...)
   → messages + context → turn-request
   → :turn chain (guard / validation / RAG / re-reading …)
       → run-tool-loop ─┬→ :chat chain (memory/logging/tool disclosure)
@@ -181,17 +181,17 @@ not a separate mechanism, just the callback's return value:
 Resuming may pause again (another sensitive tool in the same batch, or a later
 iteration triggering the gate).
 
-## Kernel: full control
+## ChatClient: full control
 
 When you need filters (memory strategy, guards, RAG, validation …), drop down
-to the kernel. **The agent layer does not accept `:filters`** — build your own
-kernel and pass it in:
+to the chat-client. **The agent layer does not accept `:filters`** — build your own
+chat-client and pass it in:
 
 ```lisp
 (defvar *memory* (make-message-window-chat-memory))
 
-(defvar *kernel*
-  (build-kernel
+(defvar *chat-client*
+  (build-chat-client
     :model *model*
     :system "You are a weather assistant"
     :tools '(get-weather)
@@ -199,21 +199,21 @@ kernel and pass it in:
                    (logging-chat-filter))
     :settings '((:max-tool-iterations . 10))))
 
-;; Use the kernel directly
-(chat *kernel* (:user "Weather in Tokyo?") (:conversation "conv-1"))
+;; Use the chat-client directly
+(chat *chat-client* (:user "Weather in Tokyo?") (:conversation "conv-1"))
 
 ;; Or hand it to an agent (gaining session management + HITL + error normalization)
-(make-agent :kernel *kernel* :memory *memory*)
+(make-agent :chat-client *chat-client* :memory *memory*)
 ```
 
 The `chat` macro:
 
 ```lisp
-(chat *kernel*
-  (:system "You are a weather assistant")  ; overrides the kernel's default :system
+(chat *chat-client*
+  (:system "You are a weather assistant")  ; overrides the chat-client's default :system
   (:user "Weather in ~A?" city)            ; format control strings supported
-  (:tools 'get-weather)                    ; request-level tools, unioned with the kernel's :tools
-  (:options :temperature 0.3)              ; merged over the kernel's :options, request-level wins
+  (:tools 'get-weather)                    ; request-level tools, unioned with the chat-client's :tools
+  (:options :temperature 0.3)              ; merged over the chat-client's :options, request-level wins
   (:conversation "conv-1")                 ; = (:context :conversation-id "conv-1")
   (:call :content))                        ; :content (default) | :response | :result | :entity
 ```
@@ -221,13 +221,13 @@ The `chat` macro:
 ### Streaming and structured output
 
 ```lisp
-;; Streaming (note: the kernel layer currently degrades to synchronous;
+;; Streaming (note: the chat-client layer currently degrades to synchronous;
 ;; for real SSE see chat-model-stream)
-(chat *kernel* (:user "Write a short poem")
+(chat *chat-client* (:user "Write a short poem")
       (:stream (lambda (delta) (princ delta))))
 
 ;; Structured JSON output — parses only, does not validate
-(chat *kernel* (:user "Give me Tokyo's info as JSON") (:call :entity))
+(chat *chat-client* (:user "Give me Tokyo's info as JSON") (:call :entity))
 ```
 
 To get "re-prompt the model with the validation error until it complies",
@@ -241,7 +241,7 @@ only parses:
                    \"population\":{\"type\":\"integer\"}},
     \"required\":[\"name\",\"population\"]}")
 
-(build-kernel
+(build-chat-client
   :model *model*
   :filters (list (validation-turn-filter
                   ;; verdict: (response) → (values ok-p feedback)
@@ -268,14 +268,14 @@ only parses:
                        (/ (- (get-internal-real-time) start)
                           internal-time-units-per-second)))))))
 
-(build-kernel :model *model* :filters (list (timing-filter)))
+(build-chat-client :model *model* :filters (list (timing-filter)))
 ```
 
 ## Modules
 
 | Module | Package | Description |
 |------|---|------|
-| **core** | `cl-agent/core` | The framework proper (one package): infrastructure + HTTP/SSE + JSON Schema + `llm-chat` SPI + Chat API (messages/Prompt/Options/Response/deftool/ChatModel/ChatMemory) + Kernel/Filter tri-chain + the `chat` macro |
+| **core** | `cl-agent/core` | The framework proper (one package): infrastructure + HTTP/SSE + JSON Schema + `llm-chat` SPI + Chat API (messages/Prompt/Options/Response/deftool/ChatModel/ChatMemory) + ChatClient/Filter tri-chain + the `chat` macro |
 | **llm** | `cl-agent/llm` | Provider implementations; `create-chat-model` builds a ChatModel in one step |
 | **client** | `cl-agent/client` | SimpleAgent: stateful chat + callbacks + error normalization + HITL |
 | **mock** | `cl-agent/mock` | Mock provider (tests/demos, no API key needed) |
@@ -297,11 +297,11 @@ Currently: **855 checks / 0 failures** (all mock, offline); live **11/11** (Mini
 
 ## Examples
 
-See [examples/kernel-usage.lisp](examples/kernel-usage.lisp): eight progressive
-examples covering the chat macro, build-kernel, deftool, memory, custom filters,
+See [examples/chat-client-usage.lisp](examples/chat-client-usage.lisp): eight progressive
+examples covering the chat macro, build-chat-client, deftool, memory, custom filters,
 the functional entry point, structured-output validation and streaming. All use
 mock — no API key needed.
-(Run: `sbcl --load examples/kernel-usage.lisp`)
+(Run: `sbcl --load examples/chat-client-usage.lisp`)
 
 End-to-end verification against a real provider (11 checks: single Q&A / tool
 loop / multi-turn memory / schema validation / HITL pause·approve·reject /
@@ -327,26 +327,43 @@ MINIMAX_API_KEY=... sbcl --script scripts/live-test.lisp
 
 ## Migration Notes
 
-The ChatClient porting layer is retired wholesale, and the package structure
-has been through a round of merging.
-
-**ChatClient → Kernel / SimpleAgent**
+### This rename: Kernel → ChatClient, the Service layer → the ChatModel layer
 
 | Old | New |
 |---|---|
-| `make-chat-client` / `make-kernel-client` | `build-kernel` (`:model` is a **keyword** argument) |
-| `chat-client-builder` + `default-system` … | `build-kernel :system ...` |
-| fluent spec (`client-prompt` → `prompt-user` → `call-content`) | `chat` macro clauses, or `kernel-chat-text` |
+| `build-kernel` | `build-chat-client` |
+| the `kernel` class / `kernel-model`, `kernel-tools`, `kernel-filters` … | `chat-client` / `chat-client-model`, `chat-client-tools`, `chat-client-filters` … |
+| `kernel-chat` | `chat-client-call` |
+| `kernel-chat-text` / `-entity` / `-stream` | `chat-client-text` / `chat-client-entity` / `chat-client-stream` |
+| `core/kernel/` (directory) | `core/chat-client/` |
+| `llm/service.lisp` (the Service layer) | `llm/chat-model.lisp` (the ChatModel layer) |
+| DI: `di-lazy-service` / `di-list-services` / `*app-services*` | `di-lazy-chat-model` / `di-list-chat-models` / `*app-chat-models*` |
+
+A pure rename — no semantics or behaviour changed. `lparallel:*kernel*` (the
+thread pool) and DashScope's `/api/v1/services/...` paths are not part of it and
+were left alone.
+
+> **Note the name reuse**: the "ChatClient porting layer" below is the Spring AI
+> ChatClient + Builder + fluent RequestSpec port, deleted wholesale in v9.0.0. It
+> is **not** the same thing as today's `chat-client` core — the names just collide.
+
+### The old ChatClient porting layer (deleted in v9.0.0) → the ChatClient core / SimpleAgent
+
+| Old (porting layer) | New |
+|---|---|
+| `make-chat-client` | `build-chat-client` (`:model` is a **keyword** argument) |
+| `chat-client-builder` + `default-system` … | `build-chat-client :system ...` |
+| fluent spec (`client-prompt` → `prompt-user` → `call-content`) | `chat` macro clauses, or `chat-client-text` |
 | `(:call :client-response)` | `(:call :result)` (returns a turn-result) |
 
-**Package merge** (`cl-agent/http` / `/chat` / `/kernel` → `cl-agent/core`)
+### Package merge (`cl-agent/http` / `/chat` / `/chat-client` → `cl-agent/core`)
 
 | Old | New |
 |---|---|
-| `cl-agent/kernel:build-kernel` | `cl-agent/core:build-kernel` |
+| `cl-agent/chat-client:build-chat-client` | `cl-agent/core:build-chat-client` |
 | `cl-agent/chat:deftool` | `cl-agent/core:deftool` |
 | `cl-agent/http:http-request` | `cl-agent/core:http-request` |
-| `cl-agent/kernel:tool-response` | `cl-agent/core:tool-result` (`make-tool-result :value ...`) |
+| `cl-agent/chat-client:tool-response` | `cl-agent/core:tool-result` (`make-tool-result :value ...`) |
 
 The name `cl-agent/client` has been **reused**: it used to be the ChatClient
 porting layer (deleted); it is now SimpleAgent.

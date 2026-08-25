@@ -51,7 +51,7 @@
 ;;; 示例 2: 服务作用域
 ;;; ============================================================
 
-(defun example-2-service-scopes ()
+(defun example-2-chat-model-scopes ()
   "示例 2: 单例和原型作用域
 
 演示：
@@ -62,30 +62,30 @@
     (cl-agent/core:make-di-container :name "scope"))
 
   ;; 1. 绑定单例服务
-  (cl-agent/core:di-bind *scope-container* :singleton-service
+  (cl-agent/core:di-bind *scope-container* :singleton-chat-model
     (lambda ()
       (cons :singleton (random 100)))
     :singleton t)
 
   ;; 2. 绑定原型服务
-  (cl-agent/core:di-bind *scope-container* :prototype-service
+  (cl-agent/core:di-bind *scope-container* :prototype-chat-model
     (lambda ()
       (cons :prototype (random 100)))
     :singleton nil)
 
   ;; 3. 测试单例：两次解析返回相同实例
-  (let ((s1 (cl-agent/core:di-resolve *scope-container* :singleton-service))
-        (s2 (cl-agent/core:di-resolve *scope-container* :singleton-service)))
-    (format t "~&Singleton service:~%")
+  (let ((s1 (cl-agent/core:di-resolve *scope-container* :singleton-chat-model))
+        (s2 (cl-agent/core:di-resolve *scope-container* :singleton-chat-model)))
+    (format t "~&Singleton chat-model:~%")
     (format t "  First:  ~A~%" s1)
     (format t "  Second: ~A~%" s2)
     (format t "  Same? ~A~%" (eq s1 s2)))
   ;; => Same? T
 
   ;; 4. 测试原型：两次解析返回不同实例
-  (let ((p1 (cl-agent/core:di-resolve *scope-container* :prototype-service))
-        (p2 (cl-agent/core:di-resolve *scope-container* :prototype-service)))
-    (format t "~&Prototype service:~%")
+  (let ((p1 (cl-agent/core:di-resolve *scope-container* :prototype-chat-model))
+        (p2 (cl-agent/core:di-resolve *scope-container* :prototype-chat-model)))
+    (format t "~&Prototype chat-model:~%")
     (format t "  First:  ~A~%" p1)
     (format t "  Second: ~A~%" p2)
     (format t "  Same? ~A~%" (eq p1 p2)))
@@ -126,8 +126,8 @@
      :singleton t))
 
   ;; 验证绑定
-  (format t "~&Services bound: ~A~%"
-          (cl-agent/core:di-list-services *batch-container*))
+  (format t "~&ChatModels bound: ~A~%"
+          (cl-agent/core:di-list-chat-models *batch-container*))
   ;; => (:CONFIG :DATABASE :CACHE :LOGGER)
 
   ;; 测试原型作用域
@@ -204,28 +204,28 @@
     (cl-agent/core:make-di-container :name "optional"))
 
   ;; 只绑定部分服务
-  (cl-agent/core:di-bind *optional-container* :required-service
-    (lambda () "Required service is available")
+  (cl-agent/core:di-bind *optional-container* :required-chat-model
+    (lambda () "Required chat-model is available")
     :singleton t)
 
   ;; 1. 使用 di-resolve-or-default
   (let ((required (cl-agent/core:di-resolve-or-default
-                   *optional-container* :required-service
+                   *optional-container* :required-chat-model
                    :default "Not found"))
         (optional (cl-agent/core:di-resolve-or-default
-                   *optional-container* :optional-service
-                   :default "Default optional service")))
+                   *optional-container* :optional-chat-model
+                   :default "Default optional chat-model")))
 
     (format t "~&Required: ~A~%" required)
-    ;; => Required: Required service is available
+    ;; => Required: Required chat-model is available
 
     (format t "Optional: ~A~%" optional))
-  ;; => Optional: Default optional service
+  ;; => Optional: Default optional chat-model
 
   ;; 2. 在 di-with-dependencies 中使用默认值
   (cl-agent/core:di-with-dependencies *optional-container*
-      ((required (:required-service))
-       (optional (:optional-service :default "Default value")))
+      ((required (:required-chat-model))
+       (optional (:optional-chat-model :default "Default value")))
     (format t "~&In macro - Required: ~A~%" required)
     (format t "In macro - Optional: ~A~%" optional))
 
@@ -247,18 +247,18 @@
     (cl-agent/core:make-di-container :name "lifecycle"))
 
   ;; 绑定服务
-  (cl-agent/core:di-bind *lifecycle-container* :service1
-    (lambda () "Service 1")
+  (cl-agent/core:di-bind *lifecycle-container* :chat-model1
+    (lambda () "ChatModel 1")
     :singleton t)
 
-  (cl-agent/core:di-bind *lifecycle-container* :service2
-    (lambda () "Service 2")
+  (cl-agent/core:di-bind *lifecycle-container* :chat-model2
+    (lambda () "ChatModel 2")
     :singleton t)
 
   ;; 1. 检查绑定状态
-  (format t "~&Service1 bound? ~A~%"
-          (cl-agent/core:di-boundp *lifecycle-container* :service1))
-  ;; => Service1 bound? T
+  (format t "~&ChatModel1 bound? ~A~%"
+          (cl-agent/core:di-boundp *lifecycle-container* :chat-model1))
+  ;; => ChatModel1 bound? T
 
   ;; 2. 获取容器统计
   (let ((stats (cl-agent/core:di-container-stats *lifecycle-container*)))
@@ -272,8 +272,8 @@
   ;;    Singletons: 0 (before resolution)
 
   ;; 3. 解析服务（创建单例）
-  (cl-agent/core:di-resolve *lifecycle-container* :service1)
-  (cl-agent/core:di-resolve *lifecycle-container* :service2)
+  (cl-agent/core:di-resolve *lifecycle-container* :chat-model1)
+  (cl-agent/core:di-resolve *lifecycle-container* :chat-model2)
 
   (let ((stats (cl-agent/core:di-container-stats *lifecycle-container*)))
     (format t "~&After resolution:~%")
@@ -281,10 +281,10 @@
   ;; => Singletons: 2
 
   ;; 4. 释放单个服务
-  (cl-agent/core:di-release *lifecycle-container* :service1)
+  (cl-agent/core:di-release *lifecycle-container* :chat-model1)
 
   (let ((stats (cl-agent/core:di-container-stats *lifecycle-container*)))
-    (format t "~&After releasing service1:~%")
+    (format t "~&After releasing chat-model1:~%")
     (format t "  Singletons: ~A~%" (getf stats :singletons)))
   ;; => Singletons: 1
 
@@ -311,10 +311,10 @@
   - 层级继承"
 
   ;; 1. 全局服务层
-  (defparameter *global-services*
+  (defparameter *global-chat-models*
     (cl-agent/core:make-di-container :name "global"))
 
-  (cl-agent/core:di-bind* *global-services*
+  (cl-agent/core:di-bind* *global-chat-models*
     (:logger
      (lambda () (list :level :debug))
      :singleton t)
@@ -324,12 +324,12 @@
      :singleton t))
 
   ;; 2. 核心服务层
-  (defparameter *core-services*
+  (defparameter *core-chat-models*
     (cl-agent/core:make-di-container
-     :parent *global-services*
+     :parent *global-chat-models*
      :name "core"))
 
-  (cl-agent/core:di-bind* *core-services*
+  (cl-agent/core:di-bind* *core-chat-models*
     (:memory
      (lambda () (list :type "in-memory"))
      :singleton t)
@@ -339,12 +339,12 @@
      :singleton t))
 
   ;; 3. 应用层
-  (defparameter *app-services*
+  (defparameter *app-chat-models*
     (cl-agent/core:make-di-container
-     :parent *core-services*
+     :parent *core-chat-models*
      :name "app"))
 
-  (cl-agent/core:di-bind* *app-services*
+  (cl-agent/core:di-bind* *app-chat-models*
     (:config
      (lambda ()
        (list :max-iterations 10
@@ -352,7 +352,7 @@
      :singleton t))
 
   ;; 4. 使用服务
-  (cl-agent/core:di-with-dependencies *app-services*
+  (cl-agent/core:di-with-dependencies *app-chat-models*
       ((memory (:memory))
        (tools (:tools))
        (config (:config))
@@ -377,7 +377,7 @@
   ;; 5. 打印容器层级结构
   (format t "~%~%Container Hierarchy:~%")
   (format t "==================~%")
-  (cl-agent/core:di-print-container *app-services*)
+  (cl-agent/core:di-print-container *app-chat-models*)
 
   :success)
 
@@ -390,26 +390,26 @@
 
 演示：
   - di-lazy-dependency: 延迟解析
-  - di-lazy-service: 延迟绑定"
+  - di-lazy-chat-model: 延迟绑定"
 
   (defparameter *lazy-container*
     (cl-agent/core:make-di-container :name "lazy"))
 
   ;; 绑定昂贵的服务
-  (cl-agent/core:di-bind *lazy-container* :expensive-service
+  (cl-agent/core:di-bind *lazy-container* :expensive-chat-model
     (lambda ()
-      (format t "~&[Creating expensive service...]~%")
+      (format t "~&[Creating expensive chat-model...]~%")
       (list :data "expensive-data"))
     :singleton t)
 
   ;; 1. 使用懒加载依赖
   (cl-agent/core:di-with-dependencies *lazy-container*
-      ((cheap-service (cl-agent/core:di-lazy-dependency
-                       :expensive-service)))
+      ((cheap-chat-model (cl-agent/core:di-lazy-dependency
+                       :expensive-chat-model)))
     (format t "~&Dependency created (not resolved yet)~%")
 
     ;; 首次使用时才会解析
-    (format t "~&Using service: ~A~%" cheap-service))
+    (format t "~&Using chat-model: ~A~%" cheap-chat-model))
 
   ;; 2. 使用懒加载服务（直接解析，不使用宏）
   (format t "~&Testing lazy dependency resolution~%")
@@ -441,7 +441,7 @@
             ;; 示例 2: 服务作用域
             (format t "~%~%示例 2: 服务作用域~%")
             (format t "---------------~%")
-            (example-2-service-scopes)
+            (example-2-chat-model-scopes)
 
             ;; 示例 3: 批量绑定
             (format t "~%~%示例 3: 批量绑定~%")
@@ -486,7 +486,7 @@
 
 (export '(run-all-di-examples
           example-1-basic-container
-          example-2-service-scopes
+          example-2-chat-model-scopes
           example-3-batch-binding
           example-4-hierarchical-containers
           example-5-optional-dependencies

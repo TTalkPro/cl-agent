@@ -13,7 +13,7 @@
 ;;;;   ChatModel 只负责单次模型调用——解析工具引用并向模型注入工具
 ;;;;   schema，但**不执行工具**。工具执行循环上移到
 ;;;;   cl-agent/core:run-tool-loop（由 invoke-turn 驱动，ChatClient
-;;;;   经 kernel 自动走到）。1.x 的 internal-tool-execution-enabled
+;;;;   经 chat-client 自动走到）。1.x 的 internal-tool-execution-enabled
 ;;;;   选项已随之移除。
 ;;;;
 ;;;;   直接使用 chat-model-call 且响应携带 tool-calls 时，调用方自行

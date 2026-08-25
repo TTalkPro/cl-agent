@@ -1,5 +1,5 @@
 ;;;; approval.lisp
-;;;; CL-Agent Kernel Filters - 工具审批 (:tool)
+;;;; CL-Agent ChatClient Filters - 工具审批 (:tool)
 ;;;;
 ;;;; 概述（对标 clj-agent approval-filter）：
 ;;;;   敏感工具执行前要求审批。审批通过 → 执行；拒绝 → 返回拒绝文本回传模型。

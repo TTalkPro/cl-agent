@@ -127,10 +127,10 @@ mock/
 
 ```lisp
 ;; 在测试中把 Mock LLM 适配为 ChatModel
-(deftest test-kernel-with-mock
+(deftest test-chat-client-with-mock
   (let* ((mock-llm (cl-agent/mock:make-mock-llm))
          (model (cl-agent/core:make-provider-chat-model mock-llm))
-         (k (cl-agent/core:build-kernel :model model)))
+         (k (cl-agent/core:build-chat-client :model model)))
     (is (stringp (cl-agent/core:chat k "你好")))))
 
 ;; 需要精确控制响应序列时，直接特化 llm-chat（见 tests/suite.lisp
@@ -149,7 +149,7 @@ mock/
                     (tool-call-response "get_weather" '(("city" . "北京")))
                     (text-response "北京今天晴，25°C")))
          (model (cl-agent/core:make-provider-chat-model provider))
-         (k (cl-agent/core:build-kernel :model model :tools '(get-weather))))
+         (k (cl-agent/core:build-chat-client :model model :tools '(get-weather))))
     (is (search "25°C"
                 (cl-agent/core:chat k (:user "北京天气怎么样？"))))))
 ```

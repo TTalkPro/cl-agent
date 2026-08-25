@@ -1,12 +1,12 @@
-;;;; test-kernel-invoke.lisp
-;;;; CL-Agent - Kernel invoke 原语 + 工具循环测试（Phase P2）
+;;;; test-chat-client-invoke.lisp
+;;;; CL-Agent - ChatClient invoke 原语 + 工具循环测试（Phase P2）
 
 (in-package :cl-agent/tests)
 
-(def-suite kernel-invoke-suite :in cl-agent-suite
-  :description "Kernel invoke-chat / invoke-tool / invoke-turn + run-tool-loop")
+(def-suite chat-client-invoke-suite :in cl-agent-suite
+  :description "ChatClient invoke-chat / invoke-tool / invoke-turn + run-tool-loop")
 
-(in-suite kernel-invoke-suite)
+(in-suite chat-client-invoke-suite)
 
 ;;; ============================================================
 ;;; 测试工具定义
@@ -19,13 +19,13 @@
   (princ-to-string (+ a b)))
 
 ;;; ============================================================
-;;; 辅助：创建测试 kernel
+;;; 辅助：创建测试 chat-client
 ;;; ============================================================
 
-(defun make-test-kernel (&rest responses)
-  "创建带 seq-provider 的 kernel。返回 (values kernel provider)。"
+(defun make-test-chat-client (&rest responses)
+  "创建带 seq-provider 的 chat-client。返回 (values chat-client provider)。"
   (let ((provider (apply #'make-seq-provider responses)))
-    (values (cl-agent/core:build-kernel
+    (values (cl-agent/core:build-chat-client
              :model (cl-agent/core:make-provider-chat-model provider)
              :tools '(ki-adder))
             provider)))
@@ -36,18 +36,18 @@
 
 (test invoke-chat-bare-llm-call
   "invoke-chat 无 filter 时 = 裸 chat-model-call"
-  (multiple-value-bind (kernel provider)
-      (make-test-kernel (text-response "hello"))
+  (multiple-value-bind (chat-client provider)
+      (make-test-chat-client (text-response "hello"))
     (let ((resp (cl-agent/core:invoke-chat
-                 kernel
+                 chat-client
                  (cl-agent/core:make-prompt "你好"))))
       (is (string= "hello" (cl-agent/core:chat-response-text resp)))
       (is (= 1 (length (seq-provider-requests provider)))))))
 
 (test invoke-chat-with-chat-filter
   ":chat filter 在链上执行，可改写 prompt"
-  (multiple-value-bind (kernel provider)
-      (make-test-kernel (text-response "ok"))
+  (multiple-value-bind (chat-client provider)
+      (make-test-chat-client (text-response "ok"))
     ;; 加一个 :chat filter 改写 prompt
     (let* ((rewrite-filter
             (cl-agent/core:make-filter
@@ -57,13 +57,13 @@
                      (funcall chain
                               (cl-agent/core:make-prompt
                                "改写后的消息")))))
-           (kernel2 (cl-agent/core:build-kernel
-                     :model (kernel-model-for-test kernel)
+           (chat-client2 (cl-agent/core:build-chat-client
+                     :model (chat-client-model-for-test chat-client)
                      :tools '(ki-adder)
                      :filters (list rewrite-filter))))
-        (declare (ignore kernel))
+        (declare (ignore chat-client))
       (let ((resp (cl-agent/core:invoke-chat
-                   kernel2
+                   chat-client2
                    (cl-agent/core:make-prompt "原始消息"))))
         (is (string= "ok" (cl-agent/core:chat-response-text resp)))
         ;; provider 收到的 messages 应该是改写后的
@@ -72,9 +72,9 @@
                      (mapcar (lambda (m) (getf m :content))
                              (getf req :messages)))))))))
 
-(defun kernel-model-for-test (kernel)
-  "从已有 kernel 取出 model（测试辅助）"
-  (cl-agent/core:kernel-model kernel))
+(defun chat-client-model-for-test (chat-client)
+  "从已有 chat-client 取出 model（测试辅助）"
+  (cl-agent/core:chat-client-model chat-client))
 
 ;;; ============================================================
 ;;; invoke-tool
@@ -82,11 +82,11 @@
 
 (test invoke-tool-single
   "invoke-tool 执行单个工具（无 filter）"
-  (multiple-value-bind (kernel)
-      (make-test-kernel)
+  (multiple-value-bind (chat-client)
+      (make-test-chat-client)
     (let* ((callback (cl-agent/core:symbol-tool-callback 'ki-adder))
            (resp (cl-agent/core:invoke-tool
-                  kernel
+                  chat-client
                   (cl-agent/core:make-tool-request
                    callback :args '(:a 3 :b 4)))))
       (is (string= "7" (cl-agent/core:tool-result-value resp)))
@@ -94,8 +94,8 @@
 
 (test invoke-tool-with-filter
   ":tool filter 可拦截工具执行"
-  (multiple-value-bind (kernel)
-      (make-test-kernel)
+  (multiple-value-bind (chat-client)
+      (make-test-chat-client)
     (let* ((timeout-filter
             (cl-agent/core:make-filter
              :timeout
@@ -103,14 +103,14 @@
                      (declare (ignore chain))
                      (cl-agent/core:make-tool-result
                       :error (list :class :timeout :message "超时")))))
-           (kernel2 (cl-agent/core:build-kernel
-                     :model (kernel-model-for-test kernel)
+           (chat-client2 (cl-agent/core:build-chat-client
+                     :model (chat-client-model-for-test chat-client)
                      :tools '(ki-adder)
                      :filters (list timeout-filter))))
-      (declare (ignore kernel))
+      (declare (ignore chat-client))
       (let* ((callback (cl-agent/core:symbol-tool-callback 'ki-adder))
              (resp (cl-agent/core:invoke-tool
-                    kernel2
+                    chat-client2
                     (cl-agent/core:make-tool-request
                      callback :args '(:a 1 :b 2)))))
         (is (null (cl-agent/core:tool-result-value resp))
@@ -124,8 +124,8 @@
 
 (test invoke-turn-tool-roundtrip
   "工具循环：tool-call → 执行 → 结果回传模型 → 最终文本"
-  (multiple-value-bind (kernel provider)
-      (make-test-kernel
+  (multiple-value-bind (chat-client provider)
+      (make-test-chat-client
        (tool-call-response "ki_adder" '(("a" . 3) ("b" . 4)))
        (lambda (messages)
          ;; 第二轮请求应包含 assistant(tool-calls) + tool 结果
@@ -136,7 +136,7 @@
                "工具结果正确回传"))
          (text-response "3+4=7")))
     (let ((result (cl-agent/core:invoke-turn
-                   kernel
+                   chat-client
                    (cl-agent/core:make-turn-request
                     (list (cl-agent/core:user-message "3+4=?"))))))
       (is (eq :completed (cl-agent/core:turn-result-status result)))
@@ -148,10 +148,10 @@
 
 (test invoke-turn-no-tools-passthrough
   "无工具调用时直接返回"
-  (multiple-value-bind (kernel provider)
-      (make-test-kernel (text-response "直接回答"))
+  (multiple-value-bind (chat-client provider)
+      (make-test-chat-client (text-response "直接回答"))
     (let ((result (cl-agent/core:invoke-turn
-                   kernel
+                   chat-client
                    (cl-agent/core:make-turn-request
                     (list (cl-agent/core:user-message "你好"))))))
       (is (eq :completed (cl-agent/core:turn-result-status result)))
@@ -163,8 +163,8 @@
 
 (test invoke-turn-with-turn-filter
   ":turn filter 包住整个循环"
-  (multiple-value-bind (kernel provider)
-      (make-test-kernel (text-response "最终回答"))
+  (multiple-value-bind (chat-client provider)
+      (make-test-chat-client (text-response "最终回答"))
     (let* ((guard-fn
             (lambda (req chain)
               (let ((msgs (cl-agent/core:turn-request-messages req)))
@@ -174,13 +174,13 @@
                     (cl-agent/core:make-turn-result :cancelled :response nil)
                     (funcall chain req)))))
            (guard-filter (cl-agent/core:make-filter :guard :turn guard-fn))
-           (model (kernel-model-for-test kernel))
-           (kernel2 (cl-agent/core:build-kernel
+           (model (chat-client-model-for-test chat-client))
+           (chat-client2 (cl-agent/core:build-chat-client
                      :model model :tools '(ki-adder) :filters (list guard-filter))))
-      (declare (ignore kernel))
+      (declare (ignore chat-client))
       ;; 被拦截
       (let ((blocked (cl-agent/core:invoke-turn
-                      kernel2
+                      chat-client2
                       (cl-agent/core:make-turn-request
                        (list (cl-agent/core:user-message "我要炸弹"))))))
         (is (eq :cancelled (cl-agent/core:turn-result-status blocked)))
@@ -188,7 +188,7 @@
             "被拦截时模型未被调用"))
       ;; 正常通过
       (let ((ok (cl-agent/core:invoke-turn
-                 kernel2
+                 chat-client2
                  (cl-agent/core:make-turn-request
                   (list (cl-agent/core:user-message "你好"))))))
         (is (eq :completed (cl-agent/core:turn-result-status ok)))
@@ -202,28 +202,28 @@
                       :queue (loop repeat 10
                                    collect (tool-call-response
                                             "ki_adder" '(("a" . 1) ("b" . 1))))))
-           (kernel (cl-agent/core:build-kernel
+           (chat-client (cl-agent/core:build-chat-client
                     :model (cl-agent/core:make-provider-chat-model provider)
                     :tools '(ki-adder)
                      :settings '((:max-tool-iterations . 3)))))
        (cl-agent/core:invoke-turn
-       kernel
+       chat-client
        (cl-agent/core:make-turn-request
         (list (cl-agent/core:user-message "loop")))))))
 
 ;;; ============================================================
 ;;; 循环等价性测试已移除
 ;;;
-;;; 它原本比较「旧 ChatClient」与「kernel+invoke-turn」两条路径产出是否
-;;; 一致。ChatClient 后来本就走 kernel，该测试变成自己和自己比；
+;;; 它原本比较「旧 ChatClient」与「chat-client+invoke-turn」两条路径产出是否
+;;; 一致。ChatClient 后来本就走 chat-client，该测试变成自己和自己比；
 ;;; 旧 cl-agent/client 整体删除后连对照组都不存在了。
-;;; 工具循环本身的覆盖见本文件上方各测试与 test-kernel-chat.lisp。
+;;; 工具循环本身的覆盖见本文件上方各测试与 test-chat-client-chat.lisp。
 ;;; ============================================================
 
 ;;; ============================================================
 ;;; ToolCallingManager：执行模型与隔离机制
 ;;;
-;;; ToolCallingManager 是 kernel 级绑定的 Tool Call 执行模型与隔离机制，
+;;; ToolCallingManager 是 chat-client 级绑定的 Tool Call 执行模型与隔离机制，
 ;;; 三个实现 = 三种执行/隔离策略。thread-pool 的存在意义就是**限流**，
 ;;; 所以这里断言的是**并发峰值**，不是「能跑通」。
 ;;;
@@ -263,7 +263,7 @@
 (defun tcm-run (mgr n)
   "用 MGR 执行 N 个慢工具，返回 (values 并发峰值 结果文本列表)"
   (setf *tcm-live* 0 *tcm-peak* 0)
-  (let* ((k (cl-agent/core:build-kernel :model nil :tools '(tcm-slow) :tool-manager mgr))
+  (let* ((k (cl-agent/core:build-chat-client :model nil :tools '(tcm-slow) :tool-manager mgr))
          (res (cl-agent/core:execute-tool-calls mgr k (tcm-response n)
                                                 (list :tool-context nil))))
     (values *tcm-peak*
@@ -336,7 +336,7 @@
 
 (test multi-tool-parallel-works-without-user-lparallel-setup
   "默认路径（不给 :tool-manager）跑 2+ 个工具不得报 NO-KERNEL-ERROR"
-  (let* ((k (cl-agent/core:build-kernel :model nil :tools '(mt-echo)))
+  (let* ((k (cl-agent/core:build-chat-client :model nil :tools '(mt-echo)))
          (opts (cl-agent/core:make-chat-options
                 :tool-callbacks (cl-agent/core:resolve-tool-callbacks '(mt-echo))))
          (calls (cl-agent/core:chat-response-tool-calls (tcm-response 3 "mt_echo"))))
@@ -348,7 +348,7 @@
 (test multi-tool-via-virtual-thread-manager-works
   "默认 manager（virtual-thread）跑 2+ 个工具同样不得崩"
   (let* ((mgr (cl-agent/core:make-virtual-thread-tool-calling-manager))
-         (k (cl-agent/core:build-kernel :model nil :tools '(mt-echo)
+         (k (cl-agent/core:build-chat-client :model nil :tools '(mt-echo)
                                         :tool-manager mgr))
          (res (cl-agent/core:execute-tool-calls mgr k (tcm-response 3 "mt_echo")
                                                 (list :tool-context nil))))
@@ -404,7 +404,7 @@
 
 (defun fc-class (sym)
   "跑一次工具，返回结果里的故障分类"
-  (let* ((k (cl-agent/core:build-kernel :model nil :tools (list sym)))
+  (let* ((k (cl-agent/core:build-chat-client :model nil :tools (list sym)))
          (req (cl-agent/core:make-tool-request
                (cl-agent/core:symbol-tool-callback sym) :args '(:x "1")))
          (r (cl-agent/core:invoke-tool k req)))
@@ -472,7 +472,7 @@
   "经 invoke-tool-batch 跑一次，返回 (values 执行次数 结果)"
   (setf *fc-runs* 0)
   (let* ((cb (cl-agent/core:symbol-tool-callback sym))
-         (k (cl-agent/core:build-kernel :model nil :tools (list sym)))
+         (k (cl-agent/core:build-chat-client :model nil :tools (list sym)))
          (calls (list (cl-agent/core:make-tool-call
                        :id "c1" :name (cl-agent/core:tool-callback-name cb)
                        :arguments (let ((h (make-hash-table :test #'equal)))
@@ -514,7 +514,7 @@
 ;;;
 ;;; 此前这两个 token-xform filter 是**三重装饰品**：
 ;;;   1. 没有代码读 filter-token-xform 去组装流（invoke-chat-stream 不存在），
-;;;      kernel-chat-stream 是同步降级；
+;;;      chat-client-stream 是同步降级；
 ;;;   2. 它们返回**裸 lambda 而不是 filter 实例**，压根放不进 :filters；
 ;;;   3. 协议照搬 transducer 的 arity 重载，0-arity 返回函数当 step。
 ;;; 三条互相掩护——放不进 :filters 就从没被组装，也就没人发现协议是拧的。
@@ -541,17 +541,17 @@
    :content (apply #'concatenate 'string (stream-provider-chunks p))
    :finish-reason :stop))
 
-(defun stream-kernel (chunks &rest filters)
-  (cl-agent/core:build-kernel
+(defun stream-chat-client (chunks &rest filters)
+  (cl-agent/core:build-chat-client
    :model (cl-agent/core:make-provider-chat-model
            (make-instance 'stream-provider :chunks chunks))
    :filters filters))
 
-(test kernel-chat-stream-is-incremental
-  "kernel-chat-stream 必须逐片回调，不是攒完一次性给。
+(test chat-client-stream-is-incremental
+  "chat-client-stream 必须逐片回调，不是攒完一次性给。
 回归：它曾是同步降级（整段文本一个 chunk）。"
   (let ((got nil))
-    (cl-agent/core:kernel-chat-stream (stream-kernel '("你" "好" "世界"))
+    (cl-agent/core:chat-client-stream (stream-chat-client '("你" "好" "世界"))
                                       (lambda (d) (push d got))
                                       :user "hi")
     (is (equal '("你" "好" "世界") (reverse got)))))
@@ -568,8 +568,8 @@
 (test token-redact-filter-redacts-in-stream
   "脱敏 xform 在流式管道里生效"
   (let ((got nil))
-    (cl-agent/core:kernel-chat-stream
-     (stream-kernel '("我的" "password" "是x")
+    (cl-agent/core:chat-client-stream
+     (stream-chat-client '("我的" "password" "是x")
                     (cl-agent/core:token-redact-filter '("password")))
      (lambda (d) (push d got))
      :user "hi")
@@ -578,8 +578,8 @@
 (test hold-release-filter-buffers-then-releases
   "hold-release 缓冲全部 token，流结束时一次性放出"
   (let ((got nil) (seen nil))
-    (cl-agent/core:kernel-chat-stream
-     (stream-kernel '("你" "好" "世界")
+    (cl-agent/core:chat-client-stream
+     (stream-chat-client '("你" "好" "世界")
                     (cl-agent/core:hold-release-filter
                      :approve-fn (lambda (text) (setf seen text) t)))
      (lambda (d) (push d got))
@@ -592,8 +592,8 @@
 (test hold-release-filter-blocks-on-reject
   "审批否决 → 送出拒答文本，原文不外泄"
   (let ((got nil))
-    (cl-agent/core:kernel-chat-stream
-     (stream-kernel '("机密" "内容")
+    (cl-agent/core:chat-client-stream
+     (stream-chat-client '("机密" "内容")
                     (cl-agent/core:hold-release-filter
                      :approve-fn (lambda (text) (declare (ignore text)) nil)))
      (lambda (d) (push d got))
@@ -606,8 +606,8 @@
   ":chat filter 在流式路径下照常生效（memory 落库）"
   (let ((mem (cl-agent/core:make-message-window-chat-memory))
         (got nil))
-    (cl-agent/core:kernel-chat-stream
-     (stream-kernel '("答") (cl-agent/core:memory-filter mem))
+    (cl-agent/core:chat-client-stream
+     (stream-chat-client '("答") (cl-agent/core:memory-filter mem))
      (lambda (d) (push d got))
      :user "问" :context '(:conversation-id "st1"))
     ;; user + assistant
@@ -631,12 +631,12 @@
         (when finish (funcall finish))
         (is (equal '(:outer :inner :sink) (reverse trace)))))))
 
-(test kernel-chat-stream-refuses-tools-loudly
+(test chat-client-stream-refuses-tools-loudly
   "流式路径不跑工具循环 → 带工具时必须**报错**，不能静默丢掉工具执行。
 静默丢掉的话，模型发了 tool_call 没人执行，用户只看到一段没头没尾的文本。"
   (signals error
-    (cl-agent/core:kernel-chat-stream
-     (cl-agent/core:build-kernel
+    (cl-agent/core:chat-client-stream
+     (cl-agent/core:build-chat-client
       :model (cl-agent/core:make-provider-chat-model
               (make-instance 'stream-provider :chunks '("x")))
       :tools '(mt-echo))
@@ -644,13 +644,13 @@
      :user "hi"))
   ;; 请求级 :tools 同样拦
   (signals error
-    (cl-agent/core:kernel-chat-stream
-     (stream-kernel '("x"))
+    (cl-agent/core:chat-client-stream
+     (stream-chat-client '("x"))
      (lambda (d) (declare (ignore d)))
      :user "hi" :tools '(mt-echo)))
   ;; 无工具则正常
   (let ((got nil))
-    (cl-agent/core:kernel-chat-stream (stream-kernel '("ok"))
+    (cl-agent/core:chat-client-stream (stream-chat-client '("ok"))
                                       (lambda (d) (push d got)) :user "hi")
     (is (equal '("ok") got))))
 
@@ -727,12 +727,12 @@
                     (ws-two-calls-response)
                     (tool-call-response "ws_read" nil :id "r1")
                     (text-response "done")))
-         (kernel (cl-agent/core:build-kernel
+         (chat-client (cl-agent/core:build-chat-client
                   :model (cl-agent/core:make-provider-chat-model provider)
                   :tools '(ws-note ws-read)
                   :state-slots (ws-state-slots)))
          (result (cl-agent/core:invoke-turn
-                  kernel
+                  chat-client
                   (cl-agent/core:make-turn-request
                    (list (cl-agent/core:user-message "记笔记"))))))
     (is (eq :completed (cl-agent/core:turn-result-status result)))
@@ -754,9 +754,9 @@
          (bad (cl-agent/core:make-tool-result
                :writes '(:notes ("泄漏"))
                :error '(:class :semantic :message "boom")))
-         (kernel (cl-agent/core:build-kernel :model nil
+         (chat-client (cl-agent/core:build-chat-client :model nil
                                              :state-slots (ws-state-slots)))
-         (ctx (cl-agent/core:fold-batch-writes kernel (list ok bad) nil)))
+         (ctx (cl-agent/core:fold-batch-writes chat-client (list ok bad) nil)))
     (is (equal '("x") (getf ctx :notes)) "只有成功调用的写意图生效")))
 
 (test writes-fold-via-manager-path
@@ -764,7 +764,7 @@
 （此前协议这么承诺、实现原样透传）"
   (dolist (mgr (list (cl-agent/core:make-sequential-tool-calling-manager)
                      (cl-agent/core:make-virtual-thread-tool-calling-manager)))
-    (let* ((kernel (cl-agent/core:build-kernel
+    (let* ((chat-client (cl-agent/core:build-chat-client
                     :model nil :tools '(ws-note)
                     :tool-manager mgr
                     :state-slots (ws-state-slots)))
@@ -777,7 +777,7 @@
                                        :arguments '(:text "hello"))))
                    :finish-reason :tool-call)))
            (result (cl-agent/core:execute-tool-calls
-                    mgr kernel resp (list :tool-context '(:seed t)))))
+                    mgr chat-client resp (list :tool-context '(:seed t)))))
       (is (equal '("hello") (getf (getf result :context) :notes))
           (format nil "~A 折叠 writes 进 :context" (type-of mgr)))
       (is (eq t (getf (getf result :context) :seed))
@@ -796,7 +796,7 @@
 此前它绕过 resolve-callback 直接调 find-callback-for-call（signal 路径），
 与主路径行为分叉——CLOS 收敛（manager-run-batch）后统一走顺序批。"
   (let* ((mgr (cl-agent/core:make-sequential-tool-calling-manager))
-         (k (cl-agent/core:build-kernel :model nil :tools '(ki-adder)
+         (k (cl-agent/core:build-chat-client :model nil :tools '(ki-adder)
                                         :tool-manager mgr))
          (resp (cl-agent/core:make-chat-response
                 (cl-agent/core:make-generation
@@ -831,7 +831,7 @@
   (dolist (mgr-fn (list #'cl-agent/core:make-sequential-tool-calling-manager
                         #'cl-agent/core:make-virtual-thread-tool-calling-manager))
     (let* ((mgr (funcall mgr-fn))
-           (k (cl-agent/core:build-kernel :model nil :tools '(rd-direct)
+           (k (cl-agent/core:build-chat-client :model nil :tools '(rd-direct)
                                           :tool-manager mgr))
            (resp (cl-agent/core:make-chat-response
                   (cl-agent/core:make-generation
@@ -852,7 +852,7 @@
          (provider (make-seq-provider
                     (tool-call-response "rd_direct" '(("x" . 42)))
                     (text-response "不应该走到第二轮")))
-         (k (cl-agent/core:build-kernel
+         (k (cl-agent/core:build-chat-client
              :model (cl-agent/core:make-provider-chat-model provider)
              :tools '(rd-direct) :tool-manager mgr)))
     (let ((result (cl-agent/core:invoke-turn
@@ -889,7 +889,7 @@ thread-pool(1) + HITL 暂停的组合下，续跑批并发不受限。"
          (provider (make-seq-provider
                     multi-tc-response
                     (text-response "done")))
-         (k (cl-agent/core:build-kernel
+         (k (cl-agent/core:build-chat-client
              :model (cl-agent/core:make-provider-chat-model provider)
              :tools '(tcm-slow) :tool-manager mgr :tool-gate gate)))
     (unwind-protect
@@ -925,7 +925,7 @@ thread-pool(1) + HITL 暂停的组合下，续跑批并发不受限。"
          (provider (make-seq-provider
                     (text-response "ok")
                     (text-response "ok2")))
-         (k (cl-agent/core:build-kernel
+         (k (cl-agent/core:build-chat-client
              :model (cl-agent/core:make-provider-chat-model provider)
              :filters (list ts-filter counter))))
     ;; 同一会话调两轮
@@ -948,23 +948,23 @@ thread-pool(1) + HITL 暂停的组合下，续跑批并发不受限。"
 
 (test stream-guard-catches-options-tools
   "流式守卫必须拦下 options 里的 tool-callbacks——不止 :tools 参数。
-回归：守卫此前只查 (getf plist :tools) 与 kernel-tools，漏了请求级
-:options 和 kernel 默认 :options 携带的工具，配 :options 的流式请求
+回归：守卫此前只查 (getf plist :tools) 与 chat-client-tools，漏了请求级
+:options 和 chat-client 默认 :options 携带的工具，配 :options 的流式请求
 直接穿过守卫，模型发 tool_call 却无人执行（正是守卫本该堵的洞）。"
   (let ((opts (cl-agent/core:make-chat-options
                :tool-callbacks (cl-agent/core:resolve-tool-callbacks '(mt-echo)))))
     ;; 请求级 :options 带工具
     (signals error
-      (cl-agent/core:kernel-chat-stream (stream-kernel '("x"))
+      (cl-agent/core:chat-client-stream (stream-chat-client '("x"))
                                         (lambda (d) (declare (ignore d)))
                                         :user "hi" :options opts))
-    ;; kernel 默认 :options 带工具
-    (let ((k (cl-agent/core:build-kernel
+    ;; chat-client 默认 :options 带工具
+    (let ((k (cl-agent/core:build-chat-client
               :model (cl-agent/core:make-provider-chat-model
                       (make-instance 'stream-provider :chunks '("x")))
               :options opts)))
       (signals error
-        (cl-agent/core:kernel-chat-stream k (lambda (d) (declare (ignore d)))
+        (cl-agent/core:chat-client-stream k (lambda (d) (declare (ignore d)))
                                           :user "hi")))))
 
 (defclass always-tool-provider ()
@@ -986,7 +986,7 @@ thread-pool(1) + HITL 暂停的组合下，续跑批并发不受限。"
 要工具即报错。回归：此前检查在循环体外且用 >（而非 >=），上限 3
 实际调了 5 次模型（多执行 1 轮 + 多探测 1 次）。"
   (let* ((provider (make-instance 'always-tool-provider))
-         (k (cl-agent/core:build-kernel
+         (k (cl-agent/core:build-chat-client
              :model (cl-agent/core:make-provider-chat-model provider)
              :tools '(mt-echo)
              :settings '((:max-tool-iterations . 2)))))
@@ -1024,7 +1024,7 @@ return-direct 工具后又多调一次模型，拿到的是不该出现的续写
                               (lambda () (incf extra)
                                 (cl-agent/core:make-llm-response
                                  :content "不该来" :finish-reason :stop :model "m")))))
-         (k (cl-agent/core:build-kernel
+         (k (cl-agent/core:build-chat-client
              :model (cl-agent/core:make-provider-chat-model provider)
              :tools '(rdc-direct)
              :tool-gate (lambda (tc) (declare (ignore tc)) :pause))))
@@ -1067,10 +1067,10 @@ subseq，window 落在对中间就产生孤儿 tool 开头。"
                      (cl-agent/core:make-chat-response
                       (cl-agent/core:make-generation
                        (cl-agent/core:assistant-message "ok") :finish-reason :stop)))))
-             (k (cl-agent/core:build-kernel
+             (k (cl-agent/core:build-chat-client
                  :model nil
                  :filters (list (cl-agent/core:memory-filter mem :window 3) spy))))
-        (cl-agent/core:kernel-chat k :user "新" :context (list :conversation-id conv))
+        (cl-agent/core:chat-client-call k :user "新" :context (list :conversation-id conv))
         ;; window=3 的纯裁剪会切成 (tool assistant user)——孤儿 tool 开头。
         ;; 修复后起点前移到 user，首条非 tool。
         (is (not (eq :tool (first sent)))
@@ -1088,15 +1088,15 @@ subseq，window 落在对中间就产生孤儿 tool 开头。"
 
 (test loop-fn-defaults-to-run-tool-loop
   "不给 :loop-fn 时 terminal 仍是 run-tool-loop——默认路径零改动"
-  (multiple-value-bind (kernel provider)
-      (make-test-kernel
+  (multiple-value-bind (chat-client provider)
+      (make-test-chat-client
        (tool-call-response "ki_adder" '(("a" . 3) ("b" . 4)))
        (text-response "3+4=7"))
     (declare (ignore provider))
-    (is (null (cl-agent/core:kernel-loop-fn kernel)) "槽缺省为 nil")
-    (is (null (cl-agent/core:kernel-resume-fn kernel)) "槽缺省为 nil")
+    (is (null (cl-agent/core:chat-client-loop-fn chat-client)) "槽缺省为 nil")
+    (is (null (cl-agent/core:chat-client-resume-fn chat-client)) "槽缺省为 nil")
     (let ((result (cl-agent/core:invoke-turn
-                   kernel
+                   chat-client
                    (cl-agent/core:make-turn-request
                     (list (cl-agent/core:user-message "3+4=?"))))))
       (is (eq :completed (cl-agent/core:turn-result-status result)))
@@ -1106,15 +1106,15 @@ subseq，window 落在对中间就产生孤儿 tool 开头。"
 
 (test loop-fn-replaces-terminal
   "自定义 loop-fn 整体接管循环：模型一次都不调"
-  (multiple-value-bind (kernel-unused provider)
-      (make-test-kernel (text-response "不该来"))
-    (declare (ignore kernel-unused))
+  (multiple-value-bind (chat-client-unused provider)
+      (make-test-chat-client (text-response "不该来"))
+    (declare (ignore chat-client-unused))
     (let* ((seen nil)
-           (k (cl-agent/core:build-kernel
+           (k (cl-agent/core:build-chat-client
                :model (cl-agent/core:make-provider-chat-model provider)
                :tools '(ki-adder)
-               :loop-fn (lambda (kernel req)
-                          (declare (ignore kernel))
+               :loop-fn (lambda (chat-client req)
+                          (declare (ignore chat-client))
                           (setf seen (cl-agent/core:turn-request-messages req))
                           (cl-agent/core:make-turn-result
                            :completed
@@ -1143,11 +1143,11 @@ subseq，window 落在对中间就产生孤儿 tool 开头。"
                        (let ((r (funcall chain req)))
                          (push :after trace)
                          r))))
-         (k (cl-agent/core:build-kernel
+         (k (cl-agent/core:build-chat-client
              :model nil
              :filters (list spy)
-             :loop-fn (lambda (kernel req)
-                        (declare (ignore kernel req))
+             :loop-fn (lambda (chat-client req)
+                        (declare (ignore chat-client req))
                         (push :loop trace)
                         (cl-agent/core:make-turn-result
                          :completed
@@ -1164,14 +1164,14 @@ subseq，window 落在对中间就产生孤儿 tool 开头。"
 (test resume-fn-replaces-continuation
   "自定义 resume-fn 接管暂停延续；filter 递归重入仍落到 loop-fn"
   (let* ((calls nil)
-         (k (cl-agent/core:build-kernel
+         (k (cl-agent/core:build-chat-client
              :model nil
-             :loop-fn (lambda (kernel req)
-                        (declare (ignore kernel req))
+             :loop-fn (lambda (chat-client req)
+                        (declare (ignore chat-client req))
                         (push :loop calls)
                         (cl-agent/core:make-turn-result :completed))
-             :resume-fn (lambda (kernel loop-state decision payload)
-                          (declare (ignore kernel payload))
+             :resume-fn (lambda (chat-client loop-state decision payload)
+                          (declare (ignore chat-client payload))
                           (push (list :resume decision
                                       (cl-agent/core:loop-state-iteration loop-state))
                                 calls)
@@ -1194,7 +1194,7 @@ subseq，window 落在对中间就产生孤儿 tool 开头。"
   (let* ((provider (make-seq-provider
                     (tool-call-response "ki_adder" '(("a" . 1) ("b" . 2)))
                     (text-response "1+2=3")))
-         (k (cl-agent/core:build-kernel
+         (k (cl-agent/core:build-chat-client
              :model (cl-agent/core:make-provider-chat-model provider)
              :tools '(ki-adder)
              :tool-gate (lambda (tc) (declare (ignore tc)) :pause)))

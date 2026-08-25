@@ -16,7 +16,7 @@
 ;;;;   (di-with-dependencies *container*
 ;;;;       ((memory (:memory-store))
 ;;;;        (tools (:tool-registry)))
-;;;;     (use-services memory tools))
+;;;;     (use-chat-models memory tools))
 
 (in-package :cl-agent/core)
 
@@ -25,11 +25,11 @@
 ;;; ============================================================
 
 (define-condition di-request-scope-not-active-error (error)
-  ((service-name :initarg :service-name :reader di-request-scope-service-name))
+  ((chat-model-name :initarg :chat-model-name :reader di-request-scope-chat-model-name))
   (:report (lambda (condition stream)
              (format stream "服务 ~S 声明为 :request 作用域，但当前不在请求作用域内。~@
 请用 (with-di-request-scope ...) 包裹，例如每个 HTTP 请求的处理入口。"
-                     (di-request-scope-service-name condition))))
+                     (di-request-scope-chat-model-name condition))))
   (:documentation "在 with-di-request-scope 之外解析 :request 作用域的服务。
 
 宁可报错也不静默退化：此前 :request 未实现，落到和 :prototype 相同的分支
@@ -97,8 +97,8 @@
 
   示例：
     (let ((container (make-di-container)))
-      (di-bind container :service #'make-service)
-      (di-resolve container :service))"))
+      (di-bind container :chat-model #'make-chat-model)
+      (di-resolve container :chat-model))"))
 
 (defmethod print-object ((container di-container) stream)
   (print-unreadable-object (container stream :type t)
@@ -141,8 +141,8 @@
   NAME
 
 工厂函数签名：
-  - 无参数：(lambda () service-instance)
-  - 带参数：(lambda (&key params) service-instance)
+  - 无参数：(lambda () chat-model-instance)
+  - 带参数：(lambda (&key params) chat-model-instance)
 
 示例：
   ;; 单例服务
@@ -301,7 +301,7 @@
         (if (di-container-parent container)
             (return-from di-resolve
               (di-resolve (di-container-parent container) name :params params))
-            (error "Service not registered: ~A" name)))
+            (error "ChatModel not registered: ~A" name)))
 
       ;; 根据作用域返回实例
       (let ((factory (getf binding :factory))
@@ -334,7 +334,7 @@
            ;; 跨请求各自独立。缓存是动态绑定的，因此天然线程隔离——
            ;; 每个线程在自己的 with-di-request-scope 里有自己的缓存。
            (unless *di-request-cache*
-             (error 'di-request-scope-not-active-error :service-name binding-name))
+             (error 'di-request-scope-not-active-error :chat-model-name binding-name))
            (multiple-value-bind (instance cached-p)
                (gethash binding-name *di-request-cache*)
              (if cached-p
@@ -365,13 +365,13 @@
       ((memory (:memory-store))
        (registry (:tool-registry))
        (provider (:llm-provider :api-key *key*)))
-    (use-services memory registry provider))
+    (use-chat-models memory registry provider))
 
 展开为：
   (let ((memory (di-resolve container :memory-store))
         (registry (di-resolve container :tool-registry))
         (provider (di-resolve container :llm-provider :api-key *key*)))
-    (use-services memory registry provider))
+    (use-chat-models memory registry provider))
 
 优势：
   - 自动解析和管理依赖
@@ -416,7 +416,7 @@
   `(let ((,name (di-resolve ,container ,name)))
      ,@body))
 
-(defmacro di-lazy-service (container name var &body body)
+(defmacro di-lazy-chat-model (container name var &body body)
   "延迟服务绑定和解析宏
 
 参数：
@@ -429,7 +429,7 @@
   BODY 的最后一个表达式的值
 
 示例：
-  (di-lazy-service container :database db
+  (di-lazy-chat-model container :database db
     (query-db db \"SELECT * FROM users\"))
 
 展开为：
@@ -594,7 +594,7 @@
   单例实例数量"
   (hash-table-count (di-singletons container)))
 
-(defun di-list-services (container)
+(defun di-list-chat-models (container)
   "列出容器中所有绑定的服务
 
 参数：
@@ -690,7 +690,7 @@
   Bindings: 3
   Singletons: 2
   Parent: (or nil or parent-name)
-  Services:
+  ChatModels:
     - :MEMORY-STORE (singleton)
     - :TOOL-REGISTRY (singleton)
     - :DATABASE (singleton)
@@ -705,7 +705,7 @@
     (format stream "  Parent: ~A~%" (if parent
                                          (di-container-name parent)
                                          "none"))
-    (format stream "  Services:~%")
+    (format stream "  ChatModels:~%")
     (maphash (lambda (name binding)
                (let ((singleton-p (getf binding :singleton))
                       (scope (getf binding :scope)))
@@ -796,12 +796,12 @@
 ;;;                          :parent *global-container*
 ;;;                          :name \"app\")))
 ;;;  ;; app-container 可以访问 logger
-;;;  (di-bind app-container :service #'make-service)
+;;;  (di-bind app-container :chat-model #'make-chat-model)
 
 ;;;  (di-with-dependencies app-container
-;;;      ((service (:service))
+;;;      ((chat-model (:chat-model))
 ;;;       (logger (:logger)))  ;; 从父容器继承
-;;;    (use-services service logger))))
+;;;    (use-chat-models chat-model logger))))
 
 ;;;=== 设计优势 ===
 

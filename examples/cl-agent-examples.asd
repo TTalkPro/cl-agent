@@ -9,8 +9,8 @@
 ;;;;
 ;;;; Contains:
 ;;;;   - di-usage-examples.lisp     依赖注入容器示例（asd 组件）
-;;;;   - kernel-usage.lisp          Kernel + Filter 完整用法（独立脚本，
-;;;;                                sbcl --load examples/kernel-usage.lisp）
+;;;;   - chat-client-usage.lisp          ChatClient + Filter 完整用法（独立脚本，
+;;;;                                sbcl --load examples/chat-client-usage.lisp）
 
 (asdf:defsystem #:cl-agent-examples
   :description "CL-Agent Examples - Usage Examples and Demos"

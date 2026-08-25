@@ -1,5 +1,5 @@
-;;;; service.lisp
-;;;; CL-Agent LLM - Service Layer
+;;;; chat-model.lisp
+;;;; CL-Agent LLM - ChatModel Layer
 ;;;;
 ;;;; Overview:
 ;;;;   Provider 层现在自身就产出统一的 llm-response 对象
@@ -41,7 +41,7 @@ PROVIDER-TYPE 参数已不再需要——provider 层自身完成归一化，
   (ensure-llm-response raw-response))
 
 ;;; ============================================================
-;;; High-Level Service Functions
+;;; High-Level ChatModel Functions
 ;;; ============================================================
 
 (defun chat-with-normalization (provider messages &rest args

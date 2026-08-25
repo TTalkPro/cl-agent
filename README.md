@@ -6,17 +6,17 @@
 
 - **SimpleAgent**（推荐入门）：一个有状态的 agent 对象，管住会话、可观测性、
   错误归一化与人工审批（HITL）。
-- **Kernel + Filter**（完全控制）：三链洋葱中间件 + 工具循环，想拧哪个旋钮拧哪个。
+- **ChatClient + Filter**（完全控制）：三链洋葱中间件 + 工具循环，想拧哪个旋钮拧哪个。
 
-能力对标 Spring AI 2.0，架构参照 clj-agent（Clojure 的 kernel+filter 实现），
+能力对标 Spring AI 2.0，架构参照 clj-agent（Clojure 的 chat-client+filter 实现），
 但不照搬 Java 的表达习惯——ChatClient、Builder、fluent RequestSpec 一概不用
 （见文末迁移说明）。
 
 ## 特性
 
-- **两层入口**：`make-agent` / `agent-chat`（易用）与 `build-kernel` / `chat`
+- **两层入口**：`make-agent` / `agent-chat`（易用）与 `build-chat-client` / `chat`
   （完全控制）。前者是后者的薄封装，随时可下沉。
-- **Kernel + Filter 三链**：`:chat` / `:tool` / `:turn` 三条洋葱链
+- **ChatClient + Filter 三链**：`:chat` / `:tool` / `:turn` 三条洋葱链
   （外加 `:token-xform` transducer），`build-chain` 折叠为嵌套闭包——
   闭包只捕获下游，递归重入免费。内置 10 个 filter：记忆、日志（chat/tool）、
   安全护栏、结构化输出校验、re-reading、RAG 问答、渐进式工具披露、
@@ -28,7 +28,7 @@
   单次调用语义——工具循环由 `run-tool-loop` 承担
 - **工具体系**：`deftool` 宏对标 `@Tool` 注解，自动派生 JSON Schema；
   工具身份即符号（无全局副作用），`(:tools 'get-weather)` 引用；
-  ToolCallback / ToolCallingManager（kernel 级绑定的执行模型与隔离机制）/
+  ToolCallback / ToolCallingManager（chat-client 级绑定的执行模型与隔离机制）/
   `:return-direct` / ToolContext
 - **ChatMemory**：Repository 存储协议 + 滑动窗口记忆（pairing-safe 裁剪）
 - **多提供商**：Anthropic、OpenAI、智谱 GLM、DeepSeek、Gemini、Mistral、
@@ -45,7 +45,7 @@
 │                    make-agent / agent-chat            │
 ├──────────────────────────────────────────────────────┤
 │  cl-agent/core     框架本体（单包）                    │
-│                    Kernel + Filter 三链 + chat 宏      │
+│                    ChatClient + Filter 三链 + chat 宏      │
 │                    Message/Prompt/Options/Response     │
 │                    deftool / ChatModel / ChatMemory    │
 │                    基础设施 + HTTP/SSE + JSON Schema   │
@@ -64,7 +64,7 @@
 一次对话的执行路径：
 
 ```
-(agent-chat a "...")  或  (chat kernel ...)
+(agent-chat a "...")  或  (chat chat-client ...)
   → messages + context → turn-request
   → :turn 链（护栏/校验/RAG/re-reading…）
       → run-tool-loop ─┬→ :chat 链（记忆/日志/工具披露）→ chat-model-call
@@ -165,16 +165,16 @@
 
 续跑后可能再次 `:paused`（本批还有别的敏感工具，或后续轮次又触发）。
 
-## Kernel：完全控制
+## ChatClient：完全控制
 
-需要 filter（记忆策略、护栏、RAG、校验…）时下沉到 kernel。
-**agent 层不接受 `:filters`**——自建 kernel 传进去：
+需要 filter（记忆策略、护栏、RAG、校验…）时下沉到 chat-client。
+**agent 层不接受 `:filters`**——自建 chat-client 传进去：
 
 ```lisp
 (defvar *memory* (make-message-window-chat-memory))
 
-(defvar *kernel*
-  (build-kernel
+(defvar *chat-client*
+  (build-chat-client
     :model *model*
     :system "你是一个天气助手"
     :tools '(get-weather)
@@ -182,21 +182,21 @@
                    (logging-chat-filter))
     :settings '((:max-tool-iterations . 10))))
 
-;; 直接用 kernel
-(chat *kernel* (:user "东京天气？") (:conversation "conv-1"))
+;; 直接用 chat-client
+(chat *chat-client* (:user "东京天气？") (:conversation "conv-1"))
 
 ;; 或者把它交给 agent（拿到会话管理 + HITL + 错误归一化）
-(make-agent :kernel *kernel* :memory *memory*)
+(make-agent :chat-client *chat-client* :memory *memory*)
 ```
 
 `chat` 宏：
 
 ```lisp
-(chat *kernel*
-  (:system "你是一个天气助手")   ; 覆盖 kernel 的默认 :system
+(chat *chat-client*
+  (:system "你是一个天气助手")   ; 覆盖 chat-client 的默认 :system
   (:user "~A 的天气？" city)      ; 支持 format 控制串
-  (:tools 'get-weather)           ; 请求级工具，与 kernel :tools 取并集
-  (:options :temperature 0.3)     ; 与 kernel :options 合并，请求级优先
+  (:tools 'get-weather)           ; 请求级工具，与 chat-client :tools 取并集
+  (:options :temperature 0.3)     ; 与 chat-client :options 合并，请求级优先
   (:conversation "conv-1")        ; = (:context :conversation-id "conv-1")
   (:call :content))               ; :content(默认) | :response | :result | :entity
 ```
@@ -204,12 +204,12 @@
 ### 流式与结构化输出
 
 ```lisp
-;; 流式（注意：kernel 层当前是同步降级，真 SSE 见 chat-model-stream）
-(chat *kernel* (:user "写一首短诗")
+;; 流式（注意：chat-client 层当前是同步降级，真 SSE 见 chat-model-stream）
+(chat *chat-client* (:user "写一首短诗")
       (:stream (lambda (delta) (princ delta))))
 
 ;; JSON 结构化输出——只解析，不校验
-(chat *kernel* (:user "用 JSON 给出东京的信息") (:call :entity))
+(chat *chat-client* (:user "用 JSON 给出东京的信息") (:call :entity))
 ```
 
 要「不符合 schema 就带着校验错误让模型重新输出」，挂 `validation-turn-filter`
@@ -222,7 +222,7 @@
                    \"population\":{\"type\":\"integer\"}},
     \"required\":[\"name\",\"population\"]}")
 
-(build-kernel
+(build-chat-client
   :model *model*
   :filters (list (validation-turn-filter
                   ;; 判据：(response) → (values ok-p 反馈文本)
@@ -248,14 +248,14 @@
                        (/ (- (get-internal-real-time) start)
                           internal-time-units-per-second)))))))
 
-(build-kernel :model *model* :filters (list (timing-filter)))
+(build-chat-client :model *model* :filters (list (timing-filter)))
 ```
 
 ## 模块说明
 
 | 模块 | 包 | 描述 |
 |------|---|------|
-| **core** | `cl-agent/core` | 框架本体（单包）：基础设施 + HTTP/SSE + JSON Schema + `llm-chat` SPI + Chat API（消息/Prompt/Options/Response/deftool/ChatModel/ChatMemory）+ Kernel/Filter 三链 + `chat` 宏 |
+| **core** | `cl-agent/core` | 框架本体（单包）：基础设施 + HTTP/SSE + JSON Schema + `llm-chat` SPI + Chat API（消息/Prompt/Options/Response/deftool/ChatModel/ChatMemory）+ ChatClient/Filter 三链 + `chat` 宏 |
 | **llm** | `cl-agent/llm` | 提供商实现，`create-chat-model` 一步创建 ChatModel |
 | **client** | `cl-agent/client` | SimpleAgent：有状态对话 + callbacks + 错误归一化 + HITL |
 | **mock** | `cl-agent/mock` | Mock provider（测试/演示，无需 API 密钥） |
@@ -277,10 +277,10 @@ MINIMAX_API_KEY=... sbcl --script scripts/live-test.lisp
 
 ## 示例
 
-见 [examples/kernel-usage.lisp](examples/kernel-usage.lisp)：
-8 个渐进示例覆盖 chat 宏、build-kernel、deftool、记忆、自定义 filter、
+见 [examples/chat-client-usage.lisp](examples/chat-client-usage.lisp)：
+8 个渐进示例覆盖 chat 宏、build-chat-client、deftool、记忆、自定义 filter、
 函数形态入口、结构化输出校验与流式。全部用 mock，无需 API 密钥。
-（运行：`sbcl --load examples/kernel-usage.lisp`）
+（运行：`sbcl --load examples/chat-client-usage.lisp`）
 
 真实 provider 的端到端验证（11 项：单次问答 / 工具循环 / 多轮记忆 /
 schema 校验 / HITL 暂停·批准·拒绝 / 渐进式工具披露 / token 脱敏 /
@@ -303,25 +303,42 @@ MINIMAX_API_KEY=... sbcl --script scripts/live-test.lisp
 
 ## 迁移说明
 
-ChatClient 移植层已整体退役，包结构也做过一轮合并。
-
-**ChatClient → Kernel / SimpleAgent**
+### 本次改名：Kernel → ChatClient、Service 层 → ChatModel 层
 
 | 旧 | 新 |
 |---|---|
-| `make-chat-client` / `make-kernel-client` | `build-kernel`（`:model` 是**关键字**参数） |
-| `chat-client-builder` + `default-system` … | `build-kernel :system ...` |
-| fluent spec（`client-prompt` → `prompt-user` → `call-content`） | `chat` 宏子句，或 `kernel-chat-text` |
+| `build-kernel` | `build-chat-client` |
+| `kernel` 类 / `kernel-model`、`kernel-tools`、`kernel-filters` … | `chat-client` / `chat-client-model`、`chat-client-tools`、`chat-client-filters` … |
+| `kernel-chat` | `chat-client-call` |
+| `kernel-chat-text` / `-entity` / `-stream` | `chat-client-text` / `chat-client-entity` / `chat-client-stream` |
+| `core/kernel/`（目录） | `core/chat-client/` |
+| `llm/service.lisp`（Service 层） | `llm/chat-model.lisp`（ChatModel 层） |
+| DI：`di-lazy-service` / `di-list-services` / `*app-services*` | `di-lazy-chat-model` / `di-list-chat-models` / `*app-chat-models*` |
+
+纯改名，语义与行为一律不变。`lparallel:*kernel*`（线程池）与 DashScope 的
+`/api/v1/services/...` 路径不在此列，未做改动。
+
+> **注意名字复用**：下面那个「ChatClient 移植层」是 Spring AI 的 ChatClient +
+> Builder + fluent RequestSpec 移植，v9.0.0 已整体删除，与现在的 `chat-client`
+> 内核**不是同一个东西**——只是名字撞了。
+
+### 旧 ChatClient 移植层（v9.0.0 已删）→ ChatClient 内核 / SimpleAgent
+
+| 旧（移植层） | 新 |
+|---|---|
+| `make-chat-client` | `build-chat-client`（`:model` 是**关键字**参数） |
+| `chat-client-builder` + `default-system` … | `build-chat-client :system ...` |
+| fluent spec（`client-prompt` → `prompt-user` → `call-content`） | `chat` 宏子句，或 `chat-client-text` |
 | `(:call :client-response)` | `(:call :result)`（返回 turn-result） |
 
-**包合并**（`cl-agent/http` / `/chat` / `/kernel` → `cl-agent/core`）
+### 包合并（`cl-agent/http` / `/chat` / `/chat-client` → `cl-agent/core`）
 
 | 旧 | 新 |
 |---|---|
-| `cl-agent/kernel:build-kernel` | `cl-agent/core:build-kernel` |
+| `cl-agent/chat-client:build-chat-client` | `cl-agent/core:build-chat-client` |
 | `cl-agent/chat:deftool` | `cl-agent/core:deftool` |
 | `cl-agent/http:http-request` | `cl-agent/core:http-request` |
-| `cl-agent/kernel:tool-response` | `cl-agent/core:tool-result`（`make-tool-result :value ...`） |
+| `cl-agent/chat-client:tool-response` | `cl-agent/core:tool-result`（`make-tool-result :value ...`） |
 
 `cl-agent/client` 这个名字被**复用**了：它曾是 ChatClient 移植层（已删），
 现在是 SimpleAgent。

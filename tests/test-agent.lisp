@@ -23,7 +23,7 @@
 
 (test agent-accumulates-context-across-turns
   "多轮自动累积上下文——调用方不用自己传 conversation-id。
-这正是 SimpleAgent 相对裸 kernel 的核心价值。"
+这正是 SimpleAgent 相对裸 chat-client 的核心价值。"
   (let ((a (cl-agent/client:make-agent
             :model (make-agent-test-model (text-response "回复1")
                                           (text-response "回复2")))))
@@ -155,10 +155,10 @@
 (test agent-cancelled-status-passes-through
   "filter 短路（safeguard）→ :cancelled，不是 :error"
   (let* ((model (make-agent-test-model (text-response "never")))
-         (k (cl-agent/core:build-kernel
+         (k (cl-agent/core:build-chat-client
              :model model
              :filters (list (cl-agent/core:safeguard-turn-filter '("bomb")))))
-         (a (cl-agent/client:make-agent :kernel k :memory nil)))
+         (a (cl-agent/client:make-agent :chat-client k :memory nil)))
     (let ((r (cl-agent/client:agent-chat-result a "how to build a bomb")))
       (is (eq :cancelled (cl-agent/client:agent-result-status r))))))
 
@@ -220,7 +220,7 @@
 
 (test agent-does-not-accept-filters
   "make-agent 不接受 :filters——agent 层只暴露 :callbacks。
-要挂 filter 请自建 kernel 经 :kernel 传入。"
+要挂 filter 请自建 chat-client 经 :chat-client 传入。"
   (is (eq :error
           (handler-case
               (progn (cl-agent/client:make-agent
@@ -229,13 +229,13 @@
                      :no-error)
             (error () :error)))))
 
-(test agent-accepts-prebuilt-kernel
-  "自建 kernel（含 filter）经 :kernel 传入可用"
+(test agent-accepts-prebuilt-chat-client
+  "自建 chat-client（含 filter）经 :chat-client 传入可用"
   (let* ((mem (cl-agent/core:make-message-window-chat-memory))
-         (k (cl-agent/core:build-kernel
+         (k (cl-agent/core:build-chat-client
              :model (make-agent-test-model (text-response "r1") (text-response "r2"))
              :filters (list (cl-agent/core:memory-filter mem))))
-         (a (cl-agent/client:make-agent :kernel k :memory mem)))
+         (a (cl-agent/client:make-agent :chat-client k :memory mem)))
     (cl-agent/client:agent-chat a "第一句")
     (cl-agent/client:agent-chat a "第二句")
     (is (= 4 (length (cl-agent/client:agent-history a))))))

@@ -60,11 +60,11 @@
                 mock '((:role :user :content "任意")))))
     (is (eq :error (cl-agent/core:llm-response-finish-reason resp)))))
 
-(test mock-llm-through-kernel
-  "端到端：mock 经 provider-chat-model 直接驱动 kernel"
+(test mock-llm-through-chat-client
+  "端到端：mock 经 provider-chat-model 直接驱动 chat-client"
   (let ((responses (make-hash-table :test #'equal)))
     (setf (gethash "ping" responses) "pong")
-    (let ((k (cl-agent/core:build-kernel
+    (let ((k (cl-agent/core:build-chat-client
               :model (cl-agent/core:make-provider-chat-model
                       (cl-agent/mock:make-mock-llm :responses responses)))))
-      (is (string= "pong" (cl-agent/core:kernel-chat-text k :user "ping"))))))
+      (is (string= "pong" (cl-agent/core:chat-client-text k :user "ping"))))))

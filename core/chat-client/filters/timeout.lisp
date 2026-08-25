@@ -1,5 +1,5 @@
 ;;;; timeout.lisp
-;;;; CL-Agent Kernel Filters - 超时拦截 (:tool)
+;;;; CL-Agent ChatClient Filters - 超时拦截 (:tool)
 ;;;;
 ;;;; 概述（对标 clj-agent timeout-filter）：
 ;;;;   工具执行超时 → 返回 :transient 错误（可触发 :retry）。

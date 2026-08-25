@@ -18,10 +18,10 @@
     :initarg :id
     :reader agent-id
     :documentation "agent 实例标识（调试/日志用）")
-   (kernel
-    :initarg :kernel
-    :reader agent-kernel
-    :documentation "底层 kernel（执行内核）")
+   (chat-client
+    :initarg :chat-client
+    :reader agent-chat-client
+    :documentation "底层 chat-client（执行内核）")
    (memory
     :initarg :memory
     :reader agent-memory
@@ -29,7 +29,7 @@
    (conversation-id
     :initarg :conversation-id
     :reader agent-conversation-id
-    :documentation "会话 ID。agent 不自己存历史——历史由 kernel 的
+    :documentation "会话 ID。agent 不自己存历史——历史由 chat-client 的
 memory-filter 按这个 ID 管，agent 只持 ID。")
    (callbacks
     :initarg :callbacks
@@ -78,7 +78,7 @@ memory-filter 按这个 ID 管，agent 只持 ID。")
 
 工具**结果**只能在执行后拿到，所以走 :tool 链。
 而 :on-tool-call 不在这里——它要能在执行**前**否决（返回 :interrupt），
-那是 kernel 的 tool-gate 的活，见 agent-gate。"
+那是 chat-client 的 tool-gate 的活，见 agent-gate。"
   (cl-agent/core:make-filter
    :agent-callbacks
    :tool (lambda (req chain)
@@ -90,7 +90,7 @@ memory-filter 按这个 ID 管，agent 只持 ID。")
              result))))
 
 (defun agent-gate (agent)
-  "把 agent 的 :on-tool-call 桥接成 kernel 的 tool-gate。
+  "把 agent 的 :on-tool-call 桥接成 chat-client 的 tool-gate。
 
   :on-tool-call (name args) 的返回值决定这个工具的命运：
     nil / 其它    → 放行
@@ -123,12 +123,12 @@ memory-filter 按这个 ID 管，agent 只持 ID。")
 
 (defun make-agent (&key model system options tools
                         (memory :default) conversation-id
-                        callbacks kernel settings
+                        callbacks chat-client settings
                         (filters nil filters-p))
   "创建有状态 agent。
 
   参数：
-  - model           chat-model 实例（不给 :kernel 时必填）
+  - model           chat-model 实例（不给 :chat-client 时必填）
   - system          默认系统提示
   - options         默认 chat-options
   - tools           工具符号列表
@@ -142,36 +142,36 @@ memory-filter 按这个 ID 管，agent 只持 ID。")
                     :on-tool-call   (name args) → 返回 (:interrupt . 原因) 触发
                                     暂停待审批（**配了它就等于启用 HITL**）
                     :on-tool-result (name text)
-  - settings        kernel settings alist（如 '((:max-tool-iterations . 10))）
-  - kernel          预构建 kernel（要挂 filter 时用这个）
+  - settings        chat-client settings alist（如 '((:max-tool-iterations . 10))）
+  - chat-client          预构建 chat-client（要挂 filter 时用这个）
 
   **本层不接受 :filters**——agent 只暴露 :callbacks。要 filter 请自己
-  build-kernel 后经 :kernel 传入。这条边界是刻意的：简单层一旦开始转发
-  filter，就会慢慢长成第二个 kernel。
+  build-chat-client 后经 :chat-client 传入。这条边界是刻意的：简单层一旦开始转发
+  filter，就会慢慢长成第二个 chat-client。
 
-  给 :kernel 时，memory-filter 由调用方自己负责挂载（本函数不改动
-  预构建 kernel 的 filters）。
+  给 :chat-client 时，memory-filter 由调用方自己负责挂载（本函数不改动
+  预构建 chat-client 的 filters）。
 
   示例：
     (make-agent :model m :system \"你是助手\" :tools '(get-weather))
     (make-agent :model m :memory nil)                      ; 无记忆
-    (make-agent :kernel my-kernel :memory my-store)        ; 自带 filter"
+    (make-agent :chat-client my-chat-client :memory my-store)        ; 自带 filter"
   (declare (ignore filters))
   ;; 显式报错而非静默忽略：clj-agent 那边是 warn + ignore，但静默丢弃
   ;; 横切能力正是本仓库刚清理掉的那类坑（ChatClient 的横切槽位最后
   ;; 全成了 no-op，记忆/护栏无声失效）。宁可直接拦下并给出出路。
   (when filters-p
     (error "make-agent 不接受 :filters——agent 层只暴露 :callbacks。~@
-            要挂 filter 请自建 kernel 后经 :kernel 传入：~@
-              (make-agent :kernel (cl-agent/core:build-kernel~@
+            要挂 filter 请自建 chat-client 后经 :chat-client 传入：~@
+              (make-agent :chat-client (cl-agent/core:build-chat-client~@
                                     :model m~@
                                     :filters (list ...))~@
                           :memory store)"))
   (let* ((store (cond ((eq memory :default)
                        (cl-agent/core:make-message-window-chat-memory))
                       (t memory)))
-         (k (or kernel
-                (cl-agent/core:build-kernel
+         (k (or chat-client
+                (cl-agent/core:build-chat-client
                  :model model
                  :system system
                  :options options
@@ -182,30 +182,30 @@ memory-filter 按这个 ID 管，agent 只持 ID。")
                                           (cl-agent/core:memory-filter store))))))))
     (let ((a (make-instance 'agent
                             :id (next-agent-id)
-                            :kernel k
+                            :chat-client k
                             :memory store
                             :conversation-id (or conversation-id
                                                  (format nil "conv-~A" (next-agent-id)))
                             :callbacks callbacks)))
-      ;; 工具回调要接到 kernel 上，而 agent 实例此刻才建好（gate/filter 的
-      ;; 闭包要捕获它）——所以这里重建一次 kernel 把它们挂上去。
+      ;; 工具回调要接到 chat-client 上，而 agent 实例此刻才建好（gate/filter 的
+      ;; 闭包要捕获它）——所以这里重建一次 chat-client 把它们挂上去。
       ;;   :on-tool-result → :tool filter（结果只能在执行后拿到）
       ;;   :on-tool-call   → tool-gate（要能在执行前否决，这是 HITL 的入口）
       (when (or (getf callbacks :on-tool-call) (getf callbacks :on-tool-result))
-        (setf (slot-value a 'kernel)
-              (cl-agent/core:build-kernel
-               :model (cl-agent/core:kernel-model k)
-               :system (cl-agent/core:kernel-default-system k)
-               :options (cl-agent/core:kernel-default-options k)
-               :tools (cl-agent/core:kernel-tools k)
-               :settings (cl-agent/core:kernel-settings k)
-               :tool-manager (cl-agent/core:kernel-tool-manager k)
-               :eligibility-fn (cl-agent/core:kernel-eligibility-fn k)
+        (setf (slot-value a 'chat-client)
+              (cl-agent/core:build-chat-client
+               :model (cl-agent/core:chat-client-model k)
+               :system (cl-agent/core:chat-client-default-system k)
+               :options (cl-agent/core:chat-client-default-options k)
+               :tools (cl-agent/core:chat-client-tools k)
+               :settings (cl-agent/core:chat-client-settings k)
+               :tool-manager (cl-agent/core:chat-client-tool-manager k)
+               :eligibility-fn (cl-agent/core:chat-client-eligibility-fn k)
                :tool-gate (when (getf callbacks :on-tool-call) (agent-gate a))
                ;; 结果 filter 放最外层：它要看到全部工具调用
                :filters (if (getf callbacks :on-tool-result)
-                            (cons (result-filter a) (cl-agent/core:kernel-filters k))
-                            (cl-agent/core:kernel-filters k)))))
+                            (cons (result-filter a) (cl-agent/core:chat-client-filters k))
+                            (cl-agent/core:chat-client-filters k)))))
       a)))
 
 ;;; ============================================================
@@ -231,7 +231,7 @@ memory-filter 按这个 ID 管，agent 只持 ID。")
 ;;; ============================================================
 
 (defun %turn->agent-result (agent turn)
-  "把 kernel 的 turn-result 归一化成 agent-result，并同步 agent 的暂停态。"
+  "把 chat-client 的 turn-result 归一化成 agent-result，并同步 agent 的暂停态。"
   (let ((status (cl-agent/core:turn-result-status turn))
         (resp (cl-agent/core:turn-result-response turn)))
     (if (eq status :paused)
@@ -269,8 +269,8 @@ memory-filter 按这个 ID 管，agent 只持 ID。")
   (handler-case
       (let* ((ctx (when (agent-conversation-id agent)
                     (list :conversation-id (agent-conversation-id agent))))
-             (turn (cl-agent/core:kernel-chat
-                    (agent-kernel agent)
+             (turn (cl-agent/core:chat-client-call
+                    (agent-chat-client agent)
                     :user message
                     :options options
                     :tools tools
@@ -313,7 +313,7 @@ memory-filter 按这个 ID 管，agent 只持 ID。")
       (error "agent 未处于暂停状态（agent-paused-p 为 nil）"))
     (invoke-callback agent :on-resume agent decision)
     (handler-case
-        (let ((turn (cl-agent/core:resume-turn (agent-kernel agent) ls decision
+        (let ((turn (cl-agent/core:resume-turn (agent-chat-client agent) ls decision
                                                :payload payload)))
           (%turn->agent-result agent turn))
       (error (e)

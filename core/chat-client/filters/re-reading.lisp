@@ -1,5 +1,5 @@
 ;;;; re-reading.lisp
-;;;; CL-Agent Kernel Filters - RE2 重读增强 (:turn)
+;;;; CL-Agent ChatClient Filters - RE2 重读增强 (:turn)
 ;;;;
 ;;;; 概述（对标 clj-agent re-reading-filter + Spring ReReadingAdvisor）：
 ;;;;   RE2 技巧：把入口用户问题重复一遍附在其后。

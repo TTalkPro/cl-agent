@@ -8,15 +8,15 @@ architecture follows clj-agent.
 ## Packages
 
 **One package**: `cl-agent/core` (nickname `cla/core`). The former
-`cl-agent/http` / `cl-agent/chat` / `cl-agent/kernel` have all been merged into
-it — `http/`, `chat/` and `kernel/` under `core/` are now just asd modules (file
+`cl-agent/http` / `cl-agent/chat` / `cl-agent/chat-client` have all been merged into
+it — `http/`, `chat/` and `chat-client/` under `core/` are now just asd modules (file
 grouping), no longer packages; every file is `(in-package #:cl-agent/core)`.
 
 | Layer | Counterpart | Contents |
 |---|---|---|
 | Infrastructure | — | Conditions, utilities, DI container, JSON Schema generation & validation, HTTP/SSE client, `llm-chat` provider SPI, unified `llm-response` |
 | Chat API | `org.springframework.ai.chat.*` | CLOS message hierarchy, Prompt, ChatOptions, ChatResponse, `deftool` tooling, ChatModel protocol, ChatMemory |
-| Kernel | `chat.client.*` + `chat.client.advisor.*` | Filter tri-chain + `build-chain`, Kernel + `build-kernel`, `invoke-chat/tool/turn`, `run-tool-loop`, `resume-turn`, ToolCallingManager, 10 built-in filters, `chat` macro DSL |
+| ChatClient | `chat.client.*` + `chat.client.advisor.*` | Filter tri-chain + `build-chain`, ChatClient + `build-chat-client`, `invoke-chat/tool/turn`, `run-tool-loop`, `resume-turn`, ToolCallingManager, 10 built-in filters, `chat` macro DSL |
 
 After the merge, `cl-agent/core` and `cl-agent/client` (SimpleAgent) can be
 `:use`d together directly, with no shadowing whatsoever:
@@ -49,10 +49,10 @@ core/
 │   ├── tool.lisp            deftool / ToolCallback
 │   ├── memory.lisp          ChatMemory / repository protocol
 │   └── model.lisp           ChatModel protocol + provider adapter (single call)
-└── kernel/                  Kernel + Filter execution core (sole path)
+└── chat-client/                  ChatClient + Filter execution core (sole path)
     ├── carriers.lisp        tri-chain carriers + pause carriers (loop-state / pending-tool)
     ├── filter.lisp          filter CLOS + build-chain + defilter
-    ├── kernel.lisp          kernel CLOS + build-kernel (incl. :tool-gate)
+    ├── chat-client.lisp          chat-client CLOS + build-chat-client (incl. :tool-gate)
     ├── conditions.lisp      tool failure classes (semantic/transient/environment)
     ├── batch.lisp           batch tool execution (parallel / :serial / failure routing)
     ├── tool-calling-manager.lisp  sequential / virtual-thread / thread-pool
@@ -68,7 +68,7 @@ core/
     │   ├── timeout.lisp     tool timeout (:tool)
     │   ├── approval.lisp    pre-execution approval gate (:tool)
     │   └── token-xform.lisp token rewriting (:token-xform, (downstream) → (values emit finish))
-    └── chat.lisp            chat macro DSL + kernel-chat* entry points
+    └── chat.lisp            chat macro DSL + chat-client-call* entry points
 ```
 
 ## Design Notes
@@ -77,7 +77,7 @@ core/
   `messages->neutral` / `neutral->messages` convert at the
   `provider-chat-model` adapter, providers only see `(:role ... :content ...)`.
 - **Option merging**: unbound slots mean "unset"; `merge-chat-options`
-  implements runtime > kernel defaults > model defaults, tool lists are unioned.
+  implements runtime > chat-client defaults > model defaults, tool lists are unioned.
 - **Tool execution is not inside ChatModel**: matching Spring AI 2.0,
   `chat-model-call` performs a single call only (it injects tool schemas but
   does not execute tools). The tool loop lives in `run-tool-loop`. The 1.x
@@ -88,7 +88,7 @@ core/
   same `chain` again, with no extra machinery (this is how
   `validation-turn-filter` implements self-correcting retries).
   List order is onion order: earlier = outer = runs first.
-- **HITL is a kernel primitive**: `build-kernel :tool-gate` takes a
+- **HITL is a chat-client primitive**: `build-chat-client :tool-gate` takes a
   `(tool-call) → :proceed | :pause | (:pause . reason)` function, evaluated
   **before** batch execution, exactly once per tool-call (gates often have side
   effects — audit logs, approval UI, counters — so "exactly once" is part of
@@ -97,14 +97,14 @@ core/
   `loop-state` snapshot, and `resume-turn` continues from that midpoint once
   approved.
 - **The ChatClient porting layer is retired**: the old ChatClient / Builder /
-  fluent RequestSpec are all gone. Kernel + filter is the sole execution path;
-  the entry point is `build-kernel`'s keyword args plus the `chat` macro. (The
+  fluent RequestSpec are all gone. ChatClient + filter is the sole execution path;
+  the entry point is `build-chat-client`'s keyword args plus the `chat` macro. (The
   name `cl-agent/client` has been **reused**: it is now SimpleAgent.)
-- **The merge eliminated all shadowing**: `cl-agent/chat` and `cl-agent/kernel`
+- **The merge eliminated all shadowing**: `cl-agent/chat` and `cl-agent/chat-client`
   used to share three exported names: `tool-response` / `make-tool-response`
   (chat's is the protocol-level "tool response" value object with id/name/text;
-  kernel's was the tool-chain response carrier) and `execute-tool-calls` (two
-  manager protocols with different signatures). Fixed at the root: the kernel
+  chat-client's was the tool-chain response carrier) and `execute-tool-calls` (two
+  manager protocols with different signatures). Fixed at the root: the chat-client
   carrier was renamed to `tool-request` / `tool-result` (symmetric with the turn
   chain's `turn-request` / `turn-result`), and chat's old ToolCallingManager was
   deleted outright. The three packages were then merged into `cl-agent/core`,

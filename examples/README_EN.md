@@ -2,26 +2,26 @@
 
 [中文](README.md)
 
-## kernel-usage.lisp — Full Kernel + Filter Walkthrough
+## chat-client-usage.lisp — Full ChatClient + Filter Walkthrough
 
 Standalone script using the mock provider (no API key needed):
 
 ```bash
-sbcl --load examples/kernel-usage.lisp
+sbcl --load examples/chat-client-usage.lisp
 ```
 
 Then run any of:
 
 | Function | Demonstrates |
 |---|---|
-| `(kernel-examples::example-1)` | Minimal chat macro call |
-| `(kernel-examples::example-2)` | Request-level system + options |
-| `(kernel-examples::example-3)` | deftool + run-tool-loop tool loop |
-| `(kernel-examples::example-4)` | memory-filter multi-turn conversation |
-| `(kernel-examples::example-5)` | Custom filter + logging/safeguard onion chain |
-| `(kernel-examples::example-6)` | Functional entry point (kernel-chat-text) |
-| `(kernel-examples::example-7)` | Structured output + schema-validated self-correction |
-| `(kernel-examples::example-8)` | Streaming (:stream) |
+| `(chat-client-examples::example-1)` | Minimal chat macro call |
+| `(chat-client-examples::example-2)` | Request-level system + options |
+| `(chat-client-examples::example-3)` | deftool + run-tool-loop tool loop |
+| `(chat-client-examples::example-4)` | memory-filter multi-turn conversation |
+| `(chat-client-examples::example-5)` | Custom filter + logging/safeguard onion chain |
+| `(chat-client-examples::example-6)` | Functional entry point (chat-client-text) |
+| `(chat-client-examples::example-7)` | Structured output + schema-validated self-correction |
+| `(chat-client-examples::example-8)` | Streaming (:stream) |
 
 To use a real provider, replace `*model*` with:
 
@@ -45,7 +45,7 @@ multi-turn memory / structured-output schema validation / real SSE chunking.
 
 ## llm-usage.lisp — Low-level Provider SPI
 
-Direct use of the `cl-agent/llm` client and providers, bypassing the kernel.
+Direct use of the `cl-agent/llm` client and providers, bypassing the chat-client.
 
 ## di-usage-examples.lisp — DI Container (optional facility)
 

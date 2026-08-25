@@ -1,5 +1,5 @@
 ;;;; validation.lisp
-;;;; CL-Agent Kernel Filters - 答案校验 (:turn, 递归重入)
+;;;; CL-Agent ChatClient Filters - 答案校验 (:turn, 递归重入)
 ;;;;
 ;;;; 概述（对标 clj-agent validation-turn-filter + Spring StructuredOutputValidationAdvisor）：
 ;;;;   校验最终回答，不合格 → 把原因作为反馈重入整个循环。

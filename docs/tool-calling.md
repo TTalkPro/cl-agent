@@ -3,7 +3,7 @@
 [中文](tool-calling_CN.md)
 
 This document explains why tool calling in cl-agent is split into three
-concerns — **the kernel's loop (`run-tool-loop`)**, **Filters (composable
+concerns — **the chat-client's loop (`run-tool-loop`)**, **Filters (composable
 around-layers)**, and **Managers (execution strategy)** — how those map onto
 Spring AI 2.0, and where we **deliberately or knowingly** diverge from the
 reference implementation.
@@ -13,7 +13,7 @@ For the symbol-level quick reference, see the "Tool System" section of the
 
 ## In one line
 
-**The kernel owns the loop; filters wrap the loop; the manager executes tools.**
+**The chat-client owns the loop; filters wrap the loop; the manager executes tools.**
 
 ```
 run-tool-loop:  invoke-chat → tool-calls & eligible? → run one batch → append messages → call model again
@@ -21,12 +21,12 @@ run-tool-loop:  invoke-chat → tool-calls & eligible? → run one batch → app
                                                          each tool in the batch also goes through the :tool chain
 ```
 
-The loop lives in `cl-agent/core:run-tool-loop` (`core/kernel/invoke.lisp`).
+The loop lives in `cl-agent/core:run-tool-loop` (`core/chat-client/invoke.lisp`).
 It is **the terminal of the `:turn` chain, not a filter**, and it is **not
 inside ChatModel** (`chat-model-call` is strictly single-call semantics).
 
-Terminal does not mean fixed: `build-kernel :loop-fn` replaces it wholesale, so
-a different loop skeleton (ReAct, plan-execute) is a kernel argument rather than
+Terminal does not mean fixed: `build-chat-client :loop-fn` replaces it wholesale, so
+a different loop skeleton (ReAct, plan-execute) is a chat-client argument rather than
 a fork. Because the swap happens *at* the terminal — the chain's single exit —
 the `:turn` filters wrapping it are untouched, and so is the HITL resume path,
 which works by substituting that same terminal. A custom loop that wants
@@ -41,11 +41,11 @@ decide whether to continue. All of that belongs to `run-tool-loop`.
 
 | Spring AI 2.0 | cl-agent | Owns loop |
 |---|---|---|
-| `ToolCallingAdvisor` (2.0) | `run-tool-loop` (`core/kernel/invoke.lisp`, `:turn` chain terminal) | **Yes** |
+| `ToolCallingAdvisor` (2.0) | `run-tool-loop` (`core/chat-client/invoke.lisp`, `:turn` chain terminal) | **Yes** |
 | `CallAdvisor` / `AdvisorChain` | `make-filter` / `defilter` + `build-chain` tri-chain | No (wraps) |
 | `ToolCallingManager` | `cl-agent/core:tool-calling-manager` (three impls) | No |
 | `ToolExecutionResult` | `make-tool-execution-result` plist | Result object |
-| `ToolExecutionExceptionProcessor` | none; the kernel uses three failure classes (below) | Error handling |
+| `ToolExecutionExceptionProcessor` | none; the chat-client uses three failure classes (below) | Error handling |
 
 A naming note: one of Spring AI 2.0's breaking changes renamed 1.1.x's
 `ToolCallAdvisor` to `ToolCallingAdvisor`. The 1.1.x javadoc still shows the
@@ -54,11 +54,11 @@ old name.
 > **cl-agent's ChatClient porting layer is retired** (ChatClient / Builder /
 > fluent RequestSpec) — note the package name `cl-agent/client` has been
 > **reused** and is now SimpleAgent. Spring's Advisor semantics are expressed
-> here with the kernel + filter tri-chain, registered via
-> `build-kernel :filters (list ...)`.
+> here with the chat-client + filter tri-chain, registered via
+> `build-chat-client :filters (list ...)`.
 > "Advisor" below therefore always refers to the Spring-side component, and
-> "the kernel path" means the one execution path:
-> `build-kernel` → `chat` → `invoke-turn`.
+> "the chat-client path" means the one execution path:
+> `build-chat-client` → `chat` → `invoke-turn`.
 
 ## Why the split exists: the 1.x lesson
 
@@ -69,7 +69,7 @@ first-class, composable component, so that other components (logging, memory,
 guardrails) can observe and intercept tool calling.
 
 cl-agent draws the same lesson but lands it further out: the loop is lifted into
-the **kernel**, and the chain is split into **three**, which makes "which layer
+the **chat-client**, and the chain is split into **three**, which makes "which layer
 you mount on" a meaningful choice by itself:
 
 | Chain | Wraps | Typical filters |
@@ -91,22 +91,22 @@ again to re-run the whole loop, without re-running the filters above it.
 
 ## Two execution modes
 
-The split yields two execution modes; both go through the kernel:
+The split yields two execution modes; both go through the chat-client:
 
-1. **Framework-controlled** — `build-kernel` + the `chat` macro; the kernel runs
+1. **Framework-controlled** — `build-chat-client` + the `chat` macro; the chat-client runs
    the loop, callers do nothing
-2. **Kernel-controlled** — inject a `:tool-manager` into the kernel to pick an
+2. **ChatClient-controlled** — inject a `:tool-manager` into the chat-client to pick an
    execution strategy
 
 ```lisp
 ;; 1. Framework-controlled
-(cl-agent/core:build-kernel
+(cl-agent/core:build-chat-client
   :model model
   :filters (list (cl-agent/core:timeout-filter 5000))
   :tools '(get-weather))
 
-;; 2. Kernel-controlled: inject an execution strategy
-(cl-agent/core:build-kernel
+;; 2. ChatClient-controlled: inject an execution strategy
+(cl-agent/core:build-chat-client
   :model model
   :tools '(get-weather)
   :tool-manager (cl-agent/core:make-sequential-tool-calling-manager))
@@ -119,19 +119,19 @@ The split yields two execution modes; both go through the kernel:
 > (`default-tool-calling-manager` / `concurrent-tool-calling-manager` /
 > `execute-tool-calls` with the `(manager prompt response)` arity /
 > `tool-execution-result` and its accessors) was deleted. Tool execution now
-> lives **only** in the kernel layer — `run-tool-loop`, `invoke-tool-batch`,
-> and the three ToolCallingManagers. The kernel is the only path.
+> lives **only** in the chat-client layer — `run-tool-loop`, `invoke-tool-batch`,
+> and the three ToolCallingManagers. The chat-client is the only path.
 >
-> A side benefit: with the chat-level `execute-tool-calls` gone and the kernel
+> A side benefit: with the chat-level `execute-tool-calls` gone and the chat-client
 > carrier renamed to `tool-result`, the two packages shared no exported names,
 > so every `:shadow` disappeared — which is precisely what made merging
-> `cl-agent/http` / `/chat` / `/kernel` into `cl-agent/core` possible.
+> `cl-agent/http` / `/chat` / `/chat-client` into `cl-agent/core` possible.
 
 ## What the execution layer does
 
 Once `run-tool-loop` sees `tool-calls` and `eligibility-fn` approves, it hands
 the batch to the execution layer — `invoke-tool-batch`
-(`core/kernel/batch.lisp`) when `kernel-tool-manager` is nil, or the
+(`core/chat-client/batch.lisp`) when `chat-client-tool-manager` is nil, or the
 `execute-tool-calls` protocol when it is not. It:
 
 1. **Resolves** — finds the callback by name (`find-callback-for-call`, `core/chat/tool.lisp`)
@@ -170,7 +170,7 @@ Swapping implementations touches neither the loop nor any filter.
 
 ## The three failure classes
 
-`core/kernel/conditions.lisp` sorts tool failures into three classes;
+`core/chat-client/conditions.lisp` sorts tool failures into three classes;
 `classify-tool-error` maps any condition onto one of them:
 
 | Class | Meaning | Intended action |
@@ -223,7 +223,7 @@ injection. And since `deftool` auto-registers, an author would have no idea thei
 attack surface had widened.
 
 The reference implementations have no such fallback either: clj-agent's
-`find-function` only consults the kernel's `:tool-vars` and throws when it
+`find-function` only consults the chat-client's `:tool-vars` and throws when it
 misses; Spring's `ToolCallbackResolver` is an instance field on the manager,
 empty by default.
 
@@ -231,14 +231,14 @@ empty by default.
 signals `tool-not-found-error` when it misses. That condition used to be raised
 *outside* the batch path's `handler-case`, so a hallucinated tool name — a common
 LLM failure — escaped all the way out of `(chat ...)` and killed the whole turn.
-`resolve-callback` (`core/kernel/batch.lisp`) now catches it and produces a
+`resolve-callback` (`core/chat-client/batch.lisp`) now catches it and produces a
 `:semantic` error `tool-result`, which `tool-result->text` renders as
 "错误：找不到工具 xxx" and feeds back to the model so it can self-correct — pick a
 different tool, fix the arguments. The boundary itself is unchanged: a tool that
 was not exposed is still never executed; the model just gets told so in words.
 
-Moving to the kernel did not loosen this boundary — it tightened it by a layer.
-The kernel's `resolve-kernel-tools` only honours `kernel-tools` (plus whatever
+Moving to the chat-client did not loosen this boundary — it tightened it by a layer.
+The chat-client's `resolve-chat-client-tools` only honours `chat-client-tools` (plus whatever
 this request's `(:tools ...)` merged in via caller-options), and `run-tool-loop`
 re-resolves on every iteration. Guardrails and approval gates are then an
 **independent second line**: `safeguard-turn-filter` short-circuits on the
@@ -259,11 +259,11 @@ public interface ToolCallingManager {
 }
 ```
 
-cl-agent's kernel manager has only the inbound half (`execute-tool-calls`).
+cl-agent's chat-client manager has only the inbound half (`execute-tool-calls`).
 Outbound resolution goes through the free function `resolve-tool-callbacks`,
 spread across three call sites: `core/chat/model.lisp` (resolving `:tool-names`
-by name), `core/kernel/invoke.lisp` (`resolve-kernel-tools`: the kernel-level
-`:tools`), and `core/kernel/chat.lisp` (`kernel-chat`: request-level
+by name), `core/chat-client/invoke.lisp` (`resolve-chat-client-tools`: the chat-client-level
+`:tools`), and `core/chat-client/chat.lisp` (`chat-client-call`: request-level
 `(:tools ...)`).
 
 **Consequence**: Spring's "swap the manager and you change both tool exposure
@@ -330,7 +330,7 @@ It will usually apologise rather than wait for someone to fix the environment.
 
 The classification itself is **accurate** (`classify-tool-error` is covered by
 tests); what is missing is the routing from class to action. That is the next
-cell on the kernel roadmap.
+cell on the chat-client roadmap.
 
 There is also a precision problem: `tool-apply-terminal` records *every* error
 thrown by a tool body as `:semantic`, and `classify-tool-error` is only invoked
@@ -356,7 +356,7 @@ impossible. cl-agent diverges further still: `tool-apply-terminal` catches
 all becomes text returned to the model. `resolve-callback` extends the same
 treatment to `tool-not-found-error`. This is more permissive than Spring, and it
 means `Error`-class problems get swallowed silently and treated as something the
-model can self-correct. The only condition that escapes the kernel is
+model can self-correct. The only condition that escapes the chat-client is
 `max-tool-iterations-exceeded-error` (loop cap, signalled directly by
 `run-tool-loop`). When you need errors to propagate, write a `:tool` filter that
 inspects `tool-result-error` and re-signals.

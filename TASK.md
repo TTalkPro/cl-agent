@@ -1,7 +1,7 @@
 # 待完成任务
 
-> 来源：2026-07-16 会话。advisor→kernel+filter 架构重构（P1-P5 + TCM）。
-> 参照实现为 `~/workspace/clj-agent`（Clojure kernel+filter 架构）+ Spring AI 2.0。
+> 来源：2026-07-16 会话。advisor→chat-client+filter 架构重构（P1-P5 + TCM）。
+> 参照实现为 `~/workspace/clj-agent`（Clojure chat-client+filter 架构）+ Spring AI 2.0。
 >
 > 测试基线：SBCL 2.6.6 **839 checks / 0 failures**
 > （810 → 652：advisor 实现与测试一并删除；→ 693：旧 ToolCallingManager
@@ -10,7 +10,7 @@
 > 真实 provider 验证：`scripts/live-test.lisp` MiniMax **8/8**
 > （单次问答 / 工具循环 / 多轮记忆 / schema 校验 / HITL 暂停·批准·拒绝 / SSE）。
 >
-> 完整重构计划见 `.sisyphus/plans/kernel-filter-refactor.md`。
+> 完整重构计划见 `.sisyphus/plans/chat-client-filter-refactor.md`。
 
 ---
 
@@ -22,7 +22,7 @@
 cl-agent/core（框架本体，单包 477 导出）
   ├── Filter CLOS 类（四钩子: :tool/:chat/:turn/:token-xform）
   ├── build-chain（洋葱折叠, 闭包仅下游, 递归重入免费）
-  ├── Kernel（model/tools/filters/settings/tool-manager +
+  ├── ChatClient（model/tools/filters/settings/tool-manager +
   │   默认 system/options, 无 memory）
   ├── 载体：tool-request/tool-result、turn-request/turn-result
   │   （chat 链无专门载体：请求=prompt，响应=chat-response）
@@ -31,9 +31,9 @@ cl-agent/core（框架本体，单包 477 导出）
   ├── ToolCallingManager 协议（Sequential/VirtualThread/ThreadPool 三实现）
   ├── 10 个内置 filter（memory/logging/safeguard/validation/
   │   re-reading/RAG/tool-search/timeout/approval/token-xform）
-  ├── chat 宏 DSL + kernel-chat* 函数入口
+  ├── chat 宏 DSL + chat-client-call* 函数入口
   ├── HITL：tool-gate + loop-state + resume-turn
-  └── 基础设施 + HTTP/SSE + Chat API（原 core/http/chat/kernel 四包合并）
+  └── 基础设施 + HTTP/SSE + Chat API（原 core/http/chat/chat-client 四包合并）
 
 cl-agent/llm（提供商，独立可插拔）
   └── 9 个 provider + create-chat-model
@@ -44,12 +44,12 @@ cl-agent/client（面向应用的易用层，v10 新增）
 
 ## 已完成（2026-07-16）
 
-### P1: Filter 机制 + Kernel 骨架 ✅
+### P1: Filter 机制 + ChatClient 骨架 ✅
 
 - [x] filter CLOS 类（四钩子: :tool/:chat/:turn/:token-xform）
 - [x] build-chain 洋葱折叠（reduce + reverse → 嵌套闭包）
 - [x] defilter 宏（(self req chain) 三参数签名）
-- [x] kernel CLOS 类（model/tools/filters/settings, 无 memory）
+- [x] chat-client CLOS 类（model/tools/filters/settings, 无 memory）
 - [x] 载体类（tool-request/response, turn-request/result）
 - [x] 测试基线 715 → 756（+41）
 
@@ -87,9 +87,9 @@ cl-agent/client（面向应用的易用层，v10 新增）
 
 ### P5: ChatClient 桥接 + 对齐审计 ✅
 
-- [x] chat-client 加 :kernel 槽, call-client-response 双路径分派
-- [x] make-kernel-client 工厂（kernel-backed ChatClient）
-- [x] 对齐审计测试（10 filter 类型 + kernel-client + 故障分类）
+- [x] chat-client 加 :chat-client 槽, call-client-response 双路径分派
+- [x] ChatClient 移植层的桥接工厂（由 chat-client 内核驱动）
+- [x] 对齐审计测试（10 filter 类型 + ChatClient 桥接 + 故障分类）
 - [x] 测试基线 781 → 810（+29）
 
 ### ToolCallingManager 协议 ✅
@@ -98,7 +98,7 @@ cl-agent/client（面向应用的易用层，v10 新增）
 - [x] sequential-tool-calling-manager（全串行, 调试/严格副作用）
 - [x] virtual-thread-tool-calling-manager（并行默认, 尊重 :serial）
 - [x] thread-pool-tool-calling-manager（线程池, 可配 pool-size）
-- [x] kernel 加 :tool-manager 槽, build-kernel 支持 :tool-manager
+- [x] chat-client 加 :tool-manager 槽, build-chat-client 支持 :tool-manager
 - [x] run-tool-loop nil-check 接入（有 manager → 协议路径; nil → 原路径）
 - [x] 测试基线 810（0 回归）
 
@@ -124,7 +124,7 @@ cl-agent/client（面向应用的易用层，v10 新增）
 - [x] **examples/chat-client-usage.lisp 迁移到 filter**：example-4 用
       `memory-filter`，example-5 用自定义 `make-filter` + safeguard/logging；
       8 个示例全部实跑通过
-- [x] **README.md 重写**：架构图/对应表/快速开始全部改为 kernel+filter；
+- [x] **README.md 重写**：架构图/对应表/快速开始全部改为 chat-client+filter；
       原「快速开始」教的 `:advisors (list ...)` 现在是硬报错，
       「`(:call :entity schema)` 会自动校验并重试最多 3 次」也早已不成立
       （`call-entity` 只解析）——都已改正并实跑验证
@@ -137,14 +137,14 @@ cl-agent/client（面向应用的易用层，v10 新增）
 > 断裂一律照不到，810 checks 全绿也没用。已补 21 个实际驱动钩子/端到端
 > 的测试（690 total），每个 bug 都验证过「改回旧代码即失败」。
 
-- [x] **`qa-turn-filter` 从未能工作**（`kernel/filters/rag.lisp`）：
+- [x] **`qa-turn-filter` 从未能工作**（`chat-client/filters/rag.lisp`）：
       `let` 该写 `let*`——`new-messages` 的初值引用同一个 `let` 里的
       `enhanced`，于是只要检索到任何文档就必然
       `UNBOUND-VARIABLE: ENHANCED`。编译期一直有
-      `undefined variable: CL-AGENT/KERNEL::ENHANCED` 告警，无人理会。
+      `undefined variable: CL-AGENT/CHAT-CLIENT::ENHANCED` 告警，无人理会。
 
 - [x] **`structured-output-validate-fn` 判据完全反相**
-      （`kernel/filters/validation.lisp`）：把
+      （`chat-client/filters/validation.lisp`）：把
       `validate-json-schema` 的返回当 `ok-p` 用，但它返回的是
       **错误消息列表**（NIL 才是通过）。实测后果：合规 JSON →
       `ok-p=NIL` + 反馈「输出不符合 Schema 要求（NIL）」→ 触发重试；
@@ -159,7 +159,7 @@ cl-agent/client（面向应用的易用层，v10 新增）
       改为四路判定：空文本→不合格；无 parse-fn→放行；解析失败→不合格；
       解析成功→按 schema 校验。
 
-- [x] **`kernel:strip-json-fences` 对带围栏输入必报错**（同上）：
+- [x] **`chat-client:strip-json-fences` 对带围栏输入必报错**（同上）：
       `(string= body "```" :start2 ...)` 该用 `:start1`——start 索引
       属于被切片的那侧，写成 `:start2` 等于去 `"```"` 这个长度 3 的
       字面量里取第 34 位 → `bounding indices ... are bad`。
@@ -167,7 +167,7 @@ cl-agent/client（面向应用的易用层，v10 新增）
       判为「不是合法 JSON」并烧光全部重试。已修 + 支持裸 ``` 围栏。
 
 - [x] **多轮记忆经 `(:conversation id)` 静默失效**
-      （`kernel/invoke.lisp` + `filters/memory.lisp`）：`memory-filter`
+      （`chat-client/invoke.lisp` + `filters/memory.lisp`）：`memory-filter`
       从 **prompt options 的 tool-context** 读 `:conversation-id`，而
       `(:conversation "id")` / `prompt-context` 写的是 **turn context**。
       `run-tool-loop` 只把 caller-options 铺进 prompt options，从不把
@@ -181,19 +181,19 @@ cl-agent/client（面向应用的易用层，v10 新增）
       测试确认工具没被冲掉）。加 3 个回归测试（可达/隔离/工具共存），
       每个都验证过「去掉折叠即失败」。
 
-> 注：`strip-json-fences` 在 `cl-agent/client` 与 `cl-agent/kernel`
-> 各有一份实现（client 那份一直是对的，kernel 那份刚修）。两份都还在，
+> 注：`strip-json-fences` 在 `cl-agent/client` 与 `cl-agent/chat-client`
+> 各有一份实现（client 那份一直是对的，chat-client 那份刚修）。两份都还在，
 > 行为已对齐，但重复本身值得后续收口到 `cl-agent/core`。
 
-### 文档全量对齐 kernel+filter ✅
+### 文档全量对齐 chat-client+filter ✅
 
 - [x] **README.md / README_EN.md**：架构图/执行路径图/对应表/快速开始
       全部改写；每段 lisp 片段都实跑验证过
-- [x] **core/README.md / core/README_EN.md**：包表加 `cl-agent/kernel`，
-      文件树换成 kernel/ + client/carriers.lisp，删掉不存在的 advisor 文件；
+- [x] **core/README.md / core/README_EN.md**：包表加 `cl-agent/chat-client`，
+      文件树换成 chat-client/ + client/carriers.lisp，删掉不存在的 advisor 文件；
       「内部工具执行」错误论断（工具循环住 ChatModel 内）已改正
-- [x] **docs/API.md / API_CN.md**：删 Advisor 章，加 cl-agent/kernel 章
-      （filter/build-kernel/invoke-*/run-tool-loop/三 manager/10 filter
+- [x] **docs/API.md / API_CN.md**：删 Advisor 章，加 cl-agent/chat-client 章
+      （filter/build-chat-client/invoke-*/run-tool-loop/三 manager/10 filter
       真实签名），ChatClient 章收敛到现存 API，补迁移表（子代理完成）
 - [x] **docs/QUICKSTART / tool-calling（CN+EN）**：自定义 Advisor → filter，
       标题「Advisor 与 Manager」→「Filter 与 Manager」，工具循环归位到
@@ -206,42 +206,42 @@ cl-agent/client（面向应用的易用层，v10 新增）
 
 > 决策：Advisor 退役后，ChatClient 是 Spring AI 留下的第二个移植层
 > （ChatClient + Builder + fluent RequestSpec）。Builder 与链式 spec 是
-> Java 的表达习惯——在 Lisp 里 `build-kernel` 的关键字参数 + 声明式 `chat`
+> Java 的表达习惯——在 Lisp 里 `build-chat-client` 的关键字参数 + 声明式 `chat`
 > 宏覆盖同样的场景，还少一个包、少一层间接。故整包删除，只把 `chat` 宏
-> 搬进 kernel（它本就不是 Spring 写法，是 Lisp 化的 DSL）。
+> 搬进 chat-client（它本就不是 Spring 写法，是 Lisp 化的 DSL）。
 
-- [x] **`chat` 宏搬入 `cl-agent/kernel`**（新文件 `core/kernel/chat.lisp`）：
-      宏 + 函数形态入口 `kernel-chat` / `kernel-chat-text` /
-      `kernel-chat-entity` / `kernel-chat-stream`
+- [x] **`chat` 宏搬入 `cl-agent/chat-client`**（新文件 `core/chat-client/chat.lisp`）：
+      宏 + 函数形态入口 `chat-client-call` / `chat-client-text` /
+      `chat-client-entity` / `chat-client-stream`
 - [x] **删除 `core/client/` 整个目录**（package / carriers / chat-client，594 行）
       —— 载体 `client-request` / `client-response` / `context-*` 是纯死代码
-      （kernel 三链不用它们，:chat 链的请求就是 prompt、响应就是 chat-response）
+      （chat-client 三链不用它们，:chat 链的请求就是 prompt、响应就是 chat-response）
 - [x] **终结操作调整**：`(:call :client-response)` → `(:call :result)`
       （返回 turn-result，能看 status）；其余 `:content` / `:response` /
       `:entity` / `:stream` 语义不变
-- [x] **请求级 `:tools`** 与 kernel 的 `:tools` 取并集（经 caller-options 的
+- [x] **请求级 `:tools`** 与 chat-client 的 `:tools` 取并集（经 caller-options 的
       tool-callbacks，run-tool-loop 的 merge 天然并集）
-- [x] **补回 kernel 级默认 system / options**（`build-kernel :system :options`）：
+- [x] **补回 chat-client 级默认 system / options**（`build-chat-client :system :options`）：
       这是**删 client 时我引入的功能回归**——旧 `make-chat-client` 有
-      `:system` / `:options`（客户端级默认），第一版 `build-kernel` 没接，
+      `:system` / `:options`（客户端级默认），第一版 `build-chat-client` 没接，
       等于逼用户每次请求重写 system。文档子代理审计时发现并报了上来，
-      核实属实（`build-kernel` 原签名只有 model/tools/filters/
+      核实属实（`build-chat-client` 原签名只有 model/tools/filters/
       eligibility-fn/settings/tool-manager）。已加 `default-system` /
       `default-options` 两个槽 + 访问器，合并语义：
       system 请求级**覆盖**、options 请求级**优先**（未提及的默认项保留）、
       tools **取并集**。加 5 个测试守住（含「默认 options 与 :tools 共存，
       merge 不冲掉 tool-callbacks」）
-- [x] **测试迁移**：`test-chat-client.lisp` → `test-kernel-chat.lisp`
+- [x] **测试迁移**：`test-chat-client.lisp` → `test-chat-client-chat.lisp`
       （14 → 13 个测试；Builder / fluent spec 的 6 个随该层退役，
       新增 `(:call :result)`、`:messages`、请求级工具并集、
       `(:conversation ...)` 可达 memory-filter 四项）
 - [x] **删除孤儿测试**：`test-parallel-tools.lisp`（不在 asd，且引用已删符号）
-- [x] **删除同义反复测试**：`kernel-loop-equivalent-to-advisor`（原本比较
-      「旧 ChatClient+advisor」vs「kernel」，advisor 退役后 ChatClient 本就
-      走 kernel，等于自己和自己比；client 删除后连对照组都不存在）
-- [x] **examples 重写**：`chat-client-usage.lisp` → `kernel-usage.lisp`，
+- [x] **删除同义反复测试**：`chat-client-loop-equivalent-to-advisor`（原本比较
+      「旧 ChatClient+advisor」vs「chat-client」，advisor 退役后 ChatClient 本就
+      走 chat-client，等于自己和自己比；client 删除后连对照组都不存在）
+- [x] **examples 重写**：`chat-client-usage.lisp` → `chat-client-usage.lisp`，
       8 个示例全部实跑通过
-- [x] **文档全量改到 kernel API**：README / core README / examples README /
+- [x] **文档全量改到 chat-client API**：README / core README / examples README /
       llm README / mock README（各中英两版）+ docs/ 六个文件。
       `llm/README` 与 `mock/README` 此前都在教 `make-chat-client`——
       即已删除的 API，属于会直接撞墙的示例，已改并实跑验证
@@ -264,31 +264,31 @@ cl-agent/client（面向应用的易用层，v10 新增）
 
 ### 包设计撞名 + 旧 ToolCallingManager 退役 ✅（2026-07-16 续三）
 
-> 两件是同一个根因，一起做掉。做完 `cl-agent/kernel` **不再需要任何
-> `:shadow`**，下游可以直接 `(:use :cl-agent/chat :cl-agent/kernel)`
+> 两件是同一个根因，一起做掉。做完 `cl-agent/chat-client` **不再需要任何
+> `:shadow`**，下游可以直接 `(:use :cl-agent/chat :cl-agent/chat-client)`
 > 而不必自己写 shadowing-import（已编译验证）。
 
-- [x] **kernel 载体改名**：`tool-response` → `tool-result`
+- [x] **chat-client 载体改名**：`tool-response` → `tool-result`
       （accessors：`tool-response-result` → `tool-result-value`、
       `-writes` / `-error` 同理；构造 `make-tool-result :value`）。
       理由：与 turn 链的 `turn-request` → `turn-result` 对称，且撞名本就是
       巧合——chat 的 `tool-response` 是**协议消息层**的值对象（id/name/text，
-      装进 role=:tool 的消息），kernel 的是**执行链层**的载体
+      装进 role=:tool 的消息），chat-client 的是**执行链层**的载体
       （value/writes/error），两者分属不同层。
 - [x] **删除 `cl-agent/chat` 的旧 ToolCallingManager**（tool.lisp 766 → 502 行）：
       `tool-calling-manager` / `default-tool-calling-manager` /
       `execute-tool-calls` / `execute-one-tool-call` /
       `process-tool-execution-error` / `concurrent-tool-calling-manager` /
       `with-concurrent-tool-calling-manager` / `tool-execution-result` 等全删。
-      工具执行唯一住在 kernel。
+      工具执行唯一住在 chat-client。
 - [x] **保留并导出 `find-callback-for-call`**：它长在 manager 区块里但与
-      manager 无关（只是「按名找工具」），且 kernel 的 batch / manager /
+      manager 无关（只是「按名找工具」），且 chat-client 的 batch / manager /
       tool-search filter 都依赖它。顺带从内部符号（`::` 访问）提为正式导出。
       它那段**安全边界注释**（不回退全局注册表 = 防提示注入越权）一并保留。
-- [x] **移除 kernel 的 `:shadow`**：三个撞名（`tool-response` /
+- [x] **移除 chat-client 的 `:shadow`**：三个撞名（`tool-response` /
       `make-tool-response` / `execute-tool-calls`）已全部消除。
 - [x] **测试改写而非删除**：`test-tool.lisp` 的 manager 测试随该层退役，
-      但**两个安全边界测试（越权回归）改写成走完整 kernel 链路保留下来**——
+      但**两个安全边界测试（越权回归）改写成走完整 chat-client 链路保留下来**——
       那是防提示注入的真实边界，不能因为 manager 没了就丢。另加
       `find-callback-for-call` 的解析/拒绝测试。
 - [x] **清理过时源码注释**（文档子代理审计报出）：`chat/package.lisp` 头部
@@ -318,7 +318,7 @@ cl-agent/client（面向应用的易用层，v10 新增）
 
 ### 顺带修掉的第 6 个真实 bug ✅
 
-- [x] **模型幻觉工具名会崩掉整轮对话**（`kernel/batch.lisp`）：
+- [x] **模型幻觉工具名会崩掉整轮对话**（`chat-client/batch.lisp`）：
       `find-callback-for-call` 找不到工具时是 **signal**，而 batch 的三个
       调用点（`batch-has-serial-p` / `execute-batch-sequential` /
       `execute-batch-parallel`）都在构造 tool-request **之前**调用它——
@@ -326,7 +326,7 @@ cl-agent/client（面向应用的易用层，v10 新增）
       于是模型只要报出一个不存在的工具名（LLM 幻觉工具名很常见），
       `TOOL-NOT-FOUND-ERROR` 一路冒泡出 `(chat ...)`，整轮对话直接中断。
       旧 ToolCallingManager 有 `process-tool-execution-error` 兜这一层，
-      kernel 路径漏了——删 manager 时改写安全测试才把它暴露出来。
+      chat-client 路径漏了——删 manager 时改写安全测试才把它暴露出来。
       修法：新增 `resolve-callback` 捕获并转成 `:semantic` 错误 tool-result；
       新增 `tool-result->text` 把错误渲染成「错误：找不到工具 xxx」回传模型
       （此前错误结果的 value 是 nil，文本变成无信息量的「（执行失败）」，
@@ -339,7 +339,7 @@ cl-agent/client（面向应用的易用层，v10 新增）
 
 ### 包合并：三模块分层 ✅
 
-- [x] **http / chat / kernel → cl-agent/core**（477 导出），对齐 clj-agent 的
+- [x] **http / chat / chat-client → cl-agent/core**（477 导出），对齐 clj-agent 的
       core / provider / client 三模块
 - [x] **llm 保持独立**（provider 可插拔）；`chat` 与 core 的宏撞名 → llm `:shadow` 之
 - [x] **合并前先清死代码**（否则正面撞名 15 处，SBCL 调用图坐实全是死的）：
@@ -357,13 +357,13 @@ cl-agent/client（面向应用的易用层，v10 新增）
 - [x] **有状态对话**：`make-agent` / `agent-chat` / `agent-chat-result` /
       `agent-history` / `agent-reset`。内部持 conversation-id + memory-filter，
       调用方不用再手写 `(:conversation "c1")`
-- [x] **kernel 级默认**：`:model :system :options :tools :memory :settings`
+- [x] **chat-client 级默认**：`:model :system :options :tools :memory :settings`
 - [x] **callbacks**：`:on-turn-start/-end/-error`、`:on-tool-call/-result`、
       `:on-interrupt/:on-resume`。回调抛异常不掀翻整轮（观测手段非控制流）
 - [x] **错误归一化**：`:completed` / `:paused` / `:cancelled` / `:error`，
       **不抛条件**（对标 clj-agent 的 `{:status :error}`）
 - [x] **分层边界**：`make-agent` **不接受 `:filters`**，只暴露 `:callbacks`。
-      要 filter 就自建 kernel 传 `:kernel`。比 clj-agent 更硬——它是
+      要 filter 就自建 chat-client 传 `:chat-client`。比 clj-agent 更硬——它是
       warn+ignore，我们直接报错并给迁移指引（静默丢横切能力正是刚清掉的
       ChatClient 老坑）
 
@@ -371,7 +371,7 @@ cl-agent/client（面向应用的易用层，v10 新增）
 
 > `:paused` 从此不再是死类型。
 
-- [x] **kernel 层**：`tool-gate` 槽（`(tool-call) → :proceed | :pause | (:pause . 原因)`）、
+- [x] **chat-client 层**：`tool-gate` 槽（`(tool-call) → :proceed | :pause | (:pause . 原因)`）、
       `loop-state` / `pending-tool` 载体、`resume-turn`
 - [x] **gate 在批执行之前评估，且每个 tool-call 恰好一次**——gate 常带副作用
       （审计/弹窗/计数），评估两遍就是重复触发
@@ -391,7 +391,7 @@ cl-agent/client（面向应用的易用层，v10 新增）
 ### 顺带修掉的第 7、8 个真实 bug ✅
 
 - [x] **system 消息在历史里线性累积**（`filters/memory.lisp`）：memory-filter
-      存了全部 prompt 消息**含 system**，而 kernel-chat 每轮都注入 system →
+      存了全部 prompt 消息**含 system**，而 chat-client-call 每轮都注入 system →
       2 轮 2 条、10 轮 10 条。实测 `history: 6 条`（应为 4），**多轮后再发
       工具调用直接失败**。修：system 不进历史（每轮由 prompt 提供），
       展开时置顶；window 只裁历史不碰 system（否则长对话里 system 先被裁掉，
@@ -427,18 +427,18 @@ cl-agent/client（面向应用的易用层，v10 新增）
 ### P0：文档全线过时 ✅（已修）
 
 > 包合并 + 新增 cl-agent/client 后没同步文档，206 处引用已删除的包——
-> 照 README 抄一行就撞 `Package CL-AGENT/KERNEL does not exist`。
+> 照 README 抄一行就撞 `Package CL-AGENT/CHAT-CLIENT does not exist`。
 > **这是本轮改动造成的回归，已全部修复。**
 
 - [x] **13 个文档全量更新**：README（我改写并逐段实跑）、README_EN、
       core README ×2、docs/API ×2、docs/QUICKSTART ×2、docs/tool-calling ×2、
       llm README ×2、mock README ×2。已删除包的引用只剩在迁移表的「旧」列。
 - [x] **SimpleAgent 上文档**：README 与 QUICKSTART 都改为 SimpleAgent 打头
-      （对标 clj-agent 的「方式一：推荐入门」），kernel 降为「完全控制」。
+      （对标 clj-agent 的「方式一：推荐入门」），chat-client 降为「完全控制」。
       API 加 `cl-agent/client` 章。
 - [x] **HITL 上文档**：pause/resume、tool-gate、三种 decision、
       「暂停时工具一个都不执行」的不变量。
-- [x] **迁移表**：Advisor→Filter、ChatClient→Kernel/SimpleAgent、包合并
+- [x] **迁移表**：Advisor→Filter、ChatClient→ChatClient/SimpleAgent、包合并
       三张表；并写明 `cl-agent/client` 这个名字被**复用**了。
 - [x] **过时的 shadowing 建议全部反转**：合并后 `(:use :cl-agent/core
       :cl-agent/client)` 无需任何 shadowing。
@@ -458,12 +458,12 @@ cl-agent/client（面向应用的易用层，v10 新增）
 
 #### 1.1 `thread-pool-tool-calling-manager` 的限流是假的 ✅（已修）
 
-> ToolCallingManager 的定位是 **kernel 级绑定的 Tool Call 执行模型与
+> ToolCallingManager 的定位是 **chat-client 级绑定的 Tool Call 执行模型与
 > 隔离机制**，三个实现 = 三种执行/隔离策略。thread-pool 的存在意义
 > 就是**限流隔离**。
 
 - [x] **pool-size 曾完全被忽略**：docstring 写着「用固定大小 lparallel
-      kernel 调度…适合需要限流的场景」，有 `pool-size` 槽 + 读取器，
+      chat-client 调度…适合需要限流的场景」，有 `pool-size` 槽 + 读取器，
       但 `execute-tool-calls` 直接委托 virtual-thread manager。
       用户配 `:pool-size 4` 以为限流到 4 并发，实际无限制——可能打爆
       下游。三种执行模型实际只有两种。
@@ -561,7 +561,7 @@ cl-agent/client（面向应用的易用层，v10 新增）
       而工具循环拿的是改写**前**那份。修法：`invoke-chat` 返回
       `(values response effective-prompt)`，工具执行按模型实际看到的那份来。
 - [x] **真流式通路**：`invoke-chat-stream` + `compose-token-xforms` 落地，
-      `kernel-chat-stream` 接真路径（此前是同步降级，整段一个 chunk）。
+      `chat-client-stream` 接真路径（此前是同步降级，整段一个 chunk）。
 - [x] **两个 token-xform filter 是三重装饰品**：没有任何代码读
       `filter-token-xform` 去组装流；它们**返回裸 lambda 而不是 filter 实例**，
       压根放不进 `:filters`（名字叫 xxx-filter 却不是 filter）；协议照搬
@@ -570,7 +570,7 @@ cl-agent/client（面向应用的易用层，v10 新增）
 - [x] **流式带工具会静默丢掉工具执行**（我在本轮引入的）：真流式是单次调用，
       不跑工具循环，而此前的同步降级版本跑完整 turn。模型发了 tool_call 却
       无人执行，用户只看到一段没头没尾的文本——正是本轮一直在修的那类静默
-      失效。改为**直接报错并指路** `kernel-chat`，与 `make-agent :filters`、
+      失效。改为**直接报错并指路** `chat-client-call`，与 `make-agent :filters`、
       `(chat ... (:advisors ...))` 的处理一致。
 - [x] 文档纠正：4 处「流式尚未落地」的说明已过时；`:token-xform` 协议描述
       仍写着 transducer `(rf) → rf'`；`invoke-chat` 的第二返回值与
@@ -600,7 +600,7 @@ cl-agent/client（面向应用的易用层，v10 新增）
         tool-context）、return-direct 收尾、`%resume-continuation`
         （HITL 续跑：真执行的提交、被拒/被答复的没有写）、三个
         ToolCallingManager 的 `:context`（把协议承诺做实）
-      - `build-kernel :state-slots` + `kernel-state-slots`；
+      - `build-chat-client :state-slots` + `chat-client-state-slots`；
         `turn-result-tool-context` 交还折叠后的最终 context
 - [x] 6 个回归测试（纯函数语义/端到端/失败作废/manager 路径/多值穿透），
       突变验证：去掉屏障折叠 → 2 项失败。测试基线 822 → 839
@@ -643,7 +643,7 @@ cl-agent/client（面向应用的易用层，v10 新增）
 - batch.lisp 新增 `tool-call->request` / `tool-results->responses` /
   `batch-error-summaries`，三处调用点共用
 - chat.lisp 抽 `%assemble-messages` / `%merge-request-options`，
-  kernel-chat 与 kernel-chat-stream 不再重复组装
+  chat-client-call 与 chat-client-stream 不再重复组装
 
 **命名/Style 合规**：
 - 全库 **shadow 清零**：cl-agent/llm 的 `chat` 函数改名 `client-chat`，
@@ -672,10 +672,10 @@ cl-agent/client（面向应用的易用层，v10 新增）
 > 5 个并行 review agent（Goal/QA/CodeQuality/Security/ContextMining）。
 > ContextMining 因配额失败，其余 4 个完成。QA（847/0 离线 + 11/11 live）
 > 与 Goal（P1-P3 全部达成）PASS，但 CodeQuality 发现 3 个 MAJOR。
-> 全部修复于 commit **26ee239**（fix(kernel)），含 4 个回归测试：
-> - test-kernel-invoke 返回 return-direct-via-manager-skeleton / -end-to-end
-> - test-kernel-invoke 返回 resume-honors-tool-manager
-> - test-kernel-invoke 返回 tool-search-instruction-injected-once
+> 全部修复于 commit **26ee239**（fix(chat-client)），含 4 个回归测试：
+> - test-chat-client-invoke 返回 return-direct-via-manager-skeleton / -end-to-end
+> - test-chat-client-invoke 返回 resume-honors-tool-manager
+> - test-chat-client-invoke 返回 tool-search-instruction-injected-once
 > 全套测试 **855/0 通过**（基线 847 → +8）。
 
 #### 4.1 `:return-direct` 在 ToolCallingManager 路径上静默失效 ❌→✅
@@ -692,7 +692,7 @@ cl-agent/client（面向应用的易用层，v10 新增）
 #### 4.2 `resume-turn` 绕过已配置的 ToolCallingManager ❌→✅
 
 - [x] **续跑批直接调 `invoke-tool-batch`**：`%resume-continuation` 第 473 行
-      不检查 `(kernel-tool-manager kernel)`。后果：配了 thread-pool manager
+      不检查 `(chat-client-tool-manager chat-client)`。后果：配了 thread-pool manager
       限流 **又**配了 tool-gate HITL——第一批被限流，**被暂停的那批**
       （往往是敏感工具）续跑时不限流。return-direct 在续跑上同样失效。
       修法：续跑的 callable 批经 `manager-run-batch` 走

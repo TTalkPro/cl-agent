@@ -1,8 +1,8 @@
 ;;;; filter.lisp
-;;;; CL-Agent Kernel - Filter CLOS 类 + build-chain + defilter 宏
+;;;; CL-Agent ChatClient - Filter CLOS 类 + build-chain + defilter 宏
 ;;;;
 ;;;; 概述：
-;;;;   Filter 是 kernel 架构的核心可组合单元。对标 clj-agent 的 Filter
+;;;;   Filter 是 chat-client 架构的核心可组合单元。对标 clj-agent 的 Filter
 ;;;;   协议：每个 filter 持有四个钩子（:chat/:tool/:turn/:token-xform），
 ;;;;   钩子是普通函数而非泛型方法，存放在 CLOS 槽里。
 ;;;;

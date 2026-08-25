@@ -1,8 +1,8 @@
 ;;;; carriers.lisp
-;;;; CL-Agent Kernel - 三链请求/响应载体
+;;;; CL-Agent ChatClient - 三链请求/响应载体
 ;;;;
 ;;;; 概述：
-;;;;   Kernel 架构里 chat / tool / turn 三条链各自携带不同的请求/响应
+;;;;   ChatClient 架构里 chat / tool / turn 三条链各自携带不同的请求/响应
 ;;;;   结构。Chat 链不用专门的载体——请求就是 cl-agent/core:prompt，
 ;;;;   响应就是 chat-response，够用且少一层包装。本文件定义 tool 链与
 ;;;;   turn 链的载体类。
@@ -42,7 +42,7 @@
     :initform nil
     :reader tool-request-context
     :documentation "工具上下文 plist（filter 间共享）"))
-  (:documentation "Tool 链请求载体（kernel 工具调用请求）"))
+  (:documentation "Tool 链请求载体（chat-client 工具调用请求）"))
 
 (defun make-tool-request (function &key args context)
   "创建 tool-request。ARGS 缺省 nil，CONTEXT 缺省 nil。"
@@ -66,7 +66,7 @@
 来源：工具函数返回 (values 结果 writes-plist)，或 :tool filter 自己
 构造带 :writes 的 tool-result。工具在并行中拿到的 context 是**只读
 快照**，写经此声明——批次屏障（fold-batch-writes → apply-writes）
-按 tool-call 原始序折叠进 context，合并语义由 kernel 的 :state-slots
+按 tool-call 原始序折叠进 context，合并语义由 chat-client 的 :state-slots
 声明（未声明的槽 last-writer）。失败调用（error 非 nil）的写意图
 不生效。")
    (error
@@ -74,13 +74,13 @@
     :initform nil
     :reader tool-result-error
     :documentation "错误信息 plist（:class :message）或 nil"))
-  (:documentation "Tool 链响应载体（kernel 工具执行结果）。
+  (:documentation "Tool 链响应载体（chat-client 工具执行结果）。
 
 命名：与 turn 链的 turn-request → turn-result 对称。
 曾叫 tool-response——与 cl-agent/core:tool-response（协议消息层的
-「工具响应」值对象：id/name/text）撞名，逼得 kernel 必须 shadow，
+「工具响应」值对象：id/name/text）撞名，逼得 chat-client 必须 shadow，
 下游想同时 :use 两个包还得自己写 shadowing-import。两者本就是不同
-层的东西：chat 的是发回模型的消息，kernel 的是执行链的结果载体。
+层的东西：chat 的是发回模型的消息，chat-client 的是执行链的结果载体。
 改名后撞名消失，shadow 也随之删除。"))
 
 (defun make-tool-result (&key value writes error)
@@ -109,7 +109,7 @@
     :initarg :resume-p
     :initform nil
     :reader turn-request-resume-p
-    :documentation "是否从暂停恢复（kernel 循环续跑用）"))
+    :documentation "是否从暂停恢复（chat-client 循环续跑用）"))
   (:documentation "Turn 链请求载体（一轮 LLM 调用的输入）"))
 
 (defun make-turn-request (messages &key context resume-p)
@@ -161,7 +161,7 @@
     :documentation "暂停时刻的 turn context"))
   (:documentation "工具循环的暂停快照——resume 靠它从中点续跑。
 
-刻意不含 kernel/gate/callbacks：那些是代码侧的东西，resume 时重新提供。
+刻意不含 chat-client/gate/callbacks：那些是代码侧的东西，resume 时重新提供。
 本类只装「续跑所需的数据」。"))
 
 (defun make-loop-state (&key messages response tool-calls pending-id

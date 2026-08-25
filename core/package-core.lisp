@@ -115,16 +115,16 @@
    #:di-cleanup
    #:di-cleanup-p
    #:di-lazy-dependency
-   #:di-lazy-service
+   #:di-lazy-chat-model
    #:di-boundp
    #:di-resolve-or-default
-   #:di-list-services
+   #:di-list-chat-models
    #:di-container-stats
    #:di-print-container
    ;; 请求作用域
    #:with-di-request-scope
    #:di-request-scope-not-active-error
-   #:di-request-scope-service-name
+   #:di-request-scope-chat-model-name
    #:*di-request-cache*
 
    ;; === JSON Schema 工具 ===
@@ -480,12 +480,12 @@
    #:find-tool-callback
    #:list-tool-callbacks
    #:resolve-tool-callbacks
-   ;; 工具解析（kernel 的 batch / manager / tool-search filter 依赖）
+   ;; 工具解析（chat-client 的 batch / manager / tool-search filter 依赖）
    #:find-callback-for-call
    ;; 注：ToolCallingManager（tool-calling-manager / execute-tool-calls /
    ;; concurrent-tool-calling-manager / tool-execution-result ...）已删除。
    ;; 工具执行循环唯一住在 cl-agent/core:run-tool-loop，执行策略见
-   ;; cl-agent/kernel 的 sequential/virtual-thread/thread-pool 三个 manager。
+   ;; cl-agent/chat-client 的 sequential/virtual-thread/thread-pool 三个 manager。
    ;; *inherited-special-variables* / with-inherited-specials 属于
    ;; cl-agent/core（见 core/utils.lisp），需要时从那里取。
    #:arguments->plist
@@ -525,7 +525,7 @@
    #:+default-conversation-id+
 
    ;; ============================================================
-   ;; Kernel + Filter（原 cl-agent/kernel）
+   ;; ChatClient + Filter（原 cl-agent/chat-client）
    ;; ============================================================
    ;; ==================== Filter 类与构造 ====================
    #:filter
@@ -584,22 +584,22 @@
    #:pending-tool-args
    #:pending-tool-id
 
-    ;; ==================== Kernel ====================
-    #:kernel
-    #:make-kernel
-    #:build-kernel
-    #:kernel-model
-    #:kernel-tools
-    #:kernel-filters
-    #:kernel-eligibility-fn
-    #:kernel-settings
-    #:kernel-tool-manager
-    #:kernel-default-system
-    #:kernel-default-options
-    #:kernel-tool-gate
-    #:kernel-state-slots
-    #:kernel-loop-fn
-    #:kernel-resume-fn
+    ;; ==================== ChatClient ====================
+    #:chat-client
+    #:make-chat-client
+    #:build-chat-client
+    #:chat-client-model
+    #:chat-client-tools
+    #:chat-client-filters
+    #:chat-client-eligibility-fn
+    #:chat-client-settings
+    #:chat-client-tool-manager
+    #:chat-client-default-system
+    #:chat-client-default-options
+    #:chat-client-tool-gate
+    #:chat-client-state-slots
+    #:chat-client-loop-fn
+    #:chat-client-resume-fn
 
     ;; ==================== ToolCallingManager ====================
     #:tool-calling-manager
@@ -638,10 +638,10 @@
 
     ;; ==================== chat DSL（调用方入口） ====================
     #:chat
-    #:kernel-chat
-    #:kernel-chat-text
-    #:kernel-chat-entity
-    #:kernel-chat-stream
+    #:chat-client-call
+    #:chat-client-text
+    #:chat-client-entity
+    #:chat-client-stream
     #:strip-json-fences
 
     ;; ==================== 故障分类 ====================

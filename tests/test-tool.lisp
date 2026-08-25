@@ -43,7 +43,7 @@
 
 自动全局注册会让每个 deftool 悄悄扩大攻击面（模型报出名字即可执行
 从未暴露的工具），也让测试相互污染。对齐 clj-agent：deftool 生成
-defn + var 元数据，工具由 (build-kernel {:tools [#'foo]}) 显式传入。"
+defn + var 元数据，工具由 (build-chat-client {:tools [#'foo]}) 显式传入。"
   (let ((callback (cl-agent/core:symbol-tool-callback 'test-adder)))
     (is-true callback)
     (is (string= "test_adder" (cl-agent/core:tool-callback-name callback)))
@@ -147,7 +147,7 @@ defn + var 元数据，工具由 (build-kernel {:tools [#'foo]}) 显式传入。
 ;;; ============================================================
 ;;;
 ;;; ToolCallingManager 的测试已随该层删除——工具执行循环现在唯一住在
-;;; cl-agent/kernel（覆盖见 test-kernel-invoke / test-kernel-chat）。
+;;; cl-agent/chat-client（覆盖见 test-chat-client-invoke / test-chat-client-chat）。
 ;;; 本层只剩「工具是什么」：定义、注册、schema、按名解析。
 
 (defun opts-exposing (&rest tool-syms)
@@ -190,10 +190,10 @@ defn + var 元数据，工具由 (build-kernel {:tools [#'foo]}) 显式传入。
 回退查全局注册表，而 deftool 自动注册，于是任何 deftool 过的工具，
 模型只要报出名字就会被执行（提示注入下可直接利用的越权）。
 
-参照实现同样没有回退：clj-agent 的 find-function 只查 kernel 的
+参照实现同样没有回退：clj-agent 的 find-function 只查 chat-client 的
 :tool-vars 并抛异常；Spring 的 ToolCallbackResolver 默认为空。
 
-本测试走完整 kernel 链路（旧版经已删除的 ToolCallingManager）：
+本测试走完整 chat-client 链路（旧版经已删除的 ToolCallingManager）：
 模型第一轮报出 secret_tool，第二轮给最终文本。"
   (let ((cb (cl-agent/core:symbol-tool-callback 'secret-tool)))
     (unwind-protect
@@ -205,8 +205,8 @@ defn + var 元数据，工具由 (build-kernel {:tools [#'foo]}) 显式传入。
                              (tool-call-response "secret_tool" '(("target" . "alice")))
                              (text-response "done")))
                   (model (cl-agent/core:make-provider-chat-model provider))
-                  ;; kernel 只暴露 test-adder
-                  (k (cl-agent/core:build-kernel :model model
+                  ;; chat-client 只暴露 test-adder
+                  (k (cl-agent/core:build-chat-client :model model
                                                    :tools '(test-adder))))
              (cl-agent/core:chat k (:user "hi"))
              (is (null *secret-tool-fired*)
@@ -227,7 +227,7 @@ defn + var 元数据，工具由 (build-kernel {:tools [#'foo]}) 显式传入。
                                (setf second-round-messages messages)
                                (text-response "done"))))
                   (model (cl-agent/core:make-provider-chat-model provider))
-                  (k (cl-agent/core:build-kernel :model model
+                  (k (cl-agent/core:build-chat-client :model model
                                                    :tools '(test-adder))))
              ;; 不报错，正常拿到最终文本
              (is (string= "done" (cl-agent/core:chat k (:user "hi"))))
@@ -245,7 +245,7 @@ defn + var 元数据，工具由 (build-kernel {:tools [#'foo]}) 显式传入。
                     (tool-call-response "test_adder" '(("a" . 2) ("b" . 3)))
                     (text-response "5")))
          (model (cl-agent/core:make-provider-chat-model provider))
-         (k (cl-agent/core:build-kernel :model model :tools '(test-adder))))
+         (k (cl-agent/core:build-chat-client :model model :tools '(test-adder))))
     (is (string= "5" (cl-agent/core:chat k (:user "2+3"))))
     ;; 两轮：一轮要工具，一轮拿结果 → 工具确实执行了
     (is (= 2 (length (seq-provider-requests provider))))))

@@ -11,7 +11,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes
 
-- **Package consolidation**: `cl-agent/kernel`, `cl-agent/chat`, `cl-agent/http`
+- **Renamed: `kernel` → `chat-client`, and the LLM `service` layer → `chat-model`.**
+  A pure rename — no semantics, no behaviour, no wire format changed. Every
+  public symbol, file and directory that carried the old word moved:
+
+  | Before | After |
+  |---|---|
+  | `build-kernel` | `build-chat-client` |
+  | the `kernel` class, `kernel-model` / `kernel-tools` / `kernel-filters` / `kernel-settings` / `kernel-tool-manager` / `kernel-tool-gate` / `kernel-state-slots` / `kernel-loop-fn` / `kernel-resume-fn` / `kernel-default-system` / `kernel-default-options` / `kernel-eligibility-fn` | `chat-client`, `chat-client-model`, `chat-client-tools`, … (same suffixes) |
+  | `kernel-chat` | `chat-client-call` |
+  | `kernel-chat-text` / `kernel-chat-entity` / `kernel-chat-stream` | `chat-client-text` / `chat-client-entity` / `chat-client-stream` |
+  | `core/kernel/` (with `kernel.lisp`) | `core/chat-client/` (with `chat-client.lisp`) |
+  | `llm/service.lisp` (the "Service layer") | `llm/chat-model.lisp` (the "ChatModel layer") |
+  | `di-lazy-service`, `di-list-services`, `di-request-scope-service-name`, `*app-services*`, `*core-services*`, `*global-services*` | `di-lazy-chat-model`, `di-list-chat-models`, `di-request-scope-chat-model-name`, `*app-chat-models*`, `*core-chat-models*`, `*global-chat-models*` |
+  | `tests/test-kernel-{chat,invoke,skeleton}.lisp`, `examples/kernel-usage.lisp` | `tests/test-chat-client-{chat,invoke,skeleton}.lisp`, `examples/chat-client-usage.lisp` |
+
+  Two things deliberately kept the old word because they are not ours:
+  `lparallel:*kernel*` / `lparallel:make-kernel` / `lparallel:end-kernel` /
+  `no-kernel-error` (lparallel's thread pool, including the `with-http-kernel`
+  macro that binds it), and DashScope's `/api/v1/services/...` URL paths.
+
+  Note the **name reuse**: the Spring AI ChatClient porting layer deleted in
+  v9.0.0 also had symbols called `chat-client` / `make-chat-client`. Today's
+  `cl-agent/core:chat-client` is the core class formerly known as `kernel` and is
+  unrelated to it. See *Migration* in the README.
+
+- **Package consolidation**: `cl-agent/chat-client`, `cl-agent/chat`, `cl-agent/http`
   collapsed into a single `cl-agent/core`. See *Migration* below — most direct
   symbols kept their names.
 - **Removed `cl-agent/protocols`** (the A2A / MCP layer): it was never compiled
@@ -36,9 +61,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Filters are real CLOS objects**. The historical convenience of returning
   bare lambdas from filter constructors is removed: they must be
   `make-filter` instances, returned from `make-filter`/`defilter`.
-- **Stream semantics**: `kernel-chat-stream` is a single-shot call (does not
+- **Stream semantics**: `chat-client-stream` is a single-shot call (does not
   drive a tool loop). Calling it on a prompt that triggers tool use now errors
-  with a pointer to `kernel-chat` / `make-agent`'s streaming path, instead of
+  with a pointer to `chat-client-call` / `make-agent`'s streaming path, instead of
   silently streaming the assistant's initial utterance and dropping the rest.
 
 ### Migration (from pre-v10)
@@ -48,10 +73,10 @@ with this release; the table below is canonical.
 
 | Before | After |
 |---|---|
-| `cl-agent/http:*`, `cl-agent/chat:*`, `cl-agent/kernel:*` | `cl-agent/core:*` (single package) |
-| `cl-agent/kernel:build-kernel`, `deftool`, `http-request`, `tool-response` | `cl-agent/core:build-kernel`, `cl-agent/core:deftool`, `cl-agent/core:http-request`, `cl-agent/core:tool-result` |
-| `make-chat-client` / `chat-client-builder` | `build-kernel` (preferred for power) **or** `cl-agent/client:make-agent` (recommended for apps) |
-| `cl-agent/kernel:run-tool-loop` | `cl-agent/core:run-tool-loop` (exposed if you built a custom executor) |
+| `cl-agent/http:*`, `cl-agent/chat:*`, `cl-agent/chat-client:*` | `cl-agent/core:*` (single package) |
+| `cl-agent/chat-client:build-chat-client`, `deftool`, `http-request`, `tool-response` | `cl-agent/core:build-chat-client`, `cl-agent/core:deftool`, `cl-agent/core:http-request`, `cl-agent/core:tool-result` |
+| `make-chat-client` / `chat-client-builder` | `build-chat-client` (preferred for power) **or** `cl-agent/client:make-agent` (recommended for apps) |
+| `cl-agent/chat-client:run-tool-loop` | `cl-agent/core:run-tool-loop` (exposed if you built a custom executor) |
 | `cl-agent/llm:chat` | `cl-agent/llm:client-chat` (low-level SPI; most users did not import this) |
 | `cl-agent/protocols:a2a-*`, `mcp-*` | **removed**; no direct replacement |
 | `(:tools (:get-weather ...))` plist forms | `(:tools 'get-weather)` (symbol identity) |
@@ -66,7 +91,7 @@ required.
 - **`cl-agent/client`**: `SimpleAgent` — a stateful, callback-driven entry
   point for applications. `make-agent`, `agent-chat`, `agent-chat-result`,
   `agent-resume`, `agent-history`, `agent-clear`. The companion `cl-agent/core`
-  kernel remains available for fully-controlled composition.
+  chat-client remains available for fully-controlled composition.
 - **HITL / approval workflow**: `make-agent :tool-gate`. When the gate returns
   `(:interrupt . reason)`, the turn is paused — **no tools execute, state is
   consistent** — and the caller receives a `pending-tool` plus a
@@ -77,13 +102,13 @@ required.
   `:on-tool-call`, `:on-tool-result` on `make-agent`. Callback exceptions are
   isolated — they do not destabilize the turn.
 
-#### Kernel & filter surface
+#### ChatClient & filter surface
 
 - **Three onion chains**: `:chat` (model-call), `:tool` (execution),
   `:turn` (loop) — plus a `:token-xform` transducer chain for streaming.
   Built via `build-chain`; recursion is free because each filter only captures
   `downstream`.
-- **`ToolCallingManager`** (kernel-bound execution model):
+- **`ToolCallingManager`** (chat-client-bound execution model):
   `thread-pool-tool-calling-manager` (hard-bounded via a channel scheduler —
   no work-stealing), `virtual-thread-tool-calling-manager`, and
   `sequential-tool-calling-manager`. Companion:
@@ -94,9 +119,9 @@ required.
   shared skeleton `execute-tool-calls`, generic `manager-run-batch`.
 - **`apply-writes` fold**: per-tool `(values result writes-plist)` declares
   write intents; `fold-batch-writes` is the barrier that folds them through
-  `build-kernel :state-slots` reducers, in tool-call original order, with
+  `build-chat-client :state-slots` reducers, in tool-call original order, with
   last-writer detection. Failed calls do not contribute.
-- **Real streaming**: `kernel-chat-stream` + `compose-token-xforms` over
+- **Real streaming**: `chat-client-stream` + `compose-token-xforms` over
   provider-side `chat-model-stream`. The `:token-xform` filter protocol
   is `(downstream-emit) → (values emit finish)`.
 - **Tool-search with progressive disclosure**: rewritten with CJK bigram
@@ -145,8 +170,8 @@ required.
   eliminated.
 - **Documentation rewritten**: top-level `README` / `docs/QUICKSTART` /
   `docs/API` / `docs/tool-calling` now lead with `SimpleAgent` (the
-  recommended entry point) and demote `kernel + filter` to "Full control".
-  Migration tables cover `ChatClient → Kernel / Agent` and the package
+  recommended entry point) and demote `chat-client + filter` to "Full control".
+  Migration tables cover `ChatClient → ChatClient / Agent` and the package
   consolidation.
 - **Test system renamed**: secondary system `cl-agent-test` →
   `cl-agent/test` (ASDF convention; ASDF no longer warns about
@@ -186,8 +211,8 @@ required.
 - Streaming chats that emit tool calls now error explicitly instead of
   silently delivering the trailing assistant utterance with no tool
   execution.
-- `examples/kernel-usage.lisp` registers `client/` with ASDF so
-  `sbcl --load examples/kernel-usage.lisp` works out of the box (was
+- `examples/chat-client-usage.lisp` registers `client/` with ASDF so
+  `sbcl --load examples/chat-client-usage.lisp` works out of the box (was
   failing with "Component `:CL-AGENT-CLIENT` not found").
 
 ### Removed
@@ -242,7 +267,7 @@ required.
 Captured here for completeness; this entry documents the architectural
 shape that preceded the public release.
 
-- Initial package consolidation: `cl-agent/{http,chat,kernel}` → `cl-agent/core`.
+- Initial package consolidation: `cl-agent/{http,chat,chat-client}` → `cl-agent/core`.
 - New `cl-agent/client` (SimpleAgent).
 - New `cl-agent/mock` (mock providers).
 - Per-package `:version` bumped to `10.0.0` (core, client).

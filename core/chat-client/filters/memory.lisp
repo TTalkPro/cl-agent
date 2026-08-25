@@ -1,5 +1,5 @@
 ;;;; memory.lisp
-;;;; CL-Agent Kernel Filters - Memory Filter (:chat, 循环内首位)
+;;;; CL-Agent ChatClient Filters - Memory Filter (:chat, 循环内首位)
 ;;;;
 ;;;; 概述（对标 clj-agent advisor/memory.clj + Spring MessageChatMemoryAdvisor）：
 ;;;;   memory-filter 挂在 :chat 链首位（循环内），每轮 LLM 调用前后执行：
@@ -59,7 +59,7 @@
                    ;;
                    ;; 两条规则，各修一个真实 bug：
                    ;;
-                   ;; 1. system 不进历史——它由每轮的 prompt 重新提供（kernel 的
+                   ;; 1. system 不进历史——它由每轮的 prompt 重新提供（chat-client 的
                    ;;    :system 默认值或请求级 (:system ...)）。此前存了全部
                    ;;    prompt 消息，于是每轮的 system 都被追加一份，历史里
                    ;;    system 随轮次线性累积。

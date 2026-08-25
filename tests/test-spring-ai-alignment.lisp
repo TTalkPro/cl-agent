@@ -268,25 +268,25 @@
     ;; 首次 + 2 次重试 = 3
     (is (= 3 calls))))
 
-(test kernel-constructable
-  "build-kernel 返回装好 filters 的 kernel"
+(test chat-client-constructable
+  "build-chat-client 返回装好 filters 的 chat-client"
   (let* ((provider (make-seq-provider (text-response "hello")))
          (model (cl-agent/core:make-provider-chat-model provider))
-         (k (cl-agent/core:build-kernel
+         (k (cl-agent/core:build-chat-client
              :model model
              :filters (list (cl-agent/core:logging-chat-filter))
              :tools nil)))
-    (is (typep k 'cl-agent/core:kernel))
-    (is (= 1 (length (cl-agent/core:kernel-filters k))))))
+    (is (typep k 'cl-agent/core:chat-client))
+    (is (= 1 (length (cl-agent/core:chat-client-filters k))))))
 
-(test kernel-executes-via-invoke-turn
-  "kernel 经 invoke-turn 执行"
-  (let* ((provider (make-seq-provider (text-response "kernel works")))
+(test chat-client-executes-via-invoke-turn
+  "chat-client 经 invoke-turn 执行"
+  (let* ((provider (make-seq-provider (text-response "chat-client works")))
          (model (cl-agent/core:make-provider-chat-model provider))
-         (k (cl-agent/core:build-kernel :model model)))
-    (is (string= "kernel works" (cl-agent/core:chat k (:user "test"))))))
+         (k (cl-agent/core:build-chat-client :model model)))
+    (is (string= "chat-client works" (cl-agent/core:chat k (:user "test"))))))
 
-(test kernel-conversation-reaches-memory-filter
+(test chat-client-conversation-reaches-memory-filter
   "(:conversation id) 必须到达 memory-filter：多轮共享记忆。
 回归：turn context 的 :conversation-id 曾没桥接到 prompt options 的
 tool-context，memory-filter 读不到 → 记忆静默失效。"
@@ -294,7 +294,7 @@ tool-context，memory-filter 读不到 → 记忆静默失效。"
                                       (text-response "回复2")))
          (model (cl-agent/core:make-provider-chat-model provider))
          (mem (cl-agent/core:make-message-window-chat-memory))
-         (k (cl-agent/core:build-kernel
+         (k (cl-agent/core:build-chat-client
              :model model :filters (list (cl-agent/core:memory-filter mem)))))
     (cl-agent/core:chat k (:user "我叫大卫") (:conversation "c1"))
     (cl-agent/core:chat k (:user "我叫什么") (:conversation "c1"))
@@ -303,20 +303,20 @@ tool-context，memory-filter 读不到 → 记忆静默失效。"
       (is (= 4 (length stored)))
       (is (string= "我叫大卫" (cl-agent/core:message-text (first stored)))))))
 
-(test kernel-separate-conversations-isolated
+(test chat-client-separate-conversations-isolated
   "不同 conversation-id 的记忆互不串"
   (let* ((provider (make-seq-provider (text-response "a") (text-response "b")))
          (model (cl-agent/core:make-provider-chat-model provider))
          (mem (cl-agent/core:make-message-window-chat-memory))
-         (k (cl-agent/core:build-kernel
+         (k (cl-agent/core:build-chat-client
              :model model :filters (list (cl-agent/core:memory-filter mem)))))
     (cl-agent/core:chat k (:user "in-c1") (:conversation "c1"))
     (cl-agent/core:chat k (:user "in-c2") (:conversation "c2"))
     (is (= 2 (length (cl-agent/core:memory-messages mem "c1"))))
     (is (= 2 (length (cl-agent/core:memory-messages mem "c2"))))))
 
-(test kernel-tools-survive-context-fold
-  "折叠 turn context 进 tool-context 后，kernel :tools 仍能解析并执行
+(test chat-client-tools-survive-context-fold
+  "折叠 turn context 进 tool-context 后，chat-client :tools 仍能解析并执行
 （回归：merge 不能把 tool-callbacks 冲掉）"
   (cl-agent/core:deftool align-echo-tool (&key text)
     "回显输入"
@@ -326,7 +326,7 @@ tool-context，memory-filter 读不到 → 记忆静默失效。"
                     (tool-call-response "align-echo-tool" '(("text" . "hi")))
                     (text-response "done")))
          (model (cl-agent/core:make-provider-chat-model provider))
-         (k (cl-agent/core:build-kernel
+         (k (cl-agent/core:build-chat-client
              :model model
              :filters (list (cl-agent/core:memory-filter
                              (cl-agent/core:make-message-window-chat-memory)))
@@ -429,7 +429,7 @@ tool-context，memory-filter 读不到 → 记忆静默失效。"
   "首轮只暴露 search_tools —— 这才是省 token 的来源。
 回归：filter 曾是 no-op，首轮把全部工具都发出去。"
   (let* ((provider (make-seq-provider (text-response "答")))
-         (k (cl-agent/core:build-kernel
+         (k (cl-agent/core:build-chat-client
              :model (cl-agent/core:make-provider-chat-model provider)
              :tools +disc-tools+
              :filters (list (cl-agent/core:tool-search-filter (disc-index))))))
@@ -443,7 +443,7 @@ tool-context，memory-filter 读不到 → 记忆静默失效。"
   (let* ((provider (make-seq-provider
                     (tool-call-response "search_tools" '(("query" . "天气")))
                     (text-response "答")))
-         (k (cl-agent/core:build-kernel
+         (k (cl-agent/core:build-chat-client
              :model (cl-agent/core:make-provider-chat-model provider)
              :tools +disc-tools+
              :filters (list (cl-agent/core:tool-search-filter (disc-index))))))
@@ -463,7 +463,7 @@ tool-context，memory-filter 读不到 → 记忆静默失效。"
   (let* ((provider (make-seq-provider
                     (tool-call-response "search_tools" '(("query" . "天气")))
                     (text-response "答")))
-         (k (cl-agent/core:build-kernel
+         (k (cl-agent/core:build-chat-client
              :model (cl-agent/core:make-provider-chat-model provider)
              :tools +disc-tools+
              :filters (list (cl-agent/core:tool-search-filter (disc-index))))))
@@ -483,12 +483,12 @@ tool-context，memory-filter 读不到 → 记忆静默失效。"
                                 (text-response "a")))
          (p2 (make-seq-provider (text-response "b"))))
     ;; 会话 d3 里搜到了 weather
-    (cl-agent/core:chat (cl-agent/core:build-kernel
+    (cl-agent/core:chat (cl-agent/core:build-chat-client
                          :model (cl-agent/core:make-provider-chat-model p1)
                          :tools +disc-tools+ :filters (list filter))
                         (:user "x") (:conversation "d3"))
     ;; 会话 d4 是干净的——不该看到 d3 的发现
-    (cl-agent/core:chat (cl-agent/core:build-kernel
+    (cl-agent/core:chat (cl-agent/core:build-chat-client
                          :model (cl-agent/core:make-provider-chat-model p2)
                          :tools +disc-tools+ :filters (list filter))
                         (:user "y") (:conversation "d4"))

@@ -16,11 +16,11 @@ LLM 提供商实现和统一接口模块。
 │  └── providers.lisp            ──┘                               │
 │           │                                                      │
 │           ▼                                                      │
-│  Service 层 (service.lisp)                                       │
+│  ChatModel 层 (chat-model.lisp)                                       │
 │  └── normalize-response ─────────→ llm-response 对象             │
 │           │                                                      │
 │           ▼                                                      │
-│  消费者 (Kernel, Agent, 应用代码)                                 │
+│  消费者 (ChatClient, Agent, 应用代码)                                 │
 │  └── 统一使用 llm-response 对象                                   │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -33,7 +33,7 @@ llm/
 ├── client.lisp               # 统一客户端接口
 ├── providers.lisp            # 提供商注册
 ├── streaming.lisp            # 流式支持
-├── service.lisp              # Service 层（响应标准化）
+├── chat-model.lisp              # ChatModel 层（响应标准化）
 ├── providers/                # 提供商实现
 │   ├── base.lisp            # 基类
 │   ├── define-provider.lisp # 共享 wire 助手
@@ -64,16 +64,16 @@ llm/
 | 阿里云百炼 | `:dashscope` | qwen-plus | 工具调用、流式 |
 | Ollama | `:ollama` | llama2 | 本地运行 |
 
-## Service 层
+## ChatModel 层
 
-Service 层负责将各 Provider 返回的原始响应转换为统一的 `llm-response` 对象。
+ChatModel 层负责将各 Provider 返回的原始响应转换为统一的 `llm-response` 对象。
 
 ### 响应标准化
 
 ```lisp
 ;; Provider 返回原始 plist
 (let ((raw-response (llm-chat provider messages)))
-  ;; Service 层标准化为 llm-response
+  ;; ChatModel 层标准化为 llm-response
   (normalize-response raw-response :zhipu))
 
 ;; 或使用高层 API（自动标准化）
@@ -120,7 +120,7 @@ Service 层负责将各 Provider 返回的原始响应转换为统一的 `llm-re
 
 ### llm-response 工具函数
 
-不限于某一提供商——各家的思维链/结束原因都已在 Service 层归一：
+不限于某一提供商——各家的思维链/结束原因都已在 ChatModel 层归一：
 
 ```lisp
 ;; 提取思维链内容：GLM / DeepSeek 的 reasoning_content、Anthropic 的
@@ -312,7 +312,7 @@ Service 层负责将各 Provider 返回的原始响应转换为统一的 `llm-re
     (format t "超时: ~A~%" e)))
 ```
 
-## 与 kernel 集成
+## 与 chat-client 集成
 
 ```lisp
 ;; 一步创建 ChatModel（推荐入口）
@@ -326,7 +326,7 @@ Service 层负责将各 Provider 返回的原始响应转换为统一的 `llm-re
     (make-anthropic-provider)
     :default-options (cl-agent/core:make-chat-options :temperature 0.3)))
 
-;; 装配 kernel 后即可对话
-(defvar *kernel* (cl-agent/core:build-kernel :model *model*))
-(cl-agent/core:chat *kernel* "你好")
+;; 装配 chat-client 后即可对话
+(defvar *chat-client* (cl-agent/core:build-chat-client :model *model*))
+(cl-agent/core:chat *chat-client* "你好")
 ```

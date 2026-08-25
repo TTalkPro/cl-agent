@@ -90,14 +90,14 @@
 ;;; ============================================================
 
 (deflive check-single-turn "[1/11] 单次问答"
-  (let* ((k (build-kernel :model *model*))
+  (let* ((k (build-chat-client :model *model*))
          (text (chat k (:user "只回答一个词，不要标点：法国的首都是？"))))
     (values (and (stringp text) (search "巴黎" text))
             (string-trim '(#\Space #\Newline) text))))
 
 (deflive check-tool-loop "[2/11] 真实工具循环（模型自主决定调用）"
   (let ((*tool-hits* 0))
-    (let* ((k (build-kernel :model *model* :tools '(live-counted-weather)))
+    (let* ((k (build-chat-client :model *model* :tools '(live-counted-weather)))
            (text (chat k
                    (:system "查天气必须用工具，不要凭空回答。")
                    (:user "东京现在天气怎么样？"))))
@@ -107,7 +107,7 @@
 
 (deflive check-memory-multi-turn "[3/11] memory-filter 多轮记忆"
   (let* ((mem (make-message-window-chat-memory))
-         (k (build-kernel :model *model* :filters (list (memory-filter mem)))))
+         (k (build-chat-client :model *model* :filters (list (memory-filter mem)))))
     (chat k (:user "记住：我的幸运数字是 42。") (:conversation "live-1"))
     (let ((text (chat k (:user "我的幸运数字是多少？只回答数字。")
                       (:conversation "live-1"))))
@@ -122,7 +122,7 @@
                    \"properties\":{\"name\":{\"type\":\"string\"},
                                   \"population\":{\"type\":\"integer\"}},
                    \"required\":[\"name\",\"population\"]}")
-         (k (build-kernel
+         (k (build-chat-client
              :model *model*
              :filters (list (validation-turn-filter
                              (structured-output-validate-fn
@@ -207,7 +207,7 @@
                                             (prompt-options prompt)))
                                    rounds)
                              (funcall chain prompt))))
-           (k (build-kernel :model *model* :tools +disclosure-tools+
+           (k (build-chat-client :model *model* :tools +disclosure-tools+
                             ;; counter 放最内：数的是 tool-search 改写**之后**的
                             :filters (list (tool-search-filter
                                             (make-keyword-tool-index +disclosure-tools+))
@@ -223,8 +223,8 @@
 
 (deflive check-stream-token-xform "[9/11] 流式 + :token-xform 脱敏"
   (let ((chunks nil))
-    (kernel-chat-stream
-     (build-kernel :model *model*
+    (chat-client-stream
+     (build-chat-client :model *model*
                    :filters (list (token-redact-filter '("北京"))))
      (lambda (d) (push d chunks))
      :user "只说两个字：北京")
@@ -255,13 +255,13 @@
           (list :notes (list text))))
 
 (deflive check-writes-fold "[11/11] :writes + :state-slots（真模型驱动折叠）"
-  (let* ((k (build-kernel
+  (let* ((k (build-chat-client
              :model *model*
              :tools '(live-note)
              :state-slots (list (list :notes :init nil
                                       :reduce (lambda (old new)
                                                 (append old new))))))
-         (result (kernel-chat k
+         (result (chat-client-call k
                   :system "用户给你的每条信息都必须用 live_note 工具记录。"
                   :user "帮我记两条信息：第一条「买牛奶」，第二条「修自行车」。"))
          (notes (getf (turn-result-tool-context result) :notes)))

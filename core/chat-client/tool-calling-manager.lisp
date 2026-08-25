@@ -1,5 +1,5 @@
 ;;;; tool-calling-manager.lisp
-;;;; CL-Agent Kernel - ToolCallingManager 协议 + 多实现
+;;;; CL-Agent ChatClient - ToolCallingManager 协议 + 多实现
 ;;;;
 ;;;; 概述（对标 clj-agent tool-calling-manager-design.md v3 + Spring ToolCallingManager）：
 ;;;;   工具执行统一管理 seam——把 invoke-tool-batch 从私有函数升格为可注入协议。
@@ -45,14 +45,14 @@
   (:documentation "工具执行统一管理 seam（对标 Spring ToolCallingManager）。
 
   子类实现 execute-tool-calls 泛型方法以选择执行策略。
-  调用方通过 build-kernel 的 :tool-manager 注入。"))
+  调用方通过 build-chat-client 的 :tool-manager 注入。"))
 
-(defgeneric execute-tool-calls (manager kernel response options)
+(defgeneric execute-tool-calls (manager chat-client response options)
   (:documentation "从 response 抽 tool-calls + 调度执行 + 返回 tool-execution-result。
 
   参数：
   - manager   tool-calling-manager 实例（决定执行策略）
-  - kernel    kernel 实例（访问 invoke-tool / tools / filters）
+  - chat-client    chat-client 实例（访问 invoke-tool / tools / filters）
   - response  chat-response（含 tool-calls）
   - options   plist：(:tool-context ctx :gate gate-fn ...)
 
@@ -69,14 +69,14 @@
 ;;; （:retry 声明在它手下无效）；virtual-thread 那份把 :errors 恒填 nil。
 ;;; 收敛后骨架只有一份，manager 只实现 manager-run-batch 一个方法。
 
-(defgeneric manager-run-batch (manager kernel tool-calls options context)
+(defgeneric manager-run-batch (manager chat-client tool-calls options context)
   (:documentation "以 MANAGER 的执行模型跑一批 tool-call。
 
   这是 manager 之间**唯一**的差异点（执行模型与隔离机制的落点）。
   返回 tool-result 列表（必须与 TOOL-CALLS 同序）。"))
 
 (defmethod execute-tool-calls ((manager tool-calling-manager)
-                               kernel response options)
+                               chat-client response options)
   "共享骨架：抽 tool-calls → manager-run-batch → 组装 tool-execution-result。
 
   :context 按协议 = 应用 writes 后的 context（fold-batch-writes 折叠，
@@ -84,8 +84,8 @@
   全部原样透传。"
   (let* ((tool-calls (cl-agent/core:chat-response-tool-calls response))
          (options-ctx (getf options :tool-context))
-         (resolved-options (resolve-kernel-tools kernel))
-         (tool-results (manager-run-batch manager kernel tool-calls
+         (resolved-options (resolve-chat-client-tools chat-client))
+         (tool-results (manager-run-batch manager chat-client tool-calls
                                           resolved-options options-ctx))
          ;; return-direct：全批工具都必须声明 :return-direct 才短路
          ;; （与 invoke-tool-batch 的 (every #'first prepared) 同构）
@@ -99,7 +99,7 @@
     (make-tool-execution-result
      :messages (tool-results->responses tool-results tool-calls)
      :records nil
-     :context (fold-batch-writes kernel tool-results options-ctx)
+     :context (fold-batch-writes chat-client tool-results options-ctx)
      :errors (batch-error-summaries tool-results tool-calls)
      :return-direct return-direct)))
 
@@ -117,11 +117,11 @@
   (make-instance 'sequential-tool-calling-manager))
 
 (defmethod manager-run-batch ((manager sequential-tool-calling-manager)
-                              kernel tool-calls options context)
+                              chat-client tool-calls options context)
   ;; 直取顺序路径。经 execute-batch-sequential 意味着与主路径同等待遇：
   ;; resolve-callback（幻觉工具名 → 语义错误回传，不崩整轮）与
   ;; %run-one-tool（:retry 瞬态重试）都生效——此前这条路两者皆无。
-  (values (execute-batch-sequential kernel tool-calls options context)))
+  (values (execute-batch-sequential chat-client tool-calls options context)))
 
 ;;; ============================================================
 ;;; VirtualThreadToolCallingManager（并行默认，尊重 :serial）
@@ -131,7 +131,7 @@
   ()
   (:documentation "虚拟线程并行 manager（默认）。
   并发执行整批；批内任一工具声明 :serial 则整批按序。
-  与 kernel 无 manager 时的 invoke-tool-batch 行为一致，
+  与 chat-client 无 manager 时的 invoke-tool-batch 行为一致，
   并发度用进程级默认池（ensure-tool-pool）。"))
 
 (defun make-virtual-thread-tool-calling-manager ()
@@ -139,8 +139,8 @@
   (make-instance 'virtual-thread-tool-calling-manager))
 
 (defmethod manager-run-batch ((manager virtual-thread-tool-calling-manager)
-                              kernel tool-calls options context)
-  (values (invoke-tool-batch kernel tool-calls options context)))
+                              chat-client tool-calls options context)
+  (values (invoke-tool-batch chat-client tool-calls options context)))
 
 ;;; ============================================================
 ;;; ThreadPoolToolCallingManager（真实线程池，限流场景）
@@ -210,14 +210,14 @@ with-thread-pool-tool-calling-manager 宏（推荐，非局部退出也能回收
 
   示例：
     (with-thread-pool-tool-calling-manager (mgr 8)
-      (chat (build-kernel :model m :tools '(...) :tool-manager mgr)
+      (chat (build-chat-client :model m :tools '(...) :tool-manager mgr)
             (:user \"...\")))"
   `(let ((,var (make-thread-pool-tool-calling-manager ,pool-size)))
      (unwind-protect (progn ,@body)
        (shutdown-tool-calling-manager ,var))))
 
 (defmethod manager-run-batch ((manager thread-pool-tool-calling-manager)
-                              kernel tool-calls options context)
+                              chat-client tool-calls options context)
   ;; 把自己的固定大小池绑成当前 lparallel kernel——batch 的 channel 任务
   ;; 提交到这个池，并发被 pool-size 卡死。
   ;;
@@ -226,7 +226,7 @@ with-thread-pool-tool-calling-manager 宏（推荐，非局部退出也能回收
   ;; 用户配 :pool-size 4 以为限流到 4 并发，实际无限制——批量工具直接
   ;; 打爆下游。三种执行模型实际只有两种。
   (let ((lparallel:*kernel* (ensure-manager-pool manager)))
-    (values (invoke-tool-batch kernel tool-calls options context))))
+    (values (invoke-tool-batch chat-client tool-calls options context))))
 
 ;;; ============================================================
 ;;; 默认 manager 工厂

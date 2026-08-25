@@ -1,18 +1,18 @@
 ;;;; cl-agent.asd
 ;;;; CL-Agent - Unified AI Agent Framework (Meta-System)
 ;;;;
-;;;; Version: 9.0.0 (Kernel + Filter Architecture)
+;;;; Version: 9.0.0 (ChatClient + Filter Architecture)
 ;;;; Author: David
 ;;;;
 ;;;; Overview:
 ;;;;   CL-Agent 元系统，聚合全部子系统。
-;;;;   核心编程模型：Kernel + Filter 三链；ChatModel 协议解耦多提供商实现。
+;;;;   核心编程模型：ChatClient + Filter 三链；ChatModel 协议解耦多提供商实现。
 ;;;;
 ;;;; Architecture:
 ;;;;   Layer 1 - Core: cl-agent-core
 ;;;;     基础设施 + cl-agent/chat（消息/Prompt/ChatOptions/ChatResponse/
 ;;;;     deftool 工具体系/ChatModel/ChatMemory）
-;;;;     + cl-agent/kernel（Filter 三链 + Kernel + invoke-* +
+;;;;     + cl-agent/chat-client（Filter 三链 + ChatClient + invoke-* +
 ;;;;       run-tool-loop + 10 个内置 filter + chat 宏 DSL）
 ;;;;   Layer 2 - LLM: cl-agent-llm
 ;;;;     提供商实现（Anthropic/OpenAI/智谱/Ollama/DashScope/MiniMax...），
@@ -23,27 +23,27 @@
 ;;;;
 ;;;; Changelog:
 ;;;;   v9.0.0 - 移除 cl-agent/client（Spring AI 的 ChatClient + Builder +
-;;;;            fluent RequestSpec 移植）；chat 宏搬入 cl-agent/kernel。
-;;;;            至此 Spring AI 的移植层全部退役，kernel+filter 成为
+;;;;            fluent RequestSpec 移植）；chat 宏搬入 cl-agent/chat-client。
+;;;;            至此 Spring AI 的移植层全部退役，chat-client+filter 成为
 ;;;;            唯一编程模型。
-;;;;   v8.0.0 - Spring AI 2.0 对标重构：删除 Process/Checkpoint/Kernel/
+;;;;   v8.0.0 - Spring AI 2.0 对标重构：删除 Process/Checkpoint/ChatClient/
 ;;;;            SimpleAgent 体系（cl-agent-extra 移除），新增 ChatClient +
 ;;;;            横切链 + ChatModel + ChatMemory + deftool 宏（前两者已在
 ;;;;            v9 退役）
 ;;;;   v7.0.0 - 减法：删除 RAG / MCP / tools 子系统
-;;;;   v6.0.0 - Core = infra + kernel + simpleagent; extras split out
+;;;;   v6.0.0 - Core = infra + chat-client + simpleagent; extras split out
 ;;;;   v5.0.0 - clj-agent architecture alignment
-;;;;   v4.0.0 - Semantic Kernel architecture
+;;;;   v4.0.0 - Semantic ChatClient architecture
 ;;;;   v3.0.0 - Initial modular design
 
 (asdf:defsystem #:cl-agent
-  :description "Unified AI Agent Framework - Meta System (Kernel + Filter)"
+  :description "Unified AI Agent Framework - Meta System (ChatClient + Filter)"
   :author "David"
   :license "MIT"
   :version "9.0.0"
 
   ;; Meta-system contains no components, only declares dependencies
-  :depends-on (;; Layer 1: Core —— 框架本体（基础设施 + HTTP + Chat API + Kernel/Filter）
+  :depends-on (;; Layer 1: Core —— 框架本体（基础设施 + HTTP + Chat API + ChatClient/Filter）
                #:cl-agent-core
 
                ;; Layer 2: LLM —— 提供商适配器（独立可插拔）
@@ -87,16 +87,16 @@
                (:file "tests/test-chat-model")  ; ChatModel + 工具执行循环
                (:file "tests/test-memory")      ; ChatMemory / Repository
 
-               ;; Kernel + Filter 测试
+               ;; ChatClient + Filter 测试
                (:file "tests/test-filter")          ; filter 机制 + build-chain
-               (:file "tests/test-kernel-skeleton") ; kernel 骨架 + 载体
-               (:file "tests/test-kernel-invoke")   ; invoke 原语 + 工具循环
+               (:file "tests/test-chat-client-skeleton") ; chat-client 骨架 + 载体
+               (:file "tests/test-chat-client-invoke")   ; invoke 原语 + 工具循环
                (:file "tests/test-spring-ai-alignment") ; P5 对齐审计
 
-               ;; kernel chat 宏 DSL + 端到端集成
+               ;; chat-client chat 宏 DSL + 端到端集成
                ;; （前身 test-chat-client：Builder / fluent spec 随
                ;;   cl-agent/client 一并退役）
-               (:file "tests/test-kernel-chat")
+               (:file "tests/test-chat-client-chat")
 
                ;; SimpleAgent（cl-agent/client）
                (:file "tests/test-agent")

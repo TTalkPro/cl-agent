@@ -7,15 +7,15 @@
 ## 包结构
 
 **一个包**：`cl-agent/core`（昵称 `cla/core`）。曾经的 `cl-agent/http` /
-`cl-agent/chat` / `cl-agent/kernel` 已全部合并进来——`core/` 下的
-`http/` `chat/` `kernel/` 现在只是 asd 的模块（文件分组），不再是包，
+`cl-agent/chat` / `cl-agent/chat-client` 已全部合并进来——`core/` 下的
+`http/` `chat/` `chat-client/` 现在只是 asd 的模块（文件分组），不再是包，
 所有文件一律 `(in-package #:cl-agent/core)`。
 
 | 分层 | 对标 | 内容 |
 |---|---|---|
 | 基础设施 | — | 条件系统、工具函数、DI 容器、JSON Schema 生成与校验、HTTP/SSE 客户端、`llm-chat` Provider SPI、统一 `llm-response` |
 | Chat API | `org.springframework.ai.chat.*` | CLOS 消息体系、Prompt、ChatOptions、ChatResponse、`deftool` 工具体系、ChatModel 协议、ChatMemory |
-| Kernel | `chat.client.*` + `chat.client.advisor.*` | Filter 三链 + `build-chain`、Kernel + `build-kernel`、`invoke-chat/tool/turn`、`run-tool-loop`、`resume-turn`、ToolCallingManager、10 个内置 filter、`chat` 宏 DSL |
+| ChatClient | `chat.client.*` + `chat.client.advisor.*` | Filter 三链 + `build-chain`、ChatClient + `build-chat-client`、`invoke-chat/tool/turn`、`run-tool-loop`、`resume-turn`、ToolCallingManager、10 个内置 filter、`chat` 宏 DSL |
 
 合并后 `cl-agent/core` 与 `cl-agent/client`（SimpleAgent）可以直接一起
 `:use`，无需任何 shadowing：
@@ -48,10 +48,10 @@ core/
 │   ├── tool.lisp            deftool / ToolCallback
 │   ├── memory.lisp          ChatMemory / Repository 协议
 │   └── model.lisp           ChatModel 协议 + Provider 适配器（单次调用）
-└── kernel/                  Kernel + Filter 执行内核（唯一执行路径）
+└── chat-client/                  ChatClient + Filter 执行内核（唯一执行路径）
     ├── carriers.lisp        三链载体 + 暂停载体（loop-state / pending-tool）
     ├── filter.lisp          filter CLOS + build-chain + defilter
-    ├── kernel.lisp          kernel CLOS + build-kernel（含 :tool-gate）
+    ├── chat-client.lisp          chat-client CLOS + build-chat-client（含 :tool-gate）
     ├── conditions.lisp      工具故障分类（语义/瞬时/环境）
     ├── batch.lisp           批量工具执行（并行 / :serial / 故障路由）
     ├── tool-calling-manager.lisp  串行 / 虚拟线程 / 线程池 三实现
@@ -67,7 +67,7 @@ core/
     │   ├── timeout.lisp     工具超时（:tool）
     │   ├── approval.lisp    预执行审批门（:tool）
     │   └── token-xform.lisp token 改写（:token-xform，(downstream) → (values emit finish)）
-    └── chat.lisp            chat 宏 DSL + kernel-chat* 调用方入口
+    └── chat.lisp            chat 宏 DSL + chat-client-call* 调用方入口
 ```
 
 ## 设计要点
@@ -76,7 +76,7 @@ core/
   `messages->neutral` / `neutral->messages` 在 `provider-chat-model`
   适配层完成互转，Provider 只见 `(:role ... :content ...)` plist。
 - **选项合并语义**：`chat-options` 用槽位未绑定表示"未设置"，
-  `merge-chat-options` 实现运行时 > kernel 默认 > 模型默认的覆盖链，
+  `merge-chat-options` 实现运行时 > chat-client 默认 > 模型默认的覆盖链，
   工具列表取并集。
 - **工具执行不在 ChatModel 内**：对齐 Spring AI 2.0——`chat-model-call`
   只做单次调用（注入工具 schema，但不执行工具），工具循环上移到
@@ -86,7 +86,7 @@ core/
   于是「递归重入」就是再调一次同一个 `chain`，零额外机制
   （`validation-turn-filter` 的自纠重试即由此实现）。
   列表顺序即洋葱层级：靠前 = 靠外 = 先执行。
-- **HITL 是 kernel 的原语**：`build-kernel :tool-gate` 接一个
+- **HITL 是 chat-client 的原语**：`build-chat-client :tool-gate` 接一个
   `(tool-call) → :proceed | :pause | (:pause . 原因)` 的函数，在**批执行
   之前**对每个 tool-call 恰好评估一次（gate 常带副作用——审计日志、
   审批 UI、计数器，所以「恰好一次」是契约的一部分）。判 :pause 则整轮
@@ -94,14 +94,14 @@ core/
   `turn-result(:paused)`，携带 `loop-state` 快照；审批后
   `resume-turn` 从中点续跑。
 - **ChatClient 移植层已退役**：旧的 ChatClient / Builder / fluent
-  RequestSpec 全部移除。执行路径唯一为 kernel + filter，入口是
-  `build-kernel` 的关键字参数 + `chat` 宏。
+  RequestSpec 全部移除。执行路径唯一为 chat-client + filter，入口是
+  `build-chat-client` 的关键字参数 + `chat` 宏。
   （`cl-agent/client` 这个名字已被**复用**：现在是 SimpleAgent。）
 - **包合并消除了所有 shadowing**：曾经 `cl-agent/chat` 与
-  `cl-agent/kernel` 有三个同名导出：`tool-response` / `make-tool-response`
-  （chat 是协议消息层的「工具响应」值对象 id/name/text，kernel 是执行链的
+  `cl-agent/chat-client` 有三个同名导出：`tool-response` / `make-tool-response`
+  （chat 是协议消息层的「工具响应」值对象 id/name/text，chat-client 是执行链的
   响应载体）与 `execute-tool-calls`（两套不同签名的 manager 协议）。已从
-  根上消除：kernel 的载体改名为 `tool-request` / `tool-result`（与 turn 链
+  根上消除：chat-client 的载体改名为 `tool-request` / `tool-result`（与 turn 链
   的 `turn-request` / `turn-result` 对称），chat 的旧 ToolCallingManager
   整体删除。三包随后合并为 `cl-agent/core`，`:shadow` 全部消失。
 

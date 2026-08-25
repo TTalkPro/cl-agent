@@ -1,5 +1,5 @@
 ;;;; tool-search.lisp
-;;;; CL-Agent Kernel Filters - 渐进式工具披露 (:chat)
+;;;; CL-Agent ChatClient Filters - 渐进式工具披露 (:chat)
 ;;;;
 ;;;; 概述（对标 clj-agent advisor/tool_search.clj + Spring ToolSearchToolCallingAdvisor）：
 ;;;;   工具多了以后，每轮把全部工具的 JSON Schema 发给模型很烧 token。
@@ -146,7 +146,7 @@
   - 模型调 search_tools(query) → 检索 → 记入本会话发现集合 → 下轮可直接调
   - instruction 系统消息**每会话只追加一次**（多轮循环里不重复膨胀）
 
-  search_tools 由本函数内部创建并注入，**不要**自己往 build-kernel 的
+  search_tools 由本函数内部创建并注入，**不要**自己往 build-chat-client 的
   :tools 里加它。工具执行只认本次请求 options 里的工具
   （find-callback-for-call 的安全边界），而 filter 改写的正是那份 options，
   所以注入是生效的。
@@ -154,7 +154,7 @@
   发现集合按 conversation-id 隔离；无 conversation-id 时退化为单一默认会话。
 
   用法：
-    (build-kernel :model m
+    (build-chat-client :model m
                   :tools '(get-weather get-stock send-mail ...)   ; 全量
                   :filters (list (tool-search-filter
                                   (make-keyword-tool-index

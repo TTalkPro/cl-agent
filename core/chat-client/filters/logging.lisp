@@ -1,5 +1,5 @@
 ;;;; logging.lisp
-;;;; CL-Agent Kernel Filters - 日志 Filter (:chat + :tool)
+;;;; CL-Agent ChatClient Filters - 日志 Filter (:chat + :tool)
 ;;;;
 ;;;; 概述（对标 clj-agent logging-chat-filter / logging-filter）：
 ;;;;   记录请求/响应摘要，不影响行为。
@@ -17,7 +17,7 @@
   - log-fn   自定义日志函数 (lambda (msg) ...)；缺省用 log-info
   - preview  文本预览截断长度（缺省 100 字符）"
   (let ((fn (or log-fn
-                (lambda (msg) (cl-agent/core:log-info "[kernel:chat] ~A" msg)))))
+                (lambda (msg) (cl-agent/core:log-info "[chat-client:chat] ~A" msg)))))
     (make-filter
      :logging-chat
      :chat (lambda (prompt chain)
@@ -40,7 +40,7 @@
 (defun logging-tool-filter (&key (log-fn nil))
   "创建 :tool 链日志 filter。记录工具名、参数、结果/错误。"
   (let ((fn (or log-fn
-                (lambda (msg) (cl-agent/core:log-info "[kernel:tool] ~A" msg)))))
+                (lambda (msg) (cl-agent/core:log-info "[chat-client:tool] ~A" msg)))))
     (make-filter
      :logging-tool
      :tool (lambda (req chain)

@@ -13,9 +13,9 @@
 ;;;;     (agent-chat *a* "那北京呢？")   ; 记得上一轮
 ;;;;
 ;;;; 设计边界（照搬 clj-agent 的一条重要决策）：
-;;;;   **agent 层不暴露 kernel filter**。想挂 filter 就自己 build-kernel
-;;;;   再用 :kernel 传进来。理由：简单层一旦开始转发 filter，就会慢慢长成
-;;;;   第二个 kernel——本仓库刚删掉的 ChatClient 正是这么烂掉的
+;;;;   **agent 层不暴露 chat-client filter**。想挂 filter 就自己 build-chat-client
+;;;;   再用 :chat-client 传进来。理由：简单层一旦开始转发 filter，就会慢慢长成
+;;;;   第二个 chat-client——本仓库刚删掉的 ChatClient 正是这么烂掉的
 ;;;;   （最后只剩一堆静默 no-op 的横切槽位）。
 ;;;;   agent 层只暴露 :callbacks（可观测性），职责边界一刀切干净。
 ;;;;
@@ -32,7 +32,7 @@
    #:agent
    #:make-agent
    #:agent-id
-   #:agent-kernel
+   #:agent-chat-client
    #:agent-memory
    #:agent-conversation-id
    #:agent-callbacks

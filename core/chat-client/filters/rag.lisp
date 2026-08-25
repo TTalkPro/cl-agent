@@ -1,5 +1,5 @@
 ;;;; rag.lisp
-;;;; CL-Agent Kernel Filters - RAG 问答增强 (:turn)
+;;;; CL-Agent ChatClient Filters - RAG 问答增强 (:turn)
 ;;;;
 ;;;; 概述（对标 clj-agent qa-turn-filter + Spring QuestionAnswerAdvisor）：
 ;;;;   每 turn 注入一次：取入口最后一条 user 问题 → 检索 → 拼进消息。

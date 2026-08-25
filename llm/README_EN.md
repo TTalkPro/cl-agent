@@ -16,11 +16,11 @@ LLM provider implementations and unified interface module.
 │  └── providers.lisp            ──┘                              │
 │           │                                                     │
 │           ▼                                                     │
-│  Service Layer (service.lisp)                                   │
+│  ChatModel Layer (chat-model.lisp)                                   │
 │  └── normalize-response ─────────→ llm-response object          │
 │           │                                                     │
 │           ▼                                                     │
-│  Consumers (Kernel, Agent, Application code)                    │
+│  Consumers (ChatClient, Agent, Application code)                    │
 │  └── Use unified llm-response objects                           │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -33,7 +33,7 @@ llm/
 ├── client.lisp               # Unified client interface
 ├── providers.lisp            # Provider registration
 ├── streaming.lisp            # Streaming support
-├── service.lisp              # Service layer (response normalization)
+├── chat-model.lisp              # ChatModel layer (response normalization)
 ├── providers/                # Provider implementations
 │   ├── base.lisp            # base class
 │   ├── define-provider.lisp # shared wire helpers
@@ -64,16 +64,16 @@ llm/
 | Alibaba DashScope | `:dashscope` | qwen-plus | Tool calling, streaming |
 | Ollama | `:ollama` | llama2 | Local running |
 
-## Service Layer
+## ChatModel Layer
 
-The Service layer normalizes raw provider responses into unified `llm-response` objects.
+The ChatModel layer normalizes raw provider responses into unified `llm-response` objects.
 
 ### Response Normalization
 
 ```lisp
 ;; Provider returns raw plist
 (let ((raw-response (llm-chat provider messages)))
-  ;; Service layer normalizes to llm-response
+  ;; ChatModel layer normalizes to llm-response
   (normalize-response raw-response :zhipu))
 
 ;; Or use high-level API (auto-normalization)
@@ -124,7 +124,7 @@ sent on the wire:
 ### llm-response Utilities
 
 Not specific to any one provider — reasoning chains and finish reasons are
-normalized in the Service layer:
+normalized in the ChatModel layer:
 
 ```lisp
 ;; Extract reasoning-chain content: GLM / DeepSeek `reasoning_content` and
@@ -317,7 +317,7 @@ Different providers have different tool schema formats, the module handles conve
     (format t "Timeout: ~A~%" e)))
 ```
 
-## Integrating with the kernel
+## Integrating with the chat-client
 
 ```lisp
 ;; Create a ChatModel in one step (recommended entry point)
@@ -331,7 +331,7 @@ Different providers have different tool schema formats, the module handles conve
     (make-anthropic-provider)
     :default-options (cl-agent/core:make-chat-options :temperature 0.3)))
 
-;; Assemble a kernel, then chat
-(defvar *kernel* (cl-agent/core:build-kernel :model *model*))
-(cl-agent/core:chat *kernel* "Hello")
+;; Assemble a chat-client, then chat
+(defvar *chat-client* (cl-agent/core:build-chat-client :model *model*))
+(cl-agent/core:chat *chat-client* "Hello")
 ```

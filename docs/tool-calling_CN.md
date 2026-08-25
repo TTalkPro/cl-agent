@@ -2,7 +2,7 @@
 
 [English](tool-calling.md)
 
-本文说明 cl-agent 的工具调用为什么拆成 **kernel 的循环（`run-tool-loop`）**、
+本文说明 cl-agent 的工具调用为什么拆成 **chat-client 的循环（`run-tool-loop`）**、
 **Filter（可组合的环绕层）** 与 **Manager（执行策略）** 三个关注点，对应
 Spring AI 2.0 的哪些组件，以及我们在哪些地方**有意或已知地**偏离了参照实现。
 
@@ -10,7 +10,7 @@ Spring AI 2.0 的哪些组件，以及我们在哪些地方**有意或已知地*
 
 ## 一句话
 
-**Kernel 拥有循环，Filter 环绕循环，Manager 执行工具。**
+**ChatClient 拥有循环，Filter 环绕循环，Manager 执行工具。**
 
 ```
 run-tool-loop:  invoke-chat → 有 tool-calls 且 eligible? → 执行一批工具 → 追加消息 → 再调模型
@@ -18,12 +18,12 @@ run-tool-loop:  invoke-chat → 有 tool-calls 且 eligible? → 执行一批工
                                                               批内每个工具再过 :tool 链
 ```
 
-循环在 `cl-agent/core:run-tool-loop`（`core/kernel/invoke.lisp`）里——它是
+循环在 `cl-agent/core:run-tool-loop`（`core/chat-client/invoke.lisp`）里——它是
 **`:turn` 链的 terminal，不是 filter**，也**不在 ChatModel 里**
 （`chat-model-call` 是严格的单次调用语义）。
 
-terminal 不等于写死：`build-kernel :loop-fn` 可整体替换它，换一套循环骨架
-（ReAct、plan-execute）是传一个 kernel 参数的事，不用改框架。因为替换发生在
+terminal 不等于写死：`build-chat-client :loop-fn` 可整体替换它，换一套循环骨架
+（ReAct、plan-execute）是传一个 chat-client 参数的事，不用改框架。因为替换发生在
 **terminal 这个唯一出口**上，环绕它的 `:turn` filter 一律不受影响，HITL 的
 续跑路径也不受影响——`resume-turn` 本来就是靠替换同一个 terminal 工作的。
 自定义循环要支持暂停/续跑就配套给 `:resume-fn`，见
@@ -36,21 +36,21 @@ terminal 不等于写死：`build-kernel :loop-fn` 可整体替换它，换一�
 
 | Spring AI 2.0 | cl-agent | 拥有循环 |
 |---|---|---|
-| `ToolCallingAdvisor`（2.0） | `run-tool-loop`（`core/kernel/invoke.lisp`，`:turn` 链终端） | **是** |
+| `ToolCallingAdvisor`（2.0） | `run-tool-loop`（`core/chat-client/invoke.lisp`，`:turn` 链终端） | **是** |
 | `CallAdvisor` / `AdvisorChain` | `make-filter` / `defilter` + `build-chain` 三链 | 否（环绕） |
 | `ToolCallingManager` | `cl-agent/core:tool-calling-manager`（三实现） | 否 |
 | `ToolExecutionResult` | `make-tool-execution-result` plist | 结果对象 |
-| `ToolExecutionExceptionProcessor` | 无对应；kernel 用三故障分类（见下） | 错误处理 |
+| `ToolExecutionExceptionProcessor` | 无对应；chat-client 用三故障分类（见下） | 错误处理 |
 
 命名注意：Spring AI 2.0 的一个 breaking change 是把 1.1.x 的 `ToolCallAdvisor`
 **重命名为** `ToolCallingAdvisor`。查 1.1.x 的 javadoc 会看到旧名。
 
 > **cl-agent 的 ChatClient 移植层已退役**（ChatClient / Builder / fluent
 > RequestSpec 均已删除，`cl-agent/client` 这个**包名被复用**了：现在是
-> SimpleAgent）。我们用 kernel + filter 三链表达 Spring 的 Advisor 语义，
-> 经 `build-kernel :filters (list ...)` 注册。
-> 因此下文的「advisor」一律指 Spring 侧的组件，「kernel 路径」指
-> `build-kernel` → `chat` → `invoke-turn` 这条唯一执行路径。
+> SimpleAgent）。我们用 chat-client + filter 三链表达 Spring 的 Advisor 语义，
+> 经 `build-chat-client :filters (list ...)` 注册。
+> 因此下文的「advisor」一律指 Spring 侧的组件，「chat-client 路径」指
+> `build-chat-client` → `chat` → `invoke-turn` 这条唯一执行路径。
 
 ## 为什么拆开：1.x 的教训
 
@@ -59,7 +59,7 @@ Spring AI 1.x 里**每个 ChatModel 实现都有自己私有的工具执行循�
 起来了，没法挂钩子）。2.0 把工具循环提升为链上一等的可组合组件，这样链上其他
 组件（日志 / 记忆 / 护栏）才能观察和拦截工具调用过程。
 
-cl-agent 吸取的是同一个教训，但落点更靠外：循环被提到 **kernel** 里，而链被拆成
+cl-agent 吸取的是同一个教训，但落点更靠外：循环被提到 **chat-client** 里，而链被拆成
 **三条**，于是「挂在哪一层」本身就是可表达的语义：
 
 | 链 | 环绕什么 | 典型 filter |
@@ -79,21 +79,21 @@ cl-agent 吸取的是同一个教训，但落点更靠外：循环被提到 **ke
 
 ## 两种执行模式
 
-拆分之后有两种执行模式，都走 kernel：
+拆分之后有两种执行模式，都走 chat-client：
 
-1. **Framework-controlled** —— `build-kernel` + `chat` 宏，循环由 kernel 自动跑，
+1. **Framework-controlled** —— `build-chat-client` + `chat` 宏，循环由 chat-client 自动跑，
    调用方无感
-2. **Kernel-controlled** —— 给 kernel 注入 `:tool-manager` 选执行策略
+2. **ChatClient-controlled** —— 给 chat-client 注入 `:tool-manager` 选执行策略
 
 ```lisp
 ;; 1. Framework-controlled
-(cl-agent/core:build-kernel
+(cl-agent/core:build-chat-client
   :model model
   :filters (list (cl-agent/core:timeout-filter 5000))
   :tools '(get-weather))
 
-;; 2. Kernel-controlled：注入执行策略
-(cl-agent/core:build-kernel
+;; 2. ChatClient-controlled：注入执行策略
+(cl-agent/core:build-chat-client
   :model model
   :tools '(get-weather)
   :tool-manager (cl-agent/core:make-sequential-tool-calling-manager))
@@ -104,18 +104,18 @@ cl-agent 吸取的是同一个教训，但落点更靠外：循环被提到 **ke
 > manager（`default-tool-calling-manager` / `concurrent-tool-calling-manager` /
 > `(manager prompt response)` 签名的 `execute-tool-calls` /
 > `tool-execution-result` 及其读取器）已整体删除。工具执行现在**只**住在
-> kernel 层——`run-tool-loop`、`invoke-tool-batch`，以及三个
-> ToolCallingManager。kernel 是唯一路径。
+> chat-client 层——`run-tool-loop`、`invoke-tool-batch`，以及三个
+> ToolCallingManager。chat-client 是唯一路径。
 >
-> 附带的好处：chat 层的 `execute-tool-calls` 消失、kernel 载体改名为
+> 附带的好处：chat 层的 `execute-tool-calls` 消失、chat-client 载体改名为
 > `tool-result` 之后，两个包再无同名导出，`:shadow` 随之删除——这正是
-> `cl-agent/http` / `/chat` / `/kernel` 三包得以合并为 `cl-agent/core` 的前提。
+> `cl-agent/http` / `/chat` / `/chat-client` 三包得以合并为 `cl-agent/core` 的前提。
 
 ## 执行层做的事
 
 `run-tool-loop` 每轮判定有 `tool-calls` 且通过 `eligibility-fn` 后，把这一批交给
-执行层——`kernel-tool-manager` 为 nil 时走 `invoke-tool-batch`
-（`core/kernel/batch.lisp`），非 nil 时走 `execute-tool-calls` 协议。它：
+执行层——`chat-client-tool-manager` 为 nil 时走 `invoke-tool-batch`
+（`core/chat-client/batch.lisp`），非 nil 时走 `execute-tool-calls` 协议。它：
 
 1. **解析** —— 按名字找 callback（`find-callback-for-call`，`core/chat/tool.lisp`）
 2. **调度** —— 缺省**整批并行**（`lparallel:future`）；批内任一工具声明
@@ -146,7 +146,7 @@ cl-agent 吸取的是同一个教训，但落点更靠外：循环被提到 **ke
 
 ## 三种故障分类
 
-`core/kernel/conditions.lisp` 把工具故障分成三类，`classify-tool-error` 负责把
+`core/chat-client/conditions.lisp` 把工具故障分成三类，`classify-tool-error` 负责把
 任意 condition 映射到其一：
 
 | 分类 | 含义 | 预期动作 |
@@ -189,20 +189,20 @@ cl-agent 吸取的是同一个教训，但落点更靠外：循环被提到 **ke
 这是刻意的：否则任何 `deftool` 过的工具，只要模型报出名字就能被执行——提示注入
 下可直接利用的越权。而 `deftool` 是自动注册的，作者根本意识不到攻击面被扩大了。
 
-参照实现同样没有这种回退：clj-agent 的 `find-function` 只查 kernel 的
+参照实现同样没有这种回退：clj-agent 的 `find-function` 只查 chat-client 的
 `:tool-vars`，找不到即抛；Spring 的 `ToolCallbackResolver` 是 manager 的实例
 字段，默认为空。
 
 **「找不到」是语义故障，不是崩溃。** `find-callback-for-call` 找不到时发
 `tool-not-found-error`。这个条件曾在批执行路径的 `handler-case` **之外**发出，
 于是模型只要报出一个幻觉工具名（LLM 常见故障），条件就会一路冒泡出 `(chat ...)`
-中断整轮对话。现在 `resolve-callback`（`core/kernel/batch.lisp`）会捕获它，产出
+中断整轮对话。现在 `resolve-callback`（`core/chat-client/batch.lisp`）会捕获它，产出
 `:semantic` 错误的 `tool-result`，经 `tool-result->text` 渲染为
 「错误：找不到工具 xxx」回传模型，让它自纠（改用别的工具、修参数）。边界本身不变：
 没暴露的工具依然绝不执行，只是改用语言告诉模型。
 
-kernel 化之后这条边界没有松动，反而更紧了一层：kernel 的 `resolve-kernel-tools`
-只认 `kernel-tools`（加上本次请求 `(:tools ...)` 合并进来的 caller-options），
+chat-client 化之后这条边界没有松动，反而更紧了一层：chat-client 的 `resolve-chat-client-tools`
+只认 `chat-client-tools`（加上本次请求 `(:tools ...)` 合并进来的 caller-options），
 `run-tool-loop` 每轮重新解析。护栏与审批门则是**独立的第二道**：
 `safeguard-turn-filter` 在 `:turn` 链短路（返回 `:cancelled` 的 `turn-result`，
 模型根本没被调用），`approval-filter` 在 `:tool` 链逐工具卡门——两者都不依赖
@@ -221,10 +221,10 @@ public interface ToolCallingManager {
 }
 ```
 
-cl-agent 的 kernel manager 只有入站那一半（`execute-tool-calls`）。出站解析用自由
+cl-agent 的 chat-client manager 只有入站那一半（`execute-tool-calls`）。出站解析用自由
 函数 `resolve-tool-callbacks`，散在三个调用点：`core/chat/model.lisp`（按名字解析
-`:tool-names`）、`core/kernel/invoke.lisp`（`resolve-kernel-tools`：kernel 级
-`:tools`）、`core/kernel/chat.lisp`（`kernel-chat`：请求级 `(:tools ...)`）。
+`:tool-names`）、`core/chat-client/invoke.lisp`（`resolve-chat-client-tools`：chat-client 级
+`:tools`）、`core/chat-client/chat.lisp`（`chat-client-call`：请求级 `(:tools ...)`）。
 
 **后果**：Spring 里「换个 manager 就同时改变工具暴露和执行」的能力，这里做不到
 ——想改工具暴露得动三个调用点。
@@ -291,7 +291,7 @@ CL 没有 checked exception 的概念，精确对齐不可能。cl-agent 偏得�
 `tool-apply-terminal` 捕获的是**全部** `error`，于是工具体里的任何错误都不会
 冒泡给调用方，一律变成回传模型的文本；`resolve-callback` 把
 `tool-not-found-error` 也纳入同样的处理。这比 Spring 更「宽容」，也意味着
-`Error` 级别的问题会被静默吞掉当成模型能自纠的事。从 kernel 逃出来的只剩
+`Error` 级别的问题会被静默吞掉当成模型能自纠的事。从 chat-client 逃出来的只剩
 `max-tool-iterations-exceeded-error`（循环超限，由 `run-tool-loop` 直接发）。
 需要错误冒泡时，写一个 `:tool` filter 检查 `tool-result-error` 并重新 signal。
 
